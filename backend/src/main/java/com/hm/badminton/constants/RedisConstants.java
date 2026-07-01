@@ -1,4 +1,4 @@
-package com.hm.badminton.utils;
+package com.hm.badminton.constants;
 
 public final class RedisConstants {
 
@@ -12,6 +12,7 @@ public final class RedisConstants {
     public static final String BLOOM_USER_USERNAME_KEY = "bf:user:username";
     public static final String SECKILL_STOCK_KEY = "seckill:stock:";
     public static final String SECKILL_USER_KEY = "seckill:users:";
+    public static final String SECKILL_ORDER_LOCK_KEY = "lock:seckill:order:";
     public static final String FOLLOW_KEY = "follows:";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
     public static final String FEED_KEY = "feed:";

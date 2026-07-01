@@ -8,6 +8,8 @@
 MySQL 容器：hm-badminton-mysql，端口 3307 -> 3306
 Redis 容器：hm-badminton-redis，端口 6379 -> 6379
 MinIO 容器：hm-badminton-minio，端口 9000 / 9001
+RocketMQ NameServer 容器：hm-badminton-rocketmq-namesrv，端口 9876
+RocketMQ Broker 容器：hm-badminton-rocketmq-broker，端口 10909 / 10911 / 10912
 ```
 
 ## 1. 存储边界
@@ -16,6 +18,7 @@ MinIO 容器：hm-badminton-minio，端口 9000 / 9001
 | --- | --- | --- | --- | --- |
 | MySQL | 用户、场所、商品、库存、订单、活动、关注、博客、文件元数据 | 强一致、关系型、需要事务和索引 | 是 | 系统主数据、交易数据与社区内容 |
 | Redis | 登录验证码、登录 token、布隆过滤器、秒杀库存和秒杀用户集合、关注集合、博客点赞集合、Feed 收件箱 | 高并发、短生命周期或可重建、读写快 | Docker volume 持久化，但业务上可重建 | 缓存、限流式判断、秒杀预扣、Feed 推流 |
+| RocketMQ | 秒杀订单消息 | 交易链路友好、异步削峰、可重试消费、适合后续扩展延迟消息/事务消息 | Docker volume 持久化 | 秒杀请求进入队列后异步创建 MySQL 订单 |
 | MinIO | 上传文件本体，例如图片、附件 | 大对象、二进制文件、非结构化 | 是 | 文件对象存储 |
 
 核心原则：
@@ -97,12 +100,12 @@ Redis 当前用于 HMDP 类项目里常见的高并发和登录态场景。
 | Key 模式 | 类型 | 存放内容 | TTL | 是否可重建 | 数据特性 |
 | --- | --- | --- | --- | --- | --- |
 | `login:code:{phone}` | String | 手机验证码 | 2 分钟 | 是 | 短生命周期；用于验证码登录 |
-| `login:token:{token}` | Hash | 登录用户摘要：id、phone、nickname、city、level、lng、lat、preciseAddress | 120 分钟，访问时刷新 | 是 | 登录态；类似 HMDP token 登录；位置变化时由 `/auth/location` 更新 |
+| `login:token:{token}` | Hash | 登录用户摘要：id、phone、nickname、city、level、lng、lat、preciseAddress | 120 分钟 + 0-10 分钟随机抖动，访问时刷新 | 是 | 登录态；类似 HMDP token 登录；位置变化时由 `/auth/location` 更新；随机 TTL 用于降低大量 token 同时过期风险 |
 | `bf:user:phone` | String Bitmap | 手机号布隆过滤器 | 无 | 是 | 注册唯一性预判断 |
 | `bf:user:email` | String Bitmap | 邮箱布隆过滤器 | 无 | 是 | 注册唯一性预判断 |
 | `bf:user:username` | String Bitmap | 用户名布隆过滤器 | 无 | 是 | 注册唯一性预判断 |
-| `seckill:stock:{activityId}` | String | 秒杀活动库存 | 无 | 是 | 秒杀库存预热，Lua 原子扣减 |
-| `seckill:users:{activityId}` | Set | 已参与该秒杀的用户 id | 无 | 是 | 秒杀一人一单预判断 |
+| `seckill:stock:{activityId}` | String | 秒杀活动库存 | 活动结束后 1 小时 + 0-30 分钟随机抖动 | 是 | 秒杀库存预热，Lua 原子扣减 |
+| `seckill:users:{activityId}` | Set | 已参与该秒杀的用户 id | 活动结束后 1 小时 + 0-30 分钟随机抖动 | 是 | 秒杀一人一单预判断；启动时从 `seckill_orders` 重建 |
 | `follows:{userId}` | Set | 当前用户关注的博主 id | 无 | 是 | 关注判断、共同关注查询；MySQL `follows` 可重建 |
 | `blog:liked:{blogId}` | ZSet | 给博客点赞的用户 id，score 为点赞时间 | 无 | 是 | 点赞状态判断与按时间扩展查询；MySQL `blogs.liked` 保存计数 |
 | `feed:{userId}` | ZSet | 推送给用户的博客 id，score 为推送时间 | 无 | 是 | HMDP 式 Feed 推流收件箱；关注博主发博客时写入 |
@@ -270,6 +273,21 @@ ttl login:code:13800000001
 hgetall login:token:{token}
 smembers seckill:users:1
 ```
+
+### RocketMQ
+
+```bash
+docker exec -it hm-badminton-rocketmq-broker sh mqadmin topicList \
+  -n rocketmq-namesrv:9876
+```
+
+当前主题：
+
+```text
+hm-seckill-order
+```
+
+秒杀请求链路为：前端提交 -> Redis Lua 预扣库存和记录用户 -> Redisson 分布式锁保护同一用户并发 -> RocketMQ 投递订单消息 -> 消费者异步写入 `seckill_orders` 并扣减数据库库存。
 
 ### MinIO
 

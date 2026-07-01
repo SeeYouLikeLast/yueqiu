@@ -16,7 +16,7 @@ import com.hm.badminton.mapper.FollowMapper;
 import com.hm.badminton.mapper.UserMapper;
 import com.hm.badminton.service.IBlogService;
 import com.hm.badminton.service.IFollowService;
-import com.hm.badminton.utils.RedisConstants;
+import com.hm.badminton.constants.RedisConstants;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

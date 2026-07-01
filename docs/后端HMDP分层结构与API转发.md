@@ -15,6 +15,7 @@ backend/
    ├─ dto/
    ├─ vo/
    ├─ config/
+   ├─ mq/
    ├─ common/
    ├─ utils/
    ├─ interceptor/
@@ -33,6 +34,7 @@ backend/
 | `dto/`          | Data Transfer Object，请求参数、登录用户摘要、服务间传递对象                                            | `LoginUser`                                                 |
 | `vo/`           | View Object，专门返回给前端展示的对象。复杂页面推荐使用 VO，不直接返回 Entity                                   | 当前保留 `package-info.java`                                    |
 | `config/`       | Spring 配置、第三方客户端配置、属性配置                                                             | `WebConfig`、`MinioConfig`、`AmapProperties`                  |
+| `mq/`           | 消息队列消费者、异步消息入口；生产消息仍由对应业务 Service 编排                                                | `SeckillOrderConsumer`                                      |
 | `common/`       | 通用响应、异常、分页、全局异常处理                                                                   | `ApiResponse`、`BusinessException`、`PageResult`              |
 | `utils/`        | 工具类、上下文工具、ID 生成器                                                                    | `UserContext`、`IdGenerator`                                 |
 | `interceptor/`  | Spring MVC 拦截器、登录态刷新、权限校验                                                           | `RefreshTokenInterceptor`、`LoginInterceptor`                |
@@ -71,9 +73,10 @@ mapper/SeckillMapper -> 秒杀活动、秒杀订单、库存扣减
 mapper/SocialMapper -> 球友资料、约球活动、成员关系
 mapper/FileMetadataMapper -> MinIO 文件元数据
 mapper/AdminMapper -> 后台统计
+mq/SeckillOrderConsumer -> RocketMQ 秒杀订单消费者，异步落库
 ```
 
-当前业务侧已移除旧的模板式 JDBC 访问，下单、扣库存、场所售卖、秒杀、球友、文件元数据和后台统计链路统一通过 MyBatis-Plus Service 或 Mapper 访问数据库。库存扣减和订单创建仍由 `service.impl` 负责事务编排。
+当前业务侧已移除旧的模板式 JDBC 访问，下单、扣库存、场所售卖、秒杀、球友、文件元数据和后台统计链路统一通过 MyBatis-Plus Service 或 Mapper 访问数据库。秒杀采用 `Redis Lua + Redisson + RocketMQ + MySQL 唯一索引`，库存预扣和消息发送由 `SeckillService` 编排，订单最终落库由 `SeckillOrderConsumer` 消费后调用 `SeckillOrderMessageService` 完成。
 
 登录态采用 HMDP 风格双拦截器：
 

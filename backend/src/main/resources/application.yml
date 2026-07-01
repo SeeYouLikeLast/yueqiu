@@ -47,6 +47,7 @@ hm:
   auth:
     code-expire-minutes: 2
     token-expire-minutes: 120
+    token-expire-jitter-minutes: 10
   jwt:
     secret: "change-this-secret-in-prod-hm-badminton-2026"
     expire-minutes: 120
@@ -73,3 +74,9 @@ hm:
 logging:
   level:
     com.hm.badminton: INFO
+
+rocketmq:
+  name-server: localhost:9876
+  producer:
+    group: hm-seckill-order-producer
+    send-message-timeout: 3000

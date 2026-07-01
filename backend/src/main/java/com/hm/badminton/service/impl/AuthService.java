@@ -12,7 +12,8 @@ import com.hm.badminton.service.IAuthService;
 import com.hm.badminton.service.IBloomFilterService;
 import com.hm.badminton.service.IFollowService;
 import com.hm.badminton.service.IPasswordService;
-import com.hm.badminton.utils.RedisConstants;
+import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.utils.RedisTtl;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -43,6 +44,7 @@ public class AuthService implements IAuthService {
     private final IPasswordService passwordService;
     private final Duration codeTtl;
     private final Duration tokenTtl;
+    private final long tokenTtlJitterMaxSeconds;
 
     public AuthService(UserMapper userMapper,
                        PlayerProfileMapper playerProfileMapper,
@@ -51,7 +53,8 @@ public class AuthService implements IAuthService {
                        IFollowService followService,
                        IPasswordService passwordService,
                        @Value("${hm.auth.code-expire-minutes:2}") long codeExpireMinutes,
-                       @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes) {
+                       @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes,
+                       @Value("${hm.auth.token-expire-jitter-minutes:10}") long tokenExpireJitterMinutes) {
         this.userMapper = userMapper;
         this.playerProfileMapper = playerProfileMapper;
         this.redisTemplate = redisTemplate;
@@ -60,6 +63,7 @@ public class AuthService implements IAuthService {
         this.passwordService = passwordService;
         this.codeTtl = Duration.ofMinutes(codeExpireMinutes);
         this.tokenTtl = Duration.ofMinutes(tokenExpireMinutes);
+        this.tokenTtlJitterMaxSeconds = Duration.ofMinutes(tokenExpireJitterMinutes).toSeconds();
     }
 
     public CodeResponse sendCode(CodeRequest request) {
@@ -211,7 +215,7 @@ public class AuthService implements IAuthService {
         }
         String key = RedisConstants.LOGIN_USER_KEY + token;
         redisTemplate.opsForHash().putAll(key, values);
-        redisTemplate.expire(key, tokenTtl);
+        redisTemplate.expire(key, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
 
         if (request.city() != null && !request.city().isBlank()) {
             UserAccount user = new UserAccount();
@@ -275,7 +279,7 @@ public class AuthService implements IAuthService {
         userMap.put("city", nullToEmpty(user.city()));
         userMap.put("level", nullToEmpty(user.level()));
         redisTemplate.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY + token, userMap);
-        redisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, tokenTtl);
+        redisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
         return token;
     }
 
@@ -376,4 +380,3 @@ public class AuthService implements IAuthService {
     }
 
 }
-

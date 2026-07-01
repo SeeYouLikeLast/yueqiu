@@ -37,6 +37,54 @@ services:
       timeout: 5s
       retries: 10
 
+  rocketmq-namesrv:
+    image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
+    container_name: hm-badminton-rocketmq-namesrv
+    restart: unless-stopped
+    user: root
+    ports:
+      - "9876:9876"
+    environment:
+      TZ: Asia/Shanghai
+    command: sh mqnamesrv
+    volumes:
+      - rocketmq-namesrv-logs:/home/rocketmq/logs
+
+  rocketmq-broker:
+    image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
+    container_name: hm-badminton-rocketmq-broker
+    restart: unless-stopped
+    user: root
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      TZ: Asia/Shanghai
+      JAVA_OPT_EXT: "-server -Xms256m -Xmx256m -Xmn128m"
+    command: sh mqbroker -c /home/rocketmq/conf/broker.conf
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
+      - rocketmq-broker-logs:/home/rocketmq/logs
+      - rocketmq-broker-store:/home/rocketmq/store
+
+  rocketmq-init:
+    image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
+    container_name: hm-badminton-rocketmq-init
+    depends_on:
+      - rocketmq-broker
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    entrypoint: >
+      /bin/sh -c "
+      sleep 15;
+      sh mqadmin updateTopic -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -t hm-seckill-order || true;
+      sh mqadmin updateSubGroup -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -g hm-seckill-order-consumer || true
+      "
+
   minio:
     image: ${MINIO_IMAGE:-quay.io/minio/minio:latest}
     container_name: hm-badminton-minio
@@ -75,4 +123,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  rocketmq-namesrv-logs:
+  rocketmq-broker-logs:
+  rocketmq-broker-store:
   minio-data:

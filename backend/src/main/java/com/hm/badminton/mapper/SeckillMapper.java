@@ -116,6 +116,9 @@ public interface SeckillMapper {
     @Select("select count(*) from seckill_orders where user_id = #{userId} and activity_id = #{activityId}")
     Integer countUserActivityOrder(@Param("userId") Long userId, @Param("activityId") Long activityId);
 
+    @Select("select user_id from seckill_orders where activity_id = #{activityId}")
+    List<Long> selectUserIdsByActivity(@Param("activityId") Long activityId);
+
     @Update("update seckill_activities set stock = stock - 1 where id = #{activityId} and stock > 0")
     int deductActivityStock(@Param("activityId") Long activityId);
 

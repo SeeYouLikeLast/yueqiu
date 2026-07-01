@@ -1514,7 +1514,7 @@ async function submitSeckill(activityId: number) {
   if (!requireLogin('请先登录后参与秒杀')) return
   await wrap(async () => {
     const result = await api<{ orderId: number }>(`/api/seckill/activities/${activityId}/orders`, { method: 'POST' })
-    message.value = `秒杀成功，订单号 ${result.orderId}`
+    message.value = `抢购请求已进入队列，订单号 ${result.orderId}`
     ordersLoaded.value = false
     await loadSeckill()
   })

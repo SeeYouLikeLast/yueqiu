@@ -8,7 +8,7 @@ import com.hm.badminton.entity.UserAccount;
 import com.hm.badminton.mapper.FollowMapper;
 import com.hm.badminton.mapper.UserMapper;
 import com.hm.badminton.service.IFollowService;
-import com.hm.badminton.utils.RedisConstants;
+import com.hm.badminton.constants.RedisConstants;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;

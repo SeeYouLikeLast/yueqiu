@@ -1,7 +1,8 @@
 package com.hm.badminton.interceptor;
 
 import com.hm.badminton.dto.LoginUser;
-import com.hm.badminton.utils.RedisConstants;
+import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.utils.RedisTtl;
 import com.hm.badminton.utils.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -19,13 +20,16 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
     private final UserContext userContext;
     private final StringRedisTemplate redisTemplate;
     private final Duration tokenTtl;
+    private final long tokenTtlJitterMaxSeconds;
 
     public RefreshTokenInterceptor(UserContext userContext,
                                    StringRedisTemplate redisTemplate,
-                                   @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes) {
+                                   @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes,
+                                   @Value("${hm.auth.token-expire-jitter-minutes:10}") long tokenExpireJitterMinutes) {
         this.userContext = userContext;
         this.redisTemplate = redisTemplate;
         this.tokenTtl = Duration.ofMinutes(tokenExpireMinutes);
+        this.tokenTtlJitterMaxSeconds = Duration.ofMinutes(tokenExpireJitterMinutes).toSeconds();
     }
 
     @Override
@@ -50,7 +54,7 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
                 doubleValue(entries, "lng"),
                 doubleValue(entries, "lat"),
                 value(entries, "preciseAddress")));
-        redisTemplate.expire(key, tokenTtl);
+        redisTemplate.expire(key, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
         return true;
     }
 

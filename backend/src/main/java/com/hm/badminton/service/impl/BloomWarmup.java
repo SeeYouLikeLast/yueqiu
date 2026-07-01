@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hm.badminton.entity.UserAccount;
 import com.hm.badminton.mapper.UserMapper;
 import com.hm.badminton.service.IBloomFilterService;
-import com.hm.badminton.utils.RedisConstants;
+import com.hm.badminton.constants.RedisConstants;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -30,4 +30,3 @@ public class BloomWarmup implements ApplicationRunner {
         }
     }
 }
-
