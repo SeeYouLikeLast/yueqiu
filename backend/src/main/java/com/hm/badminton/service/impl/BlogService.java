@@ -1,0 +1,255 @@
+package com.hm.badminton.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hm.badminton.common.BusinessException;
+import com.hm.badminton.common.PageResult;
+import com.hm.badminton.dto.BlogView;
+import com.hm.badminton.dto.LoginUser;
+import com.hm.badminton.dto.ScrollResult;
+import com.hm.badminton.entity.Blog;
+import com.hm.badminton.entity.Follow;
+import com.hm.badminton.entity.UserAccount;
+import com.hm.badminton.mapper.BlogMapper;
+import com.hm.badminton.mapper.FollowMapper;
+import com.hm.badminton.mapper.UserMapper;
+import com.hm.badminton.service.IBlogService;
+import com.hm.badminton.service.IFollowService;
+import com.hm.badminton.utils.RedisConstants;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Service
+public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
+
+    private static final int DEFAULT_SIZE = 10;
+
+    private final StringRedisTemplate redisTemplate;
+    private final UserMapper userMapper;
+    private final FollowMapper followMapper;
+    private final IFollowService followService;
+
+    public BlogService(StringRedisTemplate redisTemplate,
+                       UserMapper userMapper,
+                       FollowMapper followMapper,
+                       IFollowService followService) {
+        this.redisTemplate = redisTemplate;
+        this.userMapper = userMapper;
+        this.followMapper = followMapper;
+        this.followService = followService;
+    }
+
+    @Override
+    public PageResult<BlogView> listBlogs(String channel, String sportCode, String keyword, int page, int size, LoginUser currentUser) {
+        if ("follow".equalsIgnoreCase(channel)) {
+            return listFollowBlogs(page, size, currentUser);
+        }
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 30);
+        LambdaQueryWrapper<Blog> wrapper = baseWrapper(sportCode, keyword)
+                .orderByDesc(Blog::getLiked)
+                .orderByDesc(Blog::getCreatedAt);
+        Page<Blog> result = page(new Page<>(safePage, safeSize), wrapper);
+        return new PageResult<>(enrich(result.getRecords(), currentUser), result.getTotal(), safePage, safeSize);
+    }
+
+    @Override
+    public PageResult<BlogView> listUserBlogs(Long userId, int page, int size, LoginUser currentUser) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 30);
+        Page<Blog> result = page(new Page<>(safePage, safeSize), new LambdaQueryWrapper<Blog>()
+                .eq(Blog::getStatus, 1)
+                .eq(Blog::getUserId, userId)
+                .orderByDesc(Blog::getCreatedAt));
+        return new PageResult<>(enrich(result.getRecords(), currentUser), result.getTotal(), safePage, safeSize);
+    }
+
+    @Override
+    public ScrollResult<BlogView> followFeed(Long maxTime, Integer offset, LoginUser currentUser) {
+        if (currentUser == null) {
+            return new ScrollResult<>(Collections.emptyList(), 0L, 0);
+        }
+        long max = maxTime == null ? Long.MAX_VALUE : maxTime;
+        int safeOffset = offset == null ? 0 : Math.max(offset, 0);
+        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
+                .reverseRangeByScoreWithScores(RedisConstants.FEED_KEY + currentUser.id(), 0, max, safeOffset, DEFAULT_SIZE);
+        if (tuples == null || tuples.isEmpty()) {
+            PageResult<BlogView> fallback = listFollowBlogs(1, DEFAULT_SIZE, currentUser);
+            return new ScrollResult<>(fallback.records(), 0L, 0);
+        }
+        List<Long> ids = tuples.stream()
+                .map(ZSetOperations.TypedTuple::getValue)
+                .filter(Objects::nonNull)
+                .map(Long::valueOf)
+                .toList();
+        Map<Long, Blog> blogMap = listByIds(ids).stream().collect(Collectors.toMap(Blog::getId, Function.identity()));
+        List<Blog> blogs = ids.stream().map(blogMap::get).filter(Objects::nonNull).toList();
+        List<ZSetOperations.TypedTuple<String>> tupleList = new ArrayList<>(tuples);
+        long minTime = tupleList.get(tupleList.size() - 1).getScore().longValue();
+        int sameCount = 0;
+        for (int i = tupleList.size() - 1; i >= 0; i--) {
+            if (tupleList.get(i).getScore().longValue() == minTime) {
+                sameCount++;
+            } else {
+                break;
+            }
+        }
+        return new ScrollResult<>(enrich(blogs, currentUser), minTime, sameCount);
+    }
+
+    @Override
+    public BlogView detail(Long id, LoginUser currentUser) {
+        Blog blog = getById(id);
+        if (blog == null || !Integer.valueOf(1).equals(blog.getStatus())) {
+            throw new BusinessException(404, "博客不存在");
+        }
+        return enrich(List.of(blog), currentUser).get(0);
+    }
+
+    @Override
+    @Transactional
+    public Long publish(Long userId, BlogCreateRequest request) {
+        Blog blog = new Blog();
+        blog.setUserId(userId);
+        blog.setSportCode(request.sportCode());
+        blog.setTitle(request.title());
+        blog.setContent(request.content());
+        blog.setImageUrls(String.join(",", request.images() == null ? Collections.emptyList() : request.images()));
+        blog.setRelatedType(request.relatedType());
+        blog.setRelatedId(request.relatedId());
+        blog.setRelatedTitle(request.relatedTitle());
+        blog.setRelatedCoverUrl(request.relatedCoverUrl());
+        blog.setRelatedPrice(request.relatedPrice());
+        blog.setLiked(0);
+        blog.setStatus(1);
+        save(blog);
+
+        List<Follow> followers = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getFollowUserId, userId));
+        long timestamp = System.currentTimeMillis();
+        for (Follow follower : followers) {
+            redisTemplate.opsForZSet().add(RedisConstants.FEED_KEY + follower.getUserId(), String.valueOf(blog.getId()), timestamp);
+        }
+        return blog.getId();
+    }
+
+    @Override
+    @Transactional
+    public void like(Long userId, Long blogId) {
+        String key = RedisConstants.BLOG_LIKED_KEY + blogId;
+        String member = String.valueOf(userId);
+        Double score = redisTemplate.opsForZSet().score(key, member);
+        if (score == null) {
+            redisTemplate.opsForZSet().add(key, member, System.currentTimeMillis());
+            lambdaUpdate().setSql("liked = liked + 1").eq(Blog::getId, blogId).update();
+        } else {
+            redisTemplate.opsForZSet().remove(key, member);
+            lambdaUpdate().setSql("liked = greatest(liked - 1, 0)").eq(Blog::getId, blogId).update();
+        }
+    }
+
+    private PageResult<BlogView> listFollowBlogs(int page, int size, LoginUser currentUser) {
+        if (currentUser == null) {
+            return new PageResult<>(Collections.emptyList(), 0, page, size);
+        }
+        List<Long> followUserIds = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, currentUser.id()))
+                .stream()
+                .map(Follow::getFollowUserId)
+                .toList();
+        if (followUserIds.isEmpty()) {
+            return new PageResult<>(Collections.emptyList(), 0, page, size);
+        }
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 30);
+        Page<Blog> result = page(new Page<>(safePage, safeSize), new LambdaQueryWrapper<Blog>()
+                .eq(Blog::getStatus, 1)
+                .in(Blog::getUserId, followUserIds)
+                .orderByDesc(Blog::getCreatedAt));
+        return new PageResult<>(enrich(result.getRecords(), currentUser), result.getTotal(), safePage, safeSize);
+    }
+
+    private LambdaQueryWrapper<Blog> baseWrapper(String sportCode, String keyword) {
+        LambdaQueryWrapper<Blog> wrapper = new LambdaQueryWrapper<Blog>().eq(Blog::getStatus, 1);
+        if (sportCode != null && !sportCode.isBlank() && !"all".equalsIgnoreCase(sportCode)) {
+            wrapper.eq(Blog::getSportCode, sportCode.trim());
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String text = keyword.trim();
+            wrapper.and(w -> w.like(Blog::getTitle, text)
+                    .or()
+                    .like(Blog::getContent, text)
+                    .or()
+                    .like(Blog::getRelatedTitle, text));
+        }
+        return wrapper;
+    }
+
+    private List<BlogView> enrich(List<Blog> blogs, LoginUser currentUser) {
+        if (blogs.isEmpty()) return Collections.emptyList();
+        Map<Long, UserAccount> users = userMapper.selectBatchIds(blogs.stream().map(Blog::getUserId).collect(Collectors.toSet()))
+                .stream()
+                .collect(Collectors.toMap(UserAccount::getId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        return blogs.stream()
+                .map(blog -> toView(blog, users.get(blog.getUserId()), currentUser))
+                .toList();
+    }
+
+    private BlogView toView(Blog blog, UserAccount author, LoginUser currentUser) {
+        Long currentUserId = currentUser == null ? null : currentUser.id();
+        boolean liked = currentUserId != null && redisTemplate.opsForZSet()
+                .score(RedisConstants.BLOG_LIKED_KEY + blog.getId(), String.valueOf(currentUserId)) != null;
+        boolean followed = currentUserId != null && followService.isFollowed(currentUserId, blog.getUserId());
+        return new BlogView(
+                blog.getId(),
+                blog.getUserId(),
+                author == null ? "球友" : author.getNickname(),
+                author == null ? null : author.getAvatar(),
+                blog.getSportCode(),
+                blog.getTitle(),
+                blog.getContent(),
+                splitImages(blog.getImageUrls()),
+                blog.getRelatedType(),
+                blog.getRelatedId(),
+                blog.getRelatedTitle(),
+                blog.getRelatedCoverUrl(),
+                blog.getRelatedPrice(),
+                blog.getLiked() == null ? 0 : blog.getLiked(),
+                liked,
+                followed,
+                blog.getCreatedAt());
+    }
+
+    private List<String> splitImages(String imageUrls) {
+        if (imageUrls == null || imageUrls.isBlank()) return Collections.emptyList();
+        return Arrays.stream(imageUrls.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList();
+    }
+
+    public record BlogCreateRequest(
+            @NotBlank String sportCode,
+            @NotBlank String title,
+            @NotBlank String content,
+            List<String> images,
+            @NotBlank String relatedType,
+            @NotNull Long relatedId,
+            @NotBlank String relatedTitle,
+            String relatedCoverUrl,
+            BigDecimal relatedPrice) {
+    }
+}

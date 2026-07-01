@@ -1,0 +1,75 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: hm-badminton
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:mysql://localhost:3307/hm_badminton?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 2
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+      schema-locations: classpath:db/schema.sql
+      data-locations: classpath:db/data.sql
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+hm:
+  auth:
+    code-expire-minutes: 2
+    token-expire-minutes: 120
+  jwt:
+    secret: "change-this-secret-in-prod-hm-badminton-2026"
+    expire-minutes: 120
+  bloom:
+    bit-size: 33554432
+    hash-count: 7
+  minio:
+    endpoint: http://localhost:9000
+    public-endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin123
+    bucket: hm-badminton
+  amap:
+    key: ${AMAP_KEY:0b3dedfd34e183c63be3e7206dc5560c}
+    endpoint: https://restapi.amap.com/v5/place/around
+    default-city: 西安
+    radius: 5000
+    page-size: 20
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+
+logging:
+  level:
+    com.hm.badminton: INFO
