@@ -1,5 +1,7 @@
 package com.hm.badminton.mapper;
 
+import lombok.Data;
+
 import com.hm.badminton.entity.PlayerProfile;
 import com.hm.badminton.entity.SportActivity;
 import org.apache.ibatis.annotations.Arg;
@@ -157,7 +159,7 @@ public interface SocialMapper {
                    a.level_required, a.fee_type, a.status, a.created_at
             from sport_activities a
             join users u on u.id = a.creator_id
-            left join venues v on v.id = a.venue_id
+            left join place v on v.id = a.venue_id
             where a.status in ('招募中', '已成团')
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
             <if test="city != null and city != ''">and a.city = #{city}</if>
@@ -232,7 +234,7 @@ public interface SocialMapper {
                    a.level_required, a.fee_type, a.status, a.created_at
             from sport_activities a
             join users u on u.id = a.creator_id
-            left join venues v on v.id = a.venue_id
+            left join place v on v.id = a.venue_id
             where a.id = #{id}
             """)
     @ConstructorArgs({
@@ -266,8 +268,10 @@ public interface SocialMapper {
             """)
     List<Map<String, Object>> selectMembers(@Param("activityId") Long activityId);
 
-    @Select("select name from venues where id = #{venueId}")
+    @Select("select name from place where id = #{venueId}")
     String selectVenueName(@Param("venueId") Long venueId);
+
+    @Data
 
     class InsertActivityRow {
         private Long id;
@@ -284,34 +288,5 @@ public interface SocialMapper {
         private Integer maxPlayers;
         private String levelRequired;
         private String feeType;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public String getSportCode() { return sportCode; }
-        public void setSportCode(String sportCode) { this.sportCode = sportCode; }
-        public Long getCreatorId() { return creatorId; }
-        public void setCreatorId(Long creatorId) { this.creatorId = creatorId; }
-        public Long getVenueId() { return venueId; }
-        public void setVenueId(Long venueId) { this.venueId = venueId; }
-        public String getPlaceSource() { return placeSource; }
-        public void setPlaceSource(String placeSource) { this.placeSource = placeSource; }
-        public String getPlaceId() { return placeId; }
-        public void setPlaceId(String placeId) { this.placeId = placeId; }
-        public String getVenueName() { return venueName; }
-        public void setVenueName(String venueName) { this.venueName = venueName; }
-        public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
-        public String getCity() { return city; }
-        public void setCity(String city) { this.city = city; }
-        public LocalDateTime getStartTime() { return startTime; }
-        public void setStartTime(LocalDateTime startTime) { this.startTime = startTime; }
-        public LocalDateTime getEndTime() { return endTime; }
-        public void setEndTime(LocalDateTime endTime) { this.endTime = endTime; }
-        public Integer getMaxPlayers() { return maxPlayers; }
-        public void setMaxPlayers(Integer maxPlayers) { this.maxPlayers = maxPlayers; }
-        public String getLevelRequired() { return levelRequired; }
-        public void setLevelRequired(String levelRequired) { this.levelRequired = levelRequired; }
-        public String getFeeType() { return feeType; }
-        public void setFeeType(String feeType) { this.feeType = feeType; }
     }
 }

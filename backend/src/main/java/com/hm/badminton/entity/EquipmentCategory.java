@@ -7,24 +7,19 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
 import java.io.Serializable;
-import java.math.BigDecimal;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-public class CartItem implements Serializable {
+public class EquipmentCategory implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private Long id;
-    private Long productId;
-    private String productName;
-    private String brand;
-    private String coverUrl;
-    private BigDecimal price;
-    private Integer quantity;
-    private Integer stock;
-    private BigDecimal amount;
+    private String sportCode;
+    private String name;
+    private String icon;
+    private Integer sort;
 }

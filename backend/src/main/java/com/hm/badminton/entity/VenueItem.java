@@ -9,28 +9,34 @@ import lombok.experimental.Accessors;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-public class SeckillActivity implements Serializable {
+public class VenueItem implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private Long id;
-    private Integer type;
-    private Long productId;
-    private String productName;
+    private Long venueId;
+    private String amapPlaceId;
+    private String venueName;
+    private Integer placeRank;
     private String sportCode;
-    private Long categoryId;
-    private String categoryName;
+    private String productType;
+    private String productTypeName;
+    private String title;
+    private String description;
     private String coverUrl;
+    private BigDecimal price;
     private BigDecimal originalPrice;
-    private BigDecimal seckillPrice;
-    private Integer stock;
-    private LocalDateTime startAt;
-    private LocalDateTime endAt;
-    private Integer status;
+    private List<String> tags;
+    private String useRule;
+    private String refundRule;
+    private Integer availableStock;
+    private LocalDateTime saleStartAt;
+    private LocalDateTime saleEndAt;
 }

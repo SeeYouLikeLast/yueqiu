@@ -1,6 +1,7 @@
 package com.hm.badminton.service.impl;
 
 import com.hm.badminton.common.BusinessException;
+import com.hm.badminton.constants.TradeType;
 import com.hm.badminton.dto.SeckillOrderMessage;
 import com.hm.badminton.mapper.SeckillMapper;
 import org.springframework.stereotype.Service;
@@ -17,15 +18,24 @@ public class SeckillOrderMessageService {
 
     @Transactional
     public void createOrder(SeckillOrderMessage message) {
-        Integer exists = seckillMapper.countUserActivityOrder(message.userId(), message.activityId());
+        int type = TradeType.require(message.getType());
+        Integer exists = type == TradeType.VENUE
+                ? seckillMapper.countUserVenueOrder(message.getUserId(), message.getActivityId())
+                : seckillMapper.countUserEquipmentOrder(message.getUserId(), message.getActivityId());
         if (exists != null && exists > 0) {
             return;
         }
-        int updated = seckillMapper.deductActivityStock(message.activityId());
+        int updated = type == TradeType.VENUE
+                ? seckillMapper.deductVenueActivityStock(message.getActivityId())
+                : seckillMapper.deductEquipmentActivityStock(message.getActivityId());
         if (updated == 0) {
             throw new BusinessException("秒杀库存已抢完");
         }
-        seckillMapper.insertOrder(message.orderId(), message.activityId(), message.productId(), message.userId(), message.amount());
-        seckillMapper.deductProductStockLenient(message.productId());
+        if (type == TradeType.VENUE) {
+            seckillMapper.insertVenueOrder(message.getOrderId(), message.getActivityId(), message.getProductId(), message.getUserId(), message.getAmount());
+        } else {
+            seckillMapper.insertEquipmentOrder(message.getOrderId(), message.getActivityId(), message.getProductId(), message.getUserId(), message.getAmount());
+            seckillMapper.deductEquipmentStockLenient(message.getProductId());
+        }
     }
 }

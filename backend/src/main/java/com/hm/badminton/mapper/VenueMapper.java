@@ -1,5 +1,7 @@
 package com.hm.badminton.mapper;
 
+import lombok.Data;
+
 import com.hm.badminton.entity.Venue;
 import com.hm.badminton.entity.VenueReview;
 import org.apache.ibatis.annotations.Arg;
@@ -23,7 +25,7 @@ public interface VenueMapper {
     @Select("""
             <script>
             select count(*)
-            from venues
+            from place
             where status = 1
             <if test="city != null and city != ''">and city = #{city}</if>
             <if test="area != null and area != ''">and area = #{area}</if>
@@ -49,7 +51,7 @@ public interface VenueMapper {
                      </when>
                      <otherwise>null as distance_m</otherwise>
                    </choose>
-            from venues
+            from place
             where status = 1
             <if test="city != null and city != ''">and city = #{city}</if>
             <if test="area != null and area != ''">and area = #{area}</if>
@@ -93,7 +95,7 @@ public interface VenueMapper {
     @Select("""
             select id, name, city, area, address, longitude, latitude, avg_price, score, review_count,
                    open_hours, cover_url, facilities, created_at, null as distance_m
-            from venues
+            from place
             where id = #{id} and status = 1
             """)
     @ConstructorArgs({
@@ -169,7 +171,7 @@ public interface VenueMapper {
                      @Param("imageUrls") String imageUrls);
 
     @Update("""
-            update venues v
+            update place v
             set score = (select round(avg(rating), 1) from venue_reviews where venue_id = v.id),
                 review_count = (select count(*) from venue_reviews where venue_id = v.id)
             where v.id = #{venueId}
@@ -190,7 +192,7 @@ public interface VenueMapper {
                    v.score, v.review_count, v.open_hours, v.cover_url, v.facilities, v.created_at,
                    null as distance_m
             from venue_favorites f
-            join venues v on v.id = f.venue_id
+            join place v on v.id = f.venue_id
             where f.user_id = #{userId}
             order by f.created_at desc
             """)
@@ -214,13 +216,15 @@ public interface VenueMapper {
     List<Venue> selectFavorites(@Param("userId") Long userId);
 
     @Insert("""
-            insert into venues(name, city, area, address, longitude, latitude, avg_price, score,
+            insert into place(name, city, area, address, longitude, latitude, avg_price, score,
                                review_count, open_hours, cover_url, facilities, status)
             values (#{row.name}, #{row.city}, #{row.area}, #{row.address}, #{row.longitude}, #{row.latitude},
                     #{row.avgPrice}, 5.0, 0, #{row.openHours}, #{row.coverUrl}, #{row.facilities}, 1)
             """)
     @Options(useGeneratedKeys = true, keyProperty = "row.id")
     int insertVenue(@Param("row") InsertVenueRow row);
+
+    @Data
 
     class InsertVenueRow {
         private Long id;
@@ -234,28 +238,5 @@ public interface VenueMapper {
         private String openHours;
         private String coverUrl;
         private String facilities;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-        public String getCity() { return city; }
-        public void setCity(String city) { this.city = city; }
-        public String getArea() { return area; }
-        public void setArea(String area) { this.area = area; }
-        public String getAddress() { return address; }
-        public void setAddress(String address) { this.address = address; }
-        public BigDecimal getLongitude() { return longitude; }
-        public void setLongitude(BigDecimal longitude) { this.longitude = longitude; }
-        public BigDecimal getLatitude() { return latitude; }
-        public void setLatitude(BigDecimal latitude) { this.latitude = latitude; }
-        public Integer getAvgPrice() { return avgPrice; }
-        public void setAvgPrice(Integer avgPrice) { this.avgPrice = avgPrice; }
-        public String getOpenHours() { return openHours; }
-        public void setOpenHours(String openHours) { this.openHours = openHours; }
-        public String getCoverUrl() { return coverUrl; }
-        public void setCoverUrl(String coverUrl) { this.coverUrl = coverUrl; }
-        public String getFacilities() { return facilities; }
-        public void setFacilities(String facilities) { this.facilities = facilities; }
     }
 }

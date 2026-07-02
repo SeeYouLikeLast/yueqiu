@@ -34,7 +34,7 @@ public class FileController {
     public ApiResponse<FileMetadata> upload(@RequestParam("file") MultipartFile file,
                                             @RequestParam(defaultValue = "common") String bizType,
                                             @RequestParam(required = false) Long bizId) {
-        Long userId = userContext.current().map(user -> user.id()).orElse(null);
+        Long userId = userContext.current().map(user -> user.getId()).orElse(null);
         return ApiResponse.ok(fileStorageService.upload(userId, file, bizType, bizId));
     }
 
@@ -46,7 +46,7 @@ public class FileController {
     @GetMapping
     public ApiResponse<List<FileMetadata>> list(@RequestParam(required = false) String bizType,
                                                 @RequestParam(required = false) Long bizId) {
-        Long userId = userContext.current().map(user -> user.id()).orElse(null);
+        Long userId = userContext.current().map(user -> user.getId()).orElse(null);
         return ApiResponse.ok(fileStorageService.list(bizType, bizId, userId));
     }
 

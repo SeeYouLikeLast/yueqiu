@@ -10,6 +10,9 @@ import com.hm.badminton.service.ISportCatalogService;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +38,7 @@ public class SocialService implements ISocialService {
         int safeSize = Math.min(Math.max(1, size), 50);
         String normalizedSport = null;
         if (!isAllSport(sportCode)) {
-            normalizedSport = sportCatalogService.require(sportCode).code();
+            normalizedSport = sportCatalogService.require(sportCode).getCode();
         }
         String cityText = blankToNull(city);
         String areaText = blankToNull(area);
@@ -55,10 +58,10 @@ public class SocialService implements ISocialService {
 
     @Transactional
     public void saveProfile(Long userId, ProfileRequest request) {
-        socialMapper.updateUserProfileFields(userId, request.city(), request.level());
-        socialMapper.upsertProfile(userId, sportCatalogService.require(request.sportCode()).code(), request.city(), request.area(),
-                request.longitude(), request.latitude(), request.level(), request.playStyle(), request.availableTime(),
-                request.intro(), request.allowInvite());
+        socialMapper.updateUserProfileFields(userId, request.getCity(), request.getLevel());
+        socialMapper.upsertProfile(userId, sportCatalogService.require(request.getSportCode()).getCode(), request.getCity(), request.getArea(),
+                request.getLongitude(), request.getLatitude(), request.getLevel(), request.getPlayStyle(), request.getAvailableTime(),
+                request.getIntro(), request.getAllowInvite());
     }
 
     public PageResult<SportActivity> activities(String sportCode, String city, String level, int page, int size) {
@@ -66,7 +69,7 @@ public class SocialService implements ISocialService {
         int safeSize = Math.min(Math.max(1, size), 50);
         String normalizedSport = null;
         if (!isAllSport(sportCode)) {
-            normalizedSport = sportCatalogService.require(sportCode).code();
+            normalizedSport = sportCatalogService.require(sportCode).getCode();
         }
         String cityText = blankToNull(city);
         String levelText = blankToNull(level);
@@ -82,19 +85,19 @@ public class SocialService implements ISocialService {
     @Transactional
     public Long createActivity(Long userId, ActivityRequest request) {
         SocialMapper.InsertActivityRow row = new SocialMapper.InsertActivityRow();
-        row.setSportCode(sportCatalogService.require(request.sportCode()).code());
+        row.setSportCode(sportCatalogService.require(request.getSportCode()).getCode());
         row.setCreatorId(userId);
-        row.setVenueId(request.venueId());
-        row.setPlaceSource(request.placeSource() == null || request.placeSource().isBlank() ? "amap" : request.placeSource());
-        row.setPlaceId(request.placeId());
+        row.setVenueId(request.getVenueId());
+        row.setPlaceSource(request.getPlaceSource() == null || request.getPlaceSource().isBlank() ? "amap" : request.getPlaceSource());
+        row.setPlaceId(request.getPlaceId());
         row.setVenueName(resolveVenueName(request));
-        row.setTitle(request.title());
-        row.setCity(request.city());
-        row.setStartTime(request.startTime());
-        row.setEndTime(request.endTime());
-        row.setMaxPlayers(request.maxPlayers());
-        row.setLevelRequired(request.levelRequired());
-        row.setFeeType(request.feeType());
+        row.setTitle(request.getTitle());
+        row.setCity(request.getCity());
+        row.setStartTime(request.getStartTime());
+        row.setEndTime(request.getEndTime());
+        row.setMaxPlayers(request.getMaxPlayers());
+        row.setLevelRequired(request.getLevelRequired());
+        row.setFeeType(request.getFeeType());
         socialMapper.insertActivity(row);
         long activityId = row.getId();
         socialMapper.insertMember(activityId, userId, "发起人");
@@ -104,10 +107,10 @@ public class SocialService implements ISocialService {
     @Transactional
     public void join(Long userId, Long activityId) {
         SportActivity activity = detail(activityId);
-        if (!"招募中".equals(activity.status())) {
+        if (!"招募中".equals(activity.getStatus())) {
             throw new BusinessException("活动当前不可加入");
         }
-        if (activity.currentPlayers() >= activity.maxPlayers()) {
+        if (activity.getCurrentPlayers() >= activity.getMaxPlayers()) {
             throw new BusinessException("活动人数已满");
         }
         try {
@@ -139,11 +142,11 @@ public class SocialService implements ISocialService {
     }
 
     private String resolveVenueName(ActivityRequest request) {
-        if (request.venueName() != null && !request.venueName().isBlank()) {
-            return request.venueName().trim();
+        if (request.getVenueName() != null && !request.getVenueName().isBlank()) {
+            return request.getVenueName().trim();
         }
-        if (request.venueId() != null) {
-            String venueName = socialMapper.selectVenueName(request.venueId());
+        if (request.getVenueId() != null) {
+            String venueName = socialMapper.selectVenueName(request.getVenueId());
             if (venueName != null && !venueName.isBlank()) {
                 return venueName;
             }
@@ -155,32 +158,47 @@ public class SocialService implements ISocialService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    public record ProfileRequest(
-            String sportCode,
-            @NotBlank String city,
-            @NotBlank String area,
-            Double longitude,
-            Double latitude,
-            @NotBlank String level,
-            String playStyle,
-            String availableTime,
-            String intro,
-            Boolean allowInvite) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ProfileRequest {
+        private String sportCode;
+        @NotBlank
+        private String city;
+        @NotBlank
+        private String area;
+        private Double longitude;
+        private Double latitude;
+        @NotBlank
+        private String level;
+        private String playStyle;
+        private String availableTime;
+        private String intro;
+        private Boolean allowInvite;
     }
 
-    public record ActivityRequest(
-            String sportCode,
-            Long venueId,
-            String placeSource,
-            String placeId,
-            String venueName,
-            @NotBlank String title,
-            @NotBlank String city,
-            @Future LocalDateTime startTime,
-            @Future LocalDateTime endTime,
-            @Min(2) Integer maxPlayers,
-            @NotBlank String levelRequired,
-            String feeType) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ActivityRequest {
+        private String sportCode;
+        private Long venueId;
+        private String placeSource;
+        private String placeId;
+        private String venueName;
+        @NotBlank
+        private String title;
+        @NotBlank
+        private String city;
+        @Future
+        private LocalDateTime startTime;
+        @Future
+        private LocalDateTime endTime;
+        @Min(2)
+        private Integer maxPlayers;
+        @NotBlank
+        private String levelRequired;
+        private String feeType;
     }
 }
 

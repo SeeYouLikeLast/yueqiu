@@ -27,25 +27,30 @@ public class SeckillController {
         this.userContext = userContext;
     }
 
-    @GetMapping("/activities")
-    public ApiResponse<List<SeckillActivity>> activities(@RequestParam(required = false) String sport,
-                                                         @RequestParam(required = false) Long categoryId) {
-        return ApiResponse.ok(seckillService.list(sport, categoryId));
+    @GetMapping("/{type:[12]}")
+    public ApiResponse<List<SeckillActivity>> typedActivities(@PathVariable Integer type,
+                                                              @RequestParam(required = false) String sport,
+                                                              @RequestParam(required = false) Long categoryId) {
+        return ApiResponse.ok(seckillService.list(type, sport, categoryId));
     }
 
-    @PostMapping("/activities/{activityId}/orders")
-    public ApiResponse<Map<String, Long>> submit(@PathVariable Long activityId) {
-        return ApiResponse.ok(Map.of("orderId", seckillService.submit(userContext.requireUserId(), activityId)));
+    @PostMapping("/{type:[12]}/{seckillId}")
+    public ApiResponse<Map<String, Long>> typedSubmit(@PathVariable Integer type, @PathVariable Long seckillId) {
+        return ApiResponse.ok(Map.of("orderId", seckillService.submit(userContext.requireUserId(), type, seckillId)));
     }
 
-    @GetMapping("/orders/{orderId}")
-    public ApiResponse<SeckillOrder> order(@PathVariable Long orderId) {
-        return ApiResponse.ok(seckillService.order(userContext.requireUserId(), orderId));
+    @GetMapping("/{type:[12]}/orders")
+    public ApiResponse<List<SeckillOrder>> typedOrders(@PathVariable Integer type) {
+        return ApiResponse.ok(seckillService.myOrders(userContext.requireUserId(), type));
     }
 
-    @GetMapping("/orders")
-    public ApiResponse<List<SeckillOrder>> myOrders() {
-        return ApiResponse.ok(seckillService.myOrders(userContext.requireUserId()));
+    @GetMapping("/all/orders")
+    public ApiResponse<Map<String, List<SeckillOrder>>> allOrders() {
+        Long userId = userContext.requireUserId();
+        return ApiResponse.ok(Map.of(
+                "venue", seckillService.myOrders(userId, 1),
+                "equipment", seckillService.myOrders(userId, 2)
+        ));
     }
 
     @PostMapping("/preload")

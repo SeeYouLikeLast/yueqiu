@@ -20,6 +20,9 @@ import com.hm.badminton.constants.RedisConstants;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -90,10 +93,10 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         long max = maxTime == null ? Long.MAX_VALUE : maxTime;
         int safeOffset = offset == null ? 0 : Math.max(offset, 0);
         Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
-                .reverseRangeByScoreWithScores(RedisConstants.FEED_KEY + currentUser.id(), 0, max, safeOffset, DEFAULT_SIZE);
+                .reverseRangeByScoreWithScores(RedisConstants.FEED_KEY + currentUser.getId(), 0, max, safeOffset, DEFAULT_SIZE);
         if (tuples == null || tuples.isEmpty()) {
             PageResult<BlogView> fallback = listFollowBlogs(1, DEFAULT_SIZE, currentUser);
-            return new ScrollResult<>(fallback.records(), 0L, 0);
+            return new ScrollResult<>(fallback.getRecords(), 0L, 0);
         }
         List<Long> ids = tuples.stream()
                 .map(ZSetOperations.TypedTuple::getValue)
@@ -129,15 +132,15 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     public Long publish(Long userId, BlogCreateRequest request) {
         Blog blog = new Blog();
         blog.setUserId(userId);
-        blog.setSportCode(request.sportCode());
-        blog.setTitle(request.title());
-        blog.setContent(request.content());
-        blog.setImageUrls(String.join(",", request.images() == null ? Collections.emptyList() : request.images()));
-        blog.setRelatedType(request.relatedType());
-        blog.setRelatedId(request.relatedId());
-        blog.setRelatedTitle(request.relatedTitle());
-        blog.setRelatedCoverUrl(request.relatedCoverUrl());
-        blog.setRelatedPrice(request.relatedPrice());
+        blog.setSportCode(request.getSportCode());
+        blog.setTitle(request.getTitle());
+        blog.setContent(request.getContent());
+        blog.setImageUrls(String.join(",", request.getImages() == null ? Collections.emptyList() : request.getImages()));
+        blog.setRelatedType(request.getRelatedType());
+        blog.setRelatedId(request.getRelatedId());
+        blog.setRelatedTitle(request.getRelatedTitle());
+        blog.setRelatedCoverUrl(request.getRelatedCoverUrl());
+        blog.setRelatedPrice(request.getRelatedPrice());
         blog.setLiked(0);
         blog.setStatus(1);
         save(blog);
@@ -169,7 +172,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         if (currentUser == null) {
             return new PageResult<>(Collections.emptyList(), 0, page, size);
         }
-        List<Long> followUserIds = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, currentUser.id()))
+        List<Long> followUserIds = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, currentUser.getId()))
                 .stream()
                 .map(Follow::getFollowUserId)
                 .toList();
@@ -212,7 +215,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     }
 
     private BlogView toView(Blog blog, UserAccount author, LoginUser currentUser) {
-        Long currentUserId = currentUser == null ? null : currentUser.id();
+        Long currentUserId = currentUser == null ? null : currentUser.getId();
         boolean liked = currentUserId != null && redisTemplate.opsForZSet()
                 .score(RedisConstants.BLOG_LIKED_KEY + blog.getId(), String.valueOf(currentUserId)) != null;
         boolean followed = currentUserId != null && followService.isFollowed(currentUserId, blog.getUserId());
@@ -241,15 +244,24 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         return Arrays.stream(imageUrls.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList();
     }
 
-    public record BlogCreateRequest(
-            @NotBlank String sportCode,
-            @NotBlank String title,
-            @NotBlank String content,
-            List<String> images,
-            @NotBlank String relatedType,
-            @NotNull Long relatedId,
-            @NotBlank String relatedTitle,
-            String relatedCoverUrl,
-            BigDecimal relatedPrice) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BlogCreateRequest {
+        @NotBlank
+        private String sportCode;
+        @NotBlank
+        private String title;
+        @NotBlank
+        private String content;
+        private List<String> images;
+        @NotBlank
+        private String relatedType;
+        @NotNull
+        private Long relatedId;
+        @NotBlank
+        private String relatedTitle;
+        private String relatedCoverUrl;
+        private BigDecimal relatedPrice;
     }
 }

@@ -14,12 +14,12 @@ public interface AdminMapper {
     @Select("select count(*) from ${table}")
     Long countTable(@Param("table") String table);
 
-    @Select("select coalesce(sum(total_amount), 0) from orders where status = '已支付'")
+    @Select("select coalesce(sum(total_amount), 0) from order_equipment where status = '已支付'")
     BigDecimal paidRevenue();
 
     @Select("""
             select id, name, city, area, score, review_count
-            from venues
+            from place
             order by review_count desc, score desc
             limit 8
             """)
@@ -27,17 +27,17 @@ public interface AdminMapper {
 
     @Select("""
             select p.id, p.name, c.name as category_name, p.brand, p.price, p.stock, p.sold, p.score
-            from products p
-            join product_categories c on c.id = p.category_id
+            from equipment p
+            join equipment_categories c on c.id = p.category_id
             order by p.sold desc, p.score desc
             limit 8
             """)
-    List<Map<String, Object>> hotProducts();
+    List<Map<String, Object>> hotEquipments();
 
     @Select("""
             select r.id, v.name as venue_name, u.nickname, r.rating, r.content, r.created_at
             from venue_reviews r
-            join venues v on v.id = r.venue_id
+            join place v on v.id = r.venue_id
             join users u on u.id = r.user_id
             order by r.created_at desc
             limit 10

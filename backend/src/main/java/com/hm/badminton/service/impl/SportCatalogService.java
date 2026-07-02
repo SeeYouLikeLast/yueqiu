@@ -53,7 +53,7 @@ public class SportCatalogService implements ISportCatalogService {
     }
 
     private void register(SportType sportType) {
-        sports.put(sportType.code(), sportType);
+        sports.put(sportType.getCode(), sportType);
     }
 
     private void alias(String alias, String code) {

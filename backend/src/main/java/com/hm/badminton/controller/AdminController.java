@@ -48,10 +48,10 @@ public class AdminController {
         return ApiResponse.ok(adminService.hotVenues());
     }
 
-    @GetMapping("/hot-products")
-    public ApiResponse<List<Map<String, Object>>> hotProducts() {
+    @GetMapping("/hot-equipment")
+    public ApiResponse<List<Map<String, Object>>> hotEquipments() {
         userContext.require();
-        return ApiResponse.ok(adminService.hotProducts());
+        return ApiResponse.ok(adminService.hotEquipments());
     }
 
     @GetMapping("/latest-reviews")
@@ -66,10 +66,10 @@ public class AdminController {
         return ApiResponse.ok(Map.of("venueId", venueService.createVenue(request)));
     }
 
-    @PostMapping("/products")
-    public ApiResponse<Map<String, Long>> createProduct(@Valid @RequestBody EquipmentService.ProductCreateRequest request) {
+    @PostMapping("/equipment")
+    public ApiResponse<Map<String, Long>> createEquipment(@Valid @RequestBody EquipmentService.EquipmentCreateRequest request) {
         userContext.require();
-        return ApiResponse.ok(Map.of("productId", equipmentService.createProduct(request)));
+        return ApiResponse.ok(Map.of("productId", equipmentService.createEquipment(request)));
     }
 }
 

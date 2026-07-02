@@ -1,8 +1,12 @@
 package com.hm.badminton.mapper;
 
+import lombok.Data;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+
 import com.hm.badminton.entity.CartItem;
-import com.hm.badminton.entity.Product;
-import com.hm.badminton.entity.ProductCategory;
+import com.hm.badminton.entity.Equipment;
+import com.hm.badminton.entity.EquipmentCategory;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Delete;
@@ -23,7 +27,7 @@ public interface EquipmentMapper {
     @Select("""
             <script>
             select id, sport_code, name, icon, sort
-            from product_categories
+            from equipment_categories
             <where>
               <if test="sportCode != null and sportCode != ''">
                 sport_code = #{sportCode}
@@ -39,12 +43,12 @@ public interface EquipmentMapper {
             @Arg(column = "icon", javaType = String.class),
             @Arg(column = "sort", javaType = Integer.class)
     })
-    List<ProductCategory> selectCategories(@Param("sportCode") String sportCode);
+    List<EquipmentCategory> selectCategories(@Param("sportCode") String sportCode);
 
     @Select("""
             <script>
             select count(*)
-            from products p
+            from equipment p
             where p.status = 1
             <if test="sportCode != null and sportCode != ''">
               and p.sport_code = #{sportCode}
@@ -59,7 +63,7 @@ public interface EquipmentMapper {
             </if>
             </script>
             """)
-    Long countProducts(@Param("sportCode") String sportCode,
+    Long countEquipments(@Param("sportCode") String sportCode,
                        @Param("categoryId") Long categoryId,
                        @Param("keyword") String keyword);
 
@@ -67,8 +71,8 @@ public interface EquipmentMapper {
             <script>
             select p.id, p.sport_code, p.category_id, c.name as category_name, p.name, p.brand, p.description,
                    p.cover_url, p.price, p.stock, p.score, p.sold, p.status, p.created_at
-            from products p
-            join product_categories c on c.id = p.category_id
+            from equipment p
+            join equipment_categories c on c.id = p.category_id
             where p.status = 1
             <if test="sportCode != null and sportCode != ''">
               and p.sport_code = #{sportCode}
@@ -101,7 +105,7 @@ public interface EquipmentMapper {
             @Arg(column = "status", javaType = Integer.class),
             @Arg(column = "created_at", javaType = LocalDateTime.class)
     })
-    List<Product> selectProducts(@Param("sportCode") String sportCode,
+    List<Equipment> selectEquipments(@Param("sportCode") String sportCode,
                                  @Param("categoryId") Long categoryId,
                                  @Param("keyword") String keyword,
                                  @Param("size") int size,
@@ -110,8 +114,8 @@ public interface EquipmentMapper {
     @Select("""
             select p.id, p.sport_code, p.category_id, c.name as category_name, p.name, p.brand, p.description,
                    p.cover_url, p.price, p.stock, p.score, p.sold, p.status, p.created_at
-            from products p
-            join product_categories c on c.id = p.category_id
+            from equipment p
+            join equipment_categories c on c.id = p.category_id
             where p.id = #{id} and p.status = 1
             """)
     @ConstructorArgs({
@@ -130,26 +134,26 @@ public interface EquipmentMapper {
             @Arg(column = "status", javaType = Integer.class),
             @Arg(column = "created_at", javaType = LocalDateTime.class)
     })
-    Product selectProduct(@Param("id") Long id);
+    Equipment selectEquipment(@Param("id") Long id);
 
-    @Select("select count(*) from cart_items where user_id = #{userId} and product_id = #{productId}")
+    @Select("select count(*) from cart_equipment where user_id = #{userId} and product_id = #{productId}")
     Integer countCart(@Param("userId") Long userId, @Param("productId") Long productId);
 
     @Update("""
-            update cart_items
+            update cart_equipment
             set quantity = least(quantity + #{quantity}, 99), updated_at = now()
             where user_id = #{userId} and product_id = #{productId}
             """)
     int increaseCart(@Param("userId") Long userId, @Param("productId") Long productId, @Param("quantity") Integer quantity);
 
-    @Insert("insert into cart_items(user_id, product_id, quantity) values (#{userId}, #{productId}, #{quantity})")
+    @Insert("insert into cart_equipment(user_id, product_id, quantity) values (#{userId}, #{productId}, #{quantity})")
     int insertCart(@Param("userId") Long userId, @Param("productId") Long productId, @Param("quantity") Integer quantity);
 
     @Select("""
             select ci.id, p.id as product_id, p.name, p.brand, p.cover_url, p.price, ci.quantity, p.stock,
                    p.price * ci.quantity as amount
-            from cart_items ci
-            join products p on p.id = ci.product_id
+            from cart_equipment ci
+            join equipment p on p.id = ci.product_id
             where ci.user_id = #{userId}
             order by ci.updated_at desc
             """)
@@ -166,25 +170,25 @@ public interface EquipmentMapper {
     })
     List<CartItem> selectCart(@Param("userId") Long userId);
 
-    @Delete("delete from cart_items where id = #{itemId} and user_id = #{userId}")
+    @Delete("delete from cart_equipment where id = #{itemId} and user_id = #{userId}")
     int deleteCart(@Param("userId") Long userId, @Param("itemId") Long itemId);
 
     @Insert("""
-            insert into orders(user_id, total_amount, status, address)
+            insert into order_equipment(user_id, total_amount, status, address)
             values (#{row.userId}, #{row.totalAmount}, '待支付', #{row.address})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "row.id")
     int insertOrder(@Param("row") InsertOrderRow row);
 
     @Update("""
-            update products
+            update equipment
             set stock = stock - #{quantity}, sold = sold + #{quantity}
             where id = #{productId} and stock >= #{quantity}
             """)
-    int deductProductStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
+    int deductEquipmentStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
 
     @Insert("""
-            insert into order_items(order_id, product_id, product_name, cover_url, price, quantity)
+            insert into order_equipment_item(order_id, product_id, product_name, cover_url, price, quantity)
             values (#{orderId}, #{productId}, #{productName}, #{coverUrl}, #{price}, #{quantity})
             """)
     int insertOrderItem(@Param("orderId") Long orderId,
@@ -194,11 +198,11 @@ public interface EquipmentMapper {
                         @Param("price") BigDecimal price,
                         @Param("quantity") Integer quantity);
 
-    @Delete("delete from cart_items where user_id = #{userId}")
+    @Delete("delete from cart_equipment where user_id = #{userId}")
     int deleteCartByUser(@Param("userId") Long userId);
 
     @Update("""
-            update orders
+            update order_equipment
             set status = '已支付', paid_at = now()
             where id = #{orderId} and user_id = #{userId} and status = '待支付'
             """)
@@ -206,8 +210,8 @@ public interface EquipmentMapper {
 
     @Select("""
             select p.id, p.name, p.cover_url, p.price, ci.quantity
-            from cart_items ci
-            join products p on p.id = ci.product_id
+            from cart_equipment ci
+            join equipment p on p.id = ci.product_id
             where ci.user_id = #{userId}
             """)
     @ConstructorArgs({
@@ -217,36 +221,39 @@ public interface EquipmentMapper {
             @Arg(column = "price", javaType = BigDecimal.class),
             @Arg(column = "quantity", javaType = Integer.class)
     })
-    List<OrderProduct> selectOrderProductsFromCart(@Param("userId") Long userId);
+    List<OrderEquipment> selectOrderEquipmentsFromCart(@Param("userId") Long userId);
 
     @Insert("""
-            insert into products(sport_code, category_id, name, brand, description, cover_url, price, stock, score, sold, status)
+            insert into equipment(sport_code, category_id, name, brand, description, cover_url, price, stock, score, sold, status)
             values (#{row.sportCode}, #{row.categoryId}, #{row.name}, #{row.brand}, #{row.description}, #{row.coverUrl},
                     #{row.price}, #{row.stock}, 5.0, 0, 1)
             """)
     @Options(useGeneratedKeys = true, keyProperty = "row.id")
-    int insertProduct(@Param("row") InsertProductRow row);
+    int insertEquipment(@Param("row") InsertEquipmentRow row);
 
-    record OrderProduct(Long productId, String name, String coverUrl, BigDecimal price, Integer quantity) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    class OrderEquipment {
+        private Long productId;
+        private String name;
+        private String coverUrl;
+        private BigDecimal price;
+        private Integer quantity;
     }
+
+    @Data
 
     class InsertOrderRow {
         private Long id;
         private Long userId;
         private BigDecimal totalAmount;
         private String address;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public Long getUserId() { return userId; }
-        public void setUserId(Long userId) { this.userId = userId; }
-        public BigDecimal getTotalAmount() { return totalAmount; }
-        public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
-        public String getAddress() { return address; }
-        public void setAddress(String address) { this.address = address; }
     }
 
-    class InsertProductRow {
+    @Data
+
+    class InsertEquipmentRow {
         private Long id;
         private Long categoryId;
         private String sportCode;
@@ -256,24 +263,5 @@ public interface EquipmentMapper {
         private String coverUrl;
         private BigDecimal price;
         private Integer stock;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public Long getCategoryId() { return categoryId; }
-        public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
-        public String getSportCode() { return sportCode; }
-        public void setSportCode(String sportCode) { this.sportCode = sportCode; }
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-        public String getBrand() { return brand; }
-        public void setBrand(String brand) { this.brand = brand; }
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-        public String getCoverUrl() { return coverUrl; }
-        public void setCoverUrl(String coverUrl) { this.coverUrl = coverUrl; }
-        public BigDecimal getPrice() { return price; }
-        public void setPrice(BigDecimal price) { this.price = price; }
-        public Integer getStock() { return stock; }
-        public void setStock(Integer stock) { this.stock = stock; }
     }
 }

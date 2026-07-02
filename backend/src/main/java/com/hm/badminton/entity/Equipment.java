@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -14,21 +15,22 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-public class FileMetadata implements Serializable {
+public class Equipment implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private Long id;
-    private Long ownerUserId;
-    private String bizType;
-    private Long bizId;
-    private String bucketName;
-    private String objectName;
-    private String originalFilename;
-    private String contentType;
-    private Long fileSize;
-    private String etag;
-    private String publicUrl;
-    private String status;
+    private String sportCode;
+    private Long categoryId;
+    private String categoryName;
+    private String name;
+    private String brand;
+    private String description;
+    private String coverUrl;
+    private BigDecimal price;
+    private Integer stock;
+    private BigDecimal score;
+    private Integer sold;
+    private Integer status;
     private LocalDateTime createdAt;
 }

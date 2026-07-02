@@ -25,7 +25,7 @@ public interface VenueOrderMapper extends BaseMapper<VenueOrder> {
 
     @Select("""
             select ${columns}
-            from venue_orders
+            from order_venue
             where id = #{orderId} and user_id = #{userId}
             """)
     @ConstructorArgs({
@@ -54,7 +54,7 @@ public interface VenueOrderMapper extends BaseMapper<VenueOrder> {
 
     @Select("""
             select ${columns}
-            from venue_orders
+            from order_venue
             where user_id = #{userId}
             order by created_at desc
             """)

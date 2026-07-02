@@ -45,11 +45,11 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
 
         try {
             orderMessageService.createOrder(message);
-            log.info("秒杀订单异步落库成功，orderId={}", message.orderId());
+            log.info("秒杀订单异步落库成功，orderId={}", message.getOrderId());
         } catch (DuplicateKeyException e) {
-            log.info("秒杀订单重复消息已幂等忽略，userId={}, activityId={}", message.userId(), message.activityId());
+            log.info("秒杀订单重复消息已幂等忽略，userId={}, activityId={}", message.getUserId(), message.getActivityId());
         } catch (BusinessException e) {
-            log.warn("秒杀订单业务拒绝，orderId={}, reason={}", message.orderId(), e.getMessage());
+            log.warn("秒杀订单业务拒绝，orderId={}, reason={}", message.getOrderId(), e.getMessage());
         }
     }
 }

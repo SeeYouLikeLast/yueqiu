@@ -35,7 +35,7 @@ insert into follows(user_id, follow_user_id) values
 -- ============================================================
 -- 场馆数据 (10 个场馆，分布在杭州/上海/北京)
 -- ============================================================
-insert into venues(id, sport_code, name, city, area, address, longitude, latitude, avg_price, score, review_count, open_hours, cover_url, facilities) values
+insert into place(id, sport_code, name, city, area, address, longitude, latitude, avg_price, score, review_count, open_hours, cover_url, facilities) values
 (1, 'badminton', '西湖银羽羽毛球中心', '杭州', '西湖区', '文三路 398 号银羽运动园 2F', 120.130600, 30.279100, 68, 4.8, 36, '09:00-23:00', 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=1200&q=80', '木地板,淋浴,停车,饮水机,穿线服务'),
 (2, 'badminton', '滨江飞翔羽球馆', '杭州', '滨江区', '江南大道 1555 号体育中心 B 馆', 120.216700, 30.208400, 58, 4.6, 28, '08:00-23:30', 'https://images.unsplash.com/photo-1613918431703-aa50889e3be5?auto=format&fit=crop&w=1200&q=80', '塑胶地,空调,停车,更衣室'),
 (3, 'table_tennis', '黄龙乒乓训练中心', '杭州', '西湖区', '黄龙路 1 号黄龙体育中心内', 120.143300, 30.274200, 48, 4.7, 22, '08:00-22:30', 'https://images.unsplash.com/photo-1611251135345-18c56206b863?auto=format&fit=crop&w=1200&q=80', '专业球台,教练课,更衣室'),
@@ -179,7 +179,7 @@ insert into coaches(id, venue_id, amap_place_id, venue_name, sport_code, name, a
 -- ============================================================
 -- 场馆商品 (12 个商品，含本地场馆商品)
 -- ============================================================
-insert into venue_products(id, venue_id, amap_place_id, venue_name, place_rank, sport_code, product_type, title, description, cover_url, price, original_price, tags, use_rule, refund_rule, sale_start_at, sale_end_at, status) values
+insert into venue(id, venue_id, amap_place_id, venue_name, place_rank, sport_code, product_type, title, description, cover_url, price, original_price, tags, use_rule, refund_rule, sale_start_at, sale_end_at, status) values
 -- 西安场馆商品 (原数据 1-6)
 (1, null, null, '1', 1, 'badminton', 'TIME_PACKAGE', '08:00-12:00 单人畅打', '上午低峰不限场畅打，适合练球和自由对打。', 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80', 39.00, 68.00, '畅打,上午场,可核销', '购买后限所选日期 08:00-12:00 使用，入场需出示核销码。', '开场前 2 小时可退，过期不可退。', '2026-06-01 00:00:00', '2026-12-31 23:59:59', 1),
 (2, null, null, '1', 1, 'badminton', 'COURT_SLOT', '黄金单场 1 小时', '晚间黄金时段标准双打场，适合 2-4 人。', 'https://images.unsplash.com/photo-1613918431703-aa50889e3be5?auto=format&fit=crop&w=900&q=80', 88.00, 128.00, '单场,黄金时段,独享场地', '购买后按所选日期和时间入场，超时需现场补差。', '开场前 4 小时可退。', '2026-06-01 00:00:00', '2026-12-31 23:59:59', 1),
@@ -198,7 +198,7 @@ insert into venue_products(id, venue_id, amap_place_id, venue_name, place_rank, 
 -- ============================================================
 -- 场馆商品库存 (7 月上旬库存)
 -- ============================================================
-insert into venue_product_inventory(id, product_id, venue_id, court_name, coach_id, service_date, start_time, end_time, total_stock, available_stock, locked_stock, sold_stock, price, status) values
+insert into venue_inventory(id, product_id, venue_id, court_name, coach_id, service_date, start_time, end_time, total_stock, available_stock, locked_stock, sold_stock, price, status) values
 (1, 1, null, '上午畅打', null, '2026-06-30', '08:00:00', '12:00:00', 30, 29, 0, 1, 39.00, '可售'),
 (2, 1, null, '上午畅打', null, '2026-07-01', '08:00:00', '12:00:00', 30, 30, 0, 0, 39.00, '可售'),
 (3, 2, null, 'A1 标准场', null, '2026-06-30', '19:00:00', '20:00:00', 1, 0, 0, 1, 88.00, '已售'),
@@ -222,7 +222,7 @@ insert into venue_product_inventory(id, product_id, venue_id, court_name, coach_
 -- ============================================================
 -- 场馆订单 (增加更多订单)
 -- ============================================================
-insert into venue_orders(id, user_id, product_id, inventory_id, venue_id, amap_place_id, venue_name, product_title, product_type, service_date, start_time, end_time, amount, status, verify_code, paid_at, used_at) values
+insert into order_venue(id, user_id, product_id, inventory_id, venue_id, amap_place_id, venue_name, product_title, product_type, service_date, start_time, end_time, amount, status, verify_code, paid_at, used_at) values
 (1, 1, 1, 1, null, 'B0LBZ5OK5J', '西安城市运动公园羽毛球馆', '08:00-12:00 单人畅打', 'TIME_PACKAGE', '2026-06-30', '08:00:00', '12:00:00', 39.00, '已支付', '482916', '2026-06-28 09:15:00', null),
 (2, 2, 2, 3, null, 'B0LBZ5OK5J', '西安城市运动公园羽毛球馆', '黄金单场 1 小时', 'COURT_SLOT', '2026-06-30', '19:00:00', '20:00:00', 88.00, '已支付', '731504', '2026-06-29 14:20:00', null),
 (3, 5, 3, 5, null, 'B0LBZ5OK5J', '西安城市运动公园羽毛球馆', '私教体验课 60 分钟', 'COACH_LESSON', '2026-06-30', '18:00:00', '19:00:00', 99.00, '已使用', '205847', '2026-06-28 20:30:00', '2026-06-30 19:05:00'),
@@ -234,7 +234,7 @@ insert into venue_orders(id, user_id, product_id, inventory_id, venue_id, amap_p
 -- ============================================================
 -- 商品分类
 -- ============================================================
-insert into product_categories(id, sport_code, name, icon, sort) values
+insert into equipment_categories(id, sport_code, name, icon, sort) values
 (1, 'badminton', '羽毛球拍', 'racquet', 1),
 (2, 'badminton', '羽毛球鞋', 'shoe', 2),
 (3, 'badminton', '羽毛球', 'shuttle', 3),
@@ -254,7 +254,7 @@ insert into product_categories(id, sport_code, name, icon, sort) values
 -- ============================================================
 -- 商品数据 (14 个商品，新增 2 个)
 -- ============================================================
-insert into products(id, sport_code, category_id, name, brand, description, cover_url, price, stock, score, sold) values
+insert into equipment(id, sport_code, category_id, name, brand, description, cover_url, price, stock, score, sold) values
 (1, 'badminton', 1, '疾风 7 Pro 进阶羽毛球拍', 'YUDONG', '均衡偏进攻，适合中级双打和后场突击。', 'https://images.unsplash.com/photo-1613918431703-aa50889e3be5?auto=format&fit=crop&w=900&q=80', 599.00, 80, 4.8, 238),
 (2, 'badminton', 1, '轻羽 5U 新手训练拍', 'YUDONG', '轻量好上手，甜区大，适合入门和女双。', 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80', 269.00, 160, 4.6, 421),
 (3, 'badminton', 2, '稳定步伐缓震羽毛球鞋', 'FEATHERX', '侧向支撑强，适合多拍相持和频繁启动。', 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80', 429.00, 96, 4.7, 189),
@@ -290,17 +290,22 @@ insert into blogs(id, user_id, sport_code, title, content, image_urls, related_t
 -- ============================================================
 -- 秒杀活动
 -- ============================================================
-insert into seckill_activities(id, product_id, seckill_price, stock, start_at, end_at, status) values
+insert into seckill_equipment(id, equipment_id, seckill_price, stock, start_at, end_at, status) values
 (1, 1, 399.00, 35, '2026-06-01 00:00:00', '2026-12-31 23:59:59', 1),
 (2, 3, 299.00, 45, '2026-06-01 00:00:00', '2026-12-31 23:59:59', 1),
 (3, 9, 79.00, 120, '2026-06-01 00:00:00', '2026-12-31 23:59:59', 1),
 (4, 10, 349.00, 30, '2026-07-01 00:00:00', '2026-07-31 23:59:59', 1),
 (5, 13, 499.00, 20, '2026-07-01 00:00:00', '2026-08-31 23:59:59', 1);
 
+insert into seckill_venue(id, venue_id, seckill_price, stock, start_at, end_at, status) values
+(1, 1, 29.00, 40, '2026-07-01 00:00:00', '2026-12-31 23:59:59', 1),
+(2, 2, 69.00, 24, '2026-07-01 00:00:00', '2026-12-31 23:59:59', 1),
+(3, 3, 79.00, 16, '2026-07-01 00:00:00', '2026-12-31 23:59:59', 1);
+
 -- ============================================================
 -- 秒杀订单 (手动分配 ID，因为该表没有自增)
 -- ============================================================
-insert into seckill_orders(id, activity_id, product_id, user_id, amount, status) values
+insert into order_seckill_equipment(id, seckill_id, equipment_id, user_id, amount, status) values
 (1001, 1, 1, 1, 399.00, '已抢到'),
 (1002, 2, 3, 7, 299.00, '已抢到'),
 (1003, 3, 9, 8, 79.00, '已抢到'),
@@ -308,6 +313,9 @@ insert into seckill_orders(id, activity_id, product_id, user_id, amount, status)
 (1005, 2, 3, 2, 299.00, '已抢到'),
 (1006, 3, 9, 3, 79.00, '已抢到'),
 (1007, 4, 10, 4, 349.00, '已抢到');
+
+insert into order_seckill_venue(id, seckill_id, venue_id, user_id, amount, status) values
+(2001, 1, 1, 5, 29.00, '已抢到');
 
 -- ============================================================
 -- 球员档案 (10 个用户各有档案)
@@ -366,7 +374,7 @@ insert into sport_activity_members(activity_id, user_id, role, status) values
 -- ============================================================
 -- 购物车
 -- ============================================================
-insert into cart_items(user_id, product_id, quantity) values
+insert into cart_equipment(user_id, product_id, quantity) values
 (1, 4, 2),
 (1, 12, 1),
 (7, 2, 1),
@@ -378,7 +386,7 @@ insert into cart_items(user_id, product_id, quantity) values
 -- ============================================================
 -- 商品订单
 -- ============================================================
-insert into orders(id, user_id, total_amount, status, address, paid_at) values
+insert into order_equipment(id, user_id, total_amount, status, address, paid_at) values
 (1, 1, 251.00, '已支付', '杭州市西湖区文三路 398 号', '2026-06-20 20:18:00'),
 (2, 4, 338.00, '已支付', '北京市朝阳区望京街 9 号', '2026-06-25 15:30:00'),
 (3, 7, 488.00, '已支付', '杭州市余杭区文一西路 1888 号', '2026-06-28 10:45:00'),
@@ -387,7 +395,7 @@ insert into orders(id, user_id, total_amount, status, address, paid_at) values
 -- ============================================================
 -- 订单明细
 -- ============================================================
-insert into order_items(order_id, product_id, product_name, cover_url, price, quantity) values
+insert into order_equipment_item(order_id, product_id, product_name, cover_url, price, quantity) values
 -- 订单 1: 陈予
 (1, 4, '耐打训练 77 速羽毛球 12 只装', 'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?auto=format&fit=crop&w=900&q=80', 86.00, 2),
 (1, 12, '髌骨带护膝套装', 'https://images.unsplash.com/photo-1571019613914-85f342c6a11e?auto=format&fit=crop&w=900&q=80', 79.00, 1),

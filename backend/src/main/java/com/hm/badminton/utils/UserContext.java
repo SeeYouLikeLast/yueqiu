@@ -24,7 +24,7 @@ public class UserContext {
     }
 
     public Long requireUserId() {
-        return require().id();
+        return require().getId();
     }
 
     public void clear() {

@@ -1,27 +1,42 @@
 set names utf8mb4;
 
-drop table if exists sport_activity_members;
-drop table if exists sport_activities;
-drop table if exists player_profiles;
-drop table if exists file_metadata;
+-- Legacy table names kept here only for clean development re-initialization.
+drop table if exists seckill_orders;
+drop table if exists seckill_activities;
 drop table if exists venue_orders;
 drop table if exists venue_product_inventory;
 drop table if exists venue_products;
-drop table if exists coaches;
-drop table if exists seckill_orders;
-drop table if exists seckill_activities;
 drop table if exists order_items;
 drop table if exists orders;
 drop table if exists cart_items;
 drop table if exists products;
 drop table if exists product_categories;
+drop table if exists venues;
+
+drop table if exists sport_activity_members;
+drop table if exists sport_activities;
+drop table if exists player_profiles;
+drop table if exists file_metadata;
+drop table if exists order_venue;
+drop table if exists venue_inventory;
+drop table if exists venue;
+drop table if exists coaches;
+drop table if exists order_seckill_venue;
+drop table if exists seckill_venue;
+drop table if exists order_seckill_equipment;
+drop table if exists seckill_equipment;
+drop table if exists order_equipment_item;
+drop table if exists order_equipment;
+drop table if exists cart_equipment;
+drop table if exists equipment;
+drop table if exists equipment_categories;
 drop table if exists blogs;
 drop table if exists follows;
 drop table if exists venue_favorites;
 drop table if exists venue_reviews;
 drop table if exists venue_time_slots;
 drop table if exists venue_courts;
-drop table if exists venues;
+drop table if exists place;
 drop table if exists users;
 
 create table users (
@@ -54,7 +69,7 @@ create table follows (
   key idx_follow_target (follow_user_id)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table venues (
+create table place (
   id bigint primary key auto_increment,
   sport_code varchar(32) not null default 'badminton',
   name varchar(128) not null,
@@ -146,7 +161,7 @@ create table coaches (
   key idx_coaches_venue (venue_id, sport_code)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table venue_products (
+create table venue (
   id bigint primary key auto_increment,
   venue_id bigint null,
   amap_place_id varchar(128) null,
@@ -167,13 +182,13 @@ create table venue_products (
   status tinyint not null default 1,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,
-  key idx_venue_products_place (amap_place_id, sport_code, status),
-  key idx_venue_products_venue (venue_id, sport_code, status),
-  key idx_venue_products_rank (place_rank, sport_code, status),
-  key idx_venue_products_type (sport_code, product_type, status)
+  key idx_venue_place (amap_place_id, sport_code, status),
+  key idx_venue_venue (venue_id, sport_code, status),
+  key idx_venue_rank (place_rank, sport_code, status),
+  key idx_venue_type (sport_code, product_type, status)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table venue_product_inventory (
+create table venue_inventory (
   id bigint primary key auto_increment,
   product_id bigint not null,
   venue_id bigint null,
@@ -195,7 +210,7 @@ create table venue_product_inventory (
   key idx_inventory_status (status, available_stock)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table venue_orders (
+create table order_venue (
   id bigint primary key auto_increment,
   user_id bigint not null,
   product_id bigint not null,
@@ -215,12 +230,12 @@ create table venue_orders (
   used_at datetime null,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,
-  key idx_venue_orders_user (user_id, created_at),
-  key idx_venue_orders_product (product_id, inventory_id),
-  key idx_venue_orders_verify (verify_code)
+  key idx_order_venue_user (user_id, created_at),
+  key idx_order_venue_product (product_id, inventory_id),
+  key idx_order_venue_verify (verify_code)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table product_categories (
+create table equipment_categories (
   id bigint primary key auto_increment,
   sport_code varchar(32) not null default 'badminton',
   name varchar(64) not null,
@@ -229,7 +244,7 @@ create table product_categories (
   key idx_categories_sport (sport_code, sort)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table products (
+create table equipment (
   id bigint primary key auto_increment,
   sport_code varchar(32) not null default 'badminton',
   category_id bigint not null,
@@ -271,7 +286,7 @@ create table blogs (
   key idx_blogs_related (related_type, related_id)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table cart_items (
+create table cart_equipment (
   id bigint primary key auto_increment,
   user_id bigint not null,
   product_id bigint not null,
@@ -282,7 +297,7 @@ create table cart_items (
   key idx_cart_user (user_id)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table orders (
+create table order_equipment (
   id bigint primary key auto_increment,
   user_id bigint not null,
   total_amount decimal(10, 2) not null,
@@ -294,7 +309,7 @@ create table orders (
   key idx_orders_user (user_id, created_at)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table order_items (
+create table order_equipment_item (
   id bigint primary key auto_increment,
   order_id bigint not null,
   product_id bigint not null,
@@ -302,12 +317,12 @@ create table order_items (
   cover_url varchar(512) not null,
   price decimal(10, 2) not null,
   quantity int not null,
-  key idx_order_items_order (order_id)
+  key idx_order_equipment_item_order (order_id)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table seckill_activities (
+create table seckill_equipment (
   id bigint primary key auto_increment,
-  product_id bigint not null,
+  equipment_id bigint not null,
   seckill_price decimal(10, 2) not null,
   stock int not null,
   start_at datetime not null,
@@ -318,16 +333,41 @@ create table seckill_activities (
   key idx_seckill_time (start_at, end_at, status)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table seckill_orders (
+create table order_seckill_equipment (
   id bigint primary key,
-  activity_id bigint not null,
-  product_id bigint not null,
+  seckill_id bigint not null,
+  equipment_id bigint not null,
   user_id bigint not null,
   amount decimal(10, 2) not null,
   status varchar(16) not null default '已抢到',
   created_at datetime not null default current_timestamp,
-  unique key uk_seckill_user_activity (user_id, activity_id),
-  key idx_seckill_orders_user (user_id, created_at)
+  unique key uk_seckill_equipment_user (user_id, seckill_id),
+  key idx_order_seckill_equipment_user (user_id, created_at)
+) engine=InnoDB default charset=utf8mb4;
+
+create table seckill_venue (
+  id bigint primary key auto_increment,
+  venue_id bigint not null,
+  seckill_price decimal(10, 2) not null,
+  stock int not null,
+  start_at datetime not null,
+  end_at datetime not null,
+  status tinyint not null default 1,
+  created_at datetime not null default current_timestamp,
+  updated_at datetime not null default current_timestamp on update current_timestamp,
+  key idx_seckill_venue_time (start_at, end_at, status)
+) engine=InnoDB default charset=utf8mb4;
+
+create table order_seckill_venue (
+  id bigint primary key,
+  seckill_id bigint not null,
+  venue_id bigint not null,
+  user_id bigint not null,
+  amount decimal(10, 2) not null,
+  status varchar(16) not null default '已抢到',
+  created_at datetime not null default current_timestamp,
+  unique key uk_seckill_venue_user (user_id, seckill_id),
+  key idx_order_seckill_venue_user (user_id, created_at)
 ) engine=InnoDB default charset=utf8mb4;
 
 create table player_profiles (

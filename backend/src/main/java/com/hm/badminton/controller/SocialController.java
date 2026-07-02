@@ -44,11 +44,11 @@ public class SocialController {
         LoginUser user = userContext.current().orElse(null);
         return ApiResponse.ok(socialService.players(
                 sport,
-                firstText(city, user == null ? null : user.city()),
+                firstText(city, user == null ? null : user.getCity()),
                 area,
                 level,
-                lng == null && user != null ? user.longitude() : lng,
-                lat == null && user != null ? user.latitude() : lat,
+                lng == null && user != null ? user.getLongitude() : lng,
+                lat == null && user != null ? user.getLatitude() : lat,
                 page,
                 size));
     }
@@ -71,7 +71,7 @@ public class SocialController {
                                                              @RequestParam(defaultValue = "1") int page,
                                                              @RequestParam(defaultValue = "12") int size) {
         LoginUser user = userContext.current().orElse(null);
-        return ApiResponse.ok(socialService.activities(sport, firstText(city, user == null ? null : user.city()), level, page, size));
+        return ApiResponse.ok(socialService.activities(sport, firstText(city, user == null ? null : user.getCity()), level, page, size));
     }
 
     @GetMapping("/activities/{id}")

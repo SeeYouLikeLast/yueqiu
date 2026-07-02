@@ -2,11 +2,24 @@ package com.hm.badminton.entity;
 
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.experimental.Accessors;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(callSuper = false)
+@Accessors(chain = true)
 @TableName("player_profiles")
-public class PlayerProfileEntity {
+public class PlayerProfileEntity implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @TableId
     private Long userId;
@@ -22,108 +35,4 @@ public class PlayerProfileEntity {
     private Boolean allowInvite;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-
-    public Long getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Long userId) {
-        this.userId = userId;
-    }
-
-    public String getSportCode() {
-        return sportCode;
-    }
-
-    public void setSportCode(String sportCode) {
-        this.sportCode = sportCode;
-    }
-
-    public String getCity() {
-        return city;
-    }
-
-    public void setCity(String city) {
-        this.city = city;
-    }
-
-    public String getArea() {
-        return area;
-    }
-
-    public void setArea(String area) {
-        this.area = area;
-    }
-
-    public Double getLongitude() {
-        return longitude;
-    }
-
-    public void setLongitude(Double longitude) {
-        this.longitude = longitude;
-    }
-
-    public Double getLatitude() {
-        return latitude;
-    }
-
-    public void setLatitude(Double latitude) {
-        this.latitude = latitude;
-    }
-
-    public String getLevel() {
-        return level;
-    }
-
-    public void setLevel(String level) {
-        this.level = level;
-    }
-
-    public String getPlayStyle() {
-        return playStyle;
-    }
-
-    public void setPlayStyle(String playStyle) {
-        this.playStyle = playStyle;
-    }
-
-    public String getAvailableTime() {
-        return availableTime;
-    }
-
-    public void setAvailableTime(String availableTime) {
-        this.availableTime = availableTime;
-    }
-
-    public String getIntro() {
-        return intro;
-    }
-
-    public void setIntro(String intro) {
-        this.intro = intro;
-    }
-
-    public Boolean getAllowInvite() {
-        return allowInvite;
-    }
-
-    public void setAllowInvite(Boolean allowInvite) {
-        this.allowInvite = allowInvite;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 }

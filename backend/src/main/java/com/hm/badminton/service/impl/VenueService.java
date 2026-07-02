@@ -9,6 +9,9 @@ import com.hm.badminton.service.IVenueService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -62,12 +65,12 @@ public class VenueService implements IVenueService {
     }
 
     @Transactional
-    @CacheEvict(value = "venue", key = "#request.venueId()")
+    @CacheEvict(value = "venue", key = "#request.getVenueId()")
     public VenueReview createReview(Long userId, ReviewRequest request) {
-        detail(request.venueId());
-        venueMapper.insertReview(userId, request.venueId(), request.rating(), request.content(), request.imageUrls());
-        venueMapper.refreshVenueRating(request.venueId());
-        return reviews(request.venueId(), 1, 1).getFirst();
+        detail(request.getVenueId());
+        venueMapper.insertReview(userId, request.getVenueId(), request.getRating(), request.getContent(), request.getImageUrls());
+        venueMapper.refreshVenueRating(request.getVenueId());
+        return reviews(request.getVenueId(), 1, 1).getFirst();
     }
 
     public boolean toggleFavorite(Long userId, Long venueId) {
@@ -88,39 +91,52 @@ public class VenueService implements IVenueService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    public record ReviewRequest(
-            Long venueId,
-            @Min(1) @Max(5) Integer rating,
-            @NotBlank String content,
-            String imageUrls) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReviewRequest {
+        private Long venueId;
+        @Min(1)
+        @Max(5)
+        private Integer rating;
+        @NotBlank
+        private String content;
+        private String imageUrls;
     }
 
-    public record VenueCreateRequest(
-            @NotBlank String name,
-            @NotBlank String city,
-            @NotBlank String area,
-            @NotBlank String address,
-            BigDecimal longitude,
-            BigDecimal latitude,
-            Integer avgPrice,
-            String openHours,
-            String coverUrl,
-            String facilities) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VenueCreateRequest {
+        @NotBlank
+        private String name;
+        @NotBlank
+        private String city;
+        @NotBlank
+        private String area;
+        @NotBlank
+        private String address;
+        private BigDecimal longitude;
+        private BigDecimal latitude;
+        private Integer avgPrice;
+        private String openHours;
+        private String coverUrl;
+        private String facilities;
     }
 
     @Transactional
     public Long createVenue(VenueCreateRequest request) {
         VenueMapper.InsertVenueRow row = new VenueMapper.InsertVenueRow();
-        row.setName(request.name());
-        row.setCity(request.city());
-        row.setArea(request.area());
-        row.setAddress(request.address());
-        row.setLongitude(request.longitude());
-        row.setLatitude(request.latitude());
-        row.setAvgPrice(request.avgPrice() == null ? 60 : request.avgPrice());
-        row.setOpenHours(request.openHours());
-        row.setCoverUrl(request.coverUrl());
-        row.setFacilities(request.facilities());
+        row.setName(request.getName());
+        row.setCity(request.getCity());
+        row.setArea(request.getArea());
+        row.setAddress(request.getAddress());
+        row.setLongitude(request.getLongitude());
+        row.setLatitude(request.getLatitude());
+        row.setAvgPrice(request.getAvgPrice() == null ? 60 : request.getAvgPrice());
+        row.setOpenHours(request.getOpenHours());
+        row.setCoverUrl(request.getCoverUrl());
+        row.setFacilities(request.getFacilities());
         venueMapper.insertVenue(row);
         return row.getId();
     }

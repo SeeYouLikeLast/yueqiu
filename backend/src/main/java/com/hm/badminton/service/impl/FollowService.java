@@ -56,10 +56,10 @@ public class FollowService extends ServiceImpl<FollowMapper, Follow> implements 
             if (isFollowed(userId, followUserId)) {
                 return;
             }
-            Follow record = new Follow();
-            record.setUserId(userId);
-            record.setFollowUserId(followUserId);
-            save(record);
+            Follow followRecord = new Follow();
+            followRecord.setUserId(userId);
+            followRecord.setFollowUserId(followUserId);
+            save(followRecord);
             redisTemplate.opsForSet().add(key, String.valueOf(followUserId));
         } else {
             remove(new LambdaQueryWrapper<Follow>()

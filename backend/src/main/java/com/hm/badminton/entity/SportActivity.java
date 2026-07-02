@@ -1,25 +1,39 @@
 package com.hm.badminton.entity;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.experimental.Accessors;
+
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
-public record SportActivity(
-        Long id,
-        Long creatorId,
-        String creatorName,
-        String sportCode,
-        Long venueId,
-        String placeSource,
-        String placeId,
-        String venueName,
-        String title,
-        String city,
-        LocalDateTime startTime,
-        LocalDateTime endTime,
-        Integer maxPlayers,
-        Integer currentPlayers,
-        String levelRequired,
-        String feeType,
-        String status,
-        LocalDateTime createdAt) {
-}
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(callSuper = false)
+@Accessors(chain = true)
+public class SportActivity implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
+    private Long id;
+    private Long creatorId;
+    private String creatorName;
+    private String sportCode;
+    private Long venueId;
+    private String placeSource;
+    private String placeId;
+    private String venueName;
+    private String title;
+    private String city;
+    private LocalDateTime startTime;
+    private LocalDateTime endTime;
+    private Integer maxPlayers;
+    private Integer currentPlayers;
+    private String levelRequired;
+    private String feeType;
+    private String status;
+    private LocalDateTime createdAt;
+}

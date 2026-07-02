@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.constants.MqConstants;
 import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.constants.TradeType;
 import com.hm.badminton.dto.SeckillOrderMessage;
 import com.hm.badminton.entity.SeckillActivity;
 import com.hm.badminton.entity.SeckillOrder;
@@ -70,23 +71,28 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
                 """, Long.class);
     }
 
-    public List<SeckillActivity> list(String sportCode, Long categoryId) {
+    public List<SeckillActivity> list(Integer type, String sportCode, Long categoryId) {
         String normalizedSport = sportCode == null || sportCode.isBlank() ? null : sportCode.trim();
-        return seckillMapper.selectActivities(normalizedSport, categoryId);
+        int tradeType = TradeType.require(type);
+        if (tradeType == TradeType.VENUE) {
+            return seckillMapper.selectVenueActivities(normalizedSport);
+        }
+        return seckillMapper.selectEquipmentActivities(normalizedSport, categoryId);
     }
 
-    public Long submit(Long userId, Long activityId) {
-        SeckillActivity activity = getActivity(activityId);
+    public Long submit(Long userId, Integer type, Long activityId) {
+        int tradeType = TradeType.require(type);
+        SeckillActivity activity = getActivity(tradeType, activityId);
         validateActivityTime(activity);
 
-        RLock lock = redissonClient.getLock(RedisConstants.SECKILL_ORDER_LOCK_KEY + activityId + ":" + userId);
+        RLock lock = redissonClient.getLock(RedisConstants.SECKILL_ORDER_LOCK_KEY + tradeType + ":" + activityId + ":" + userId);
         if (!tryUserLock(lock)) {
             throw new BusinessException(409, "每人限购一件，请勿重复抢购");
         }
 
         boolean preDeducted = false;
         try {
-            Long code = tryRedisPreDeduct(userId, activityId);
+            Long code = tryRedisPreDeduct(userId, tradeType, activityId);
             if (code == null) {
                 throw new BusinessException(503, "秒杀系统繁忙，请稍后再试");
             }
@@ -101,14 +107,15 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             long orderId = idGenerator.nextId();
             sendSeckillOrderMessage(new SeckillOrderMessage(
                     orderId,
-                    activity.id(),
-                    activity.productId(),
+                    tradeType,
+                    activity.getId(),
+                    activity.getProductId(),
                     userId,
-                    activity.seckillPrice()));
+                    activity.getSeckillPrice()));
             return orderId;
         } catch (RuntimeException e) {
             if (preDeducted) {
-                rollbackRedisPreDeduct(userId, activityId);
+                rollbackRedisPreDeduct(userId, tradeType, activityId);
             }
             throw e;
         } finally {
@@ -116,24 +123,30 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         }
     }
 
-    public SeckillOrder order(Long userId, Long orderId) {
-        SeckillOrder order = seckillMapper.selectOrder(userId, orderId);
+    public SeckillOrder order(Long userId, Integer type, Long orderId) {
+        int tradeType = TradeType.require(type);
+        SeckillOrder order = tradeType == TradeType.VENUE
+                ? seckillMapper.selectVenueOrder(userId, orderId)
+                : seckillMapper.selectEquipmentOrder(userId, orderId);
         if (order == null) {
             throw new BusinessException(404, "秒杀订单不存在，可能仍在排队创建中");
         }
         return order;
     }
 
-    public List<SeckillOrder> myOrders(Long userId) {
-        return seckillMapper.selectOrdersByUser(userId);
+    public List<SeckillOrder> myOrders(Long userId, Integer type) {
+        int tradeType = TradeType.require(type);
+        return tradeType == TradeType.VENUE
+                ? seckillMapper.selectVenueOrdersByUser(userId)
+                : seckillMapper.selectEquipmentOrdersByUser(userId);
     }
 
     private void validateActivityTime(SeckillActivity activity) {
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(activity.startAt())) {
+        if (now.isBefore(activity.getStartAt())) {
             throw new BusinessException("秒杀还未开始");
         }
-        if (now.isAfter(activity.endAt())) {
+        if (now.isAfter(activity.getEndAt())) {
             throw new BusinessException("秒杀已结束");
         }
     }
@@ -165,18 +178,18 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             String payload = objectMapper.writeValueAsString(message);
             rocketMQTemplate.syncSend(MqConstants.SECKILL_ORDER_TOPIC, payload, 3000);
         } catch (JsonProcessingException e) {
-            log.warn("秒杀订单消息序列化失败，orderId={}：{}", message.orderId(), e.getMessage());
+            log.warn("秒杀订单消息序列化失败，orderId={}：{}", message.getOrderId(), e.getMessage());
             throw new BusinessException(503, "秒杀请求排队失败，请稍后再试");
         } catch (Exception e) {
-            log.warn("秒杀订单消息发送失败，orderId={}：{}", message.orderId(), e.getMessage());
+            log.warn("秒杀订单消息发送失败，orderId={}：{}", message.getOrderId(), e.getMessage());
             throw new BusinessException(503, "秒杀请求排队失败，请稍后再试");
         }
     }
 
-    private Long tryRedisPreDeduct(Long userId, Long activityId) {
+    private Long tryRedisPreDeduct(Long userId, int type, Long activityId) {
         try {
             return redisTemplate.execute(seckillScript,
-                    List.of(RedisConstants.SECKILL_STOCK_KEY + activityId, RedisConstants.SECKILL_USER_KEY + activityId),
+                    List.of(stockKey(type, activityId), userKey(type, activityId)),
                     String.valueOf(userId));
         } catch (Exception e) {
             log.warn("Redis 秒杀预扣失败：{}", e.getMessage());
@@ -184,17 +197,19 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         }
     }
 
-    private void rollbackRedisPreDeduct(Long userId, Long activityId) {
+    private void rollbackRedisPreDeduct(Long userId, int type, Long activityId) {
         try {
-            redisTemplate.opsForValue().increment(RedisConstants.SECKILL_STOCK_KEY + activityId);
-            redisTemplate.opsForSet().remove(RedisConstants.SECKILL_USER_KEY + activityId, String.valueOf(userId));
+            redisTemplate.opsForValue().increment(stockKey(type, activityId));
+            redisTemplate.opsForSet().remove(userKey(type, activityId), String.valueOf(userId));
         } catch (Exception e) {
             log.warn("秒杀 Redis 预扣回滚失败，userId={}, activityId={}：{}", userId, activityId, e.getMessage());
         }
     }
 
-    private SeckillActivity getActivity(Long activityId) {
-        SeckillActivity activity = seckillMapper.selectActivity(activityId);
+    private SeckillActivity getActivity(int type, Long activityId) {
+        SeckillActivity activity = type == TradeType.VENUE
+                ? seckillMapper.selectVenueActivity(activityId)
+                : seckillMapper.selectEquipmentActivity(activityId);
         if (activity == null) {
             throw new BusinessException(404, "秒杀活动不存在");
         }
@@ -204,18 +219,13 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
-            for (SeckillActivity activity : list(null, null)) {
-                String stockKey = RedisConstants.SECKILL_STOCK_KEY + activity.id();
-                String userKey = RedisConstants.SECKILL_USER_KEY + activity.id();
-                Duration ttl = seckillCacheTtl(activity);
-
-                redisTemplate.opsForValue().set(stockKey, String.valueOf(activity.stock()), ttl);
-                redisTemplate.delete(userKey);
-                List<Long> userIds = seckillMapper.selectUserIdsByActivity(activity.id());
-                if (!userIds.isEmpty()) {
-                    redisTemplate.opsForSet().add(userKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
-                }
-                redisTemplate.expire(userKey, ttl);
+            for (SeckillActivity activity : list(TradeType.EQUIPMENT, null, null)) {
+                deleteLegacyActivityKeys(activity.getId());
+                preloadActivity(activity, seckillMapper.selectEquipmentUserIdsByActivity(activity.getId()));
+            }
+            for (SeckillActivity activity : list(TradeType.VENUE, null, null)) {
+                deleteLegacyActivityKeys(activity.getId());
+                preloadActivity(activity, seckillMapper.selectVenueUserIdsByActivity(activity.getId()));
             }
             log.info("秒杀库存和一人一单集合已预热到 Redis");
         } catch (Exception e) {
@@ -223,8 +233,36 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         }
     }
 
+    private void preloadActivity(SeckillActivity activity, List<Long> userIds) {
+        String stockKey = stockKey(activity.getType(), activity.getId());
+        String userKey = userKey(activity.getType(), activity.getId());
+        Duration ttl = seckillCacheTtl(activity);
+
+        redisTemplate.opsForValue().set(stockKey, String.valueOf(activity.getStock()), ttl);
+        redisTemplate.delete(userKey);
+        if (!userIds.isEmpty()) {
+            redisTemplate.opsForSet().add(userKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
+        }
+        redisTemplate.expire(userKey, ttl);
+    }
+
+    private void deleteLegacyActivityKeys(Long activityId) {
+        redisTemplate.delete(List.of(
+                RedisConstants.SECKILL_STOCK_KEY + activityId,
+                RedisConstants.SECKILL_USER_KEY + activityId
+        ));
+    }
+
+    private String stockKey(int type, Long activityId) {
+        return RedisConstants.SECKILL_STOCK_KEY + type + ":" + activityId;
+    }
+
+    private String userKey(int type, Long activityId) {
+        return RedisConstants.SECKILL_USER_KEY + type + ":" + activityId;
+    }
+
     private Duration seckillCacheTtl(SeckillActivity activity) {
-        Duration untilEnd = Duration.between(LocalDateTime.now(), activity.endAt());
+        Duration untilEnd = Duration.between(LocalDateTime.now(), activity.getEndAt());
         Duration base = untilEnd.isNegative() || untilEnd.isZero()
                 ? SECKILL_KEY_KEEP_AFTER_END
                 : untilEnd.plus(SECKILL_KEY_KEEP_AFTER_END);

@@ -1,5 +1,7 @@
 package com.hm.badminton.mapper;
 
+import lombok.Data;
+
 import com.hm.badminton.entity.FileMetadata;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
@@ -100,6 +102,8 @@ public interface FileMetadataMapper {
     @Update("update file_metadata set status = '已删除', updated_at = now() where id = #{id}")
     int markDeleted(@Param("id") Long id);
 
+    @Data
+
     class InsertFileMetadataRow {
         private Long id;
         private Long ownerUserId;
@@ -112,28 +116,5 @@ public interface FileMetadataMapper {
         private Long fileSize;
         private String etag;
         private String publicUrl;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public Long getOwnerUserId() { return ownerUserId; }
-        public void setOwnerUserId(Long ownerUserId) { this.ownerUserId = ownerUserId; }
-        public String getBizType() { return bizType; }
-        public void setBizType(String bizType) { this.bizType = bizType; }
-        public Long getBizId() { return bizId; }
-        public void setBizId(Long bizId) { this.bizId = bizId; }
-        public String getBucketName() { return bucketName; }
-        public void setBucketName(String bucketName) { this.bucketName = bucketName; }
-        public String getObjectName() { return objectName; }
-        public void setObjectName(String objectName) { this.objectName = objectName; }
-        public String getOriginalFilename() { return originalFilename; }
-        public void setOriginalFilename(String originalFilename) { this.originalFilename = originalFilename; }
-        public String getContentType() { return contentType; }
-        public void setContentType(String contentType) { this.contentType = contentType; }
-        public Long getFileSize() { return fileSize; }
-        public void setFileSize(Long fileSize) { this.fileSize = fileSize; }
-        public String getEtag() { return etag; }
-        public void setEtag(String etag) { this.etag = etag; }
-        public String getPublicUrl() { return publicUrl; }
-        public void setPublicUrl(String publicUrl) { this.publicUrl = publicUrl; }
     }
 }

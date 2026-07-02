@@ -154,8 +154,8 @@ public class AmapPlaceService implements IAmapPlaceService {
         return new AmapPlace(
                 id,
                 text(poi, "name"),
-                actualSport.code(),
-                actualSport.name(),
+                actualSport.getCode(),
+                actualSport.getName(),
                 text(poi, "cityname"),
                 text(poi, "adname"),
                 text(poi, "address"),
@@ -167,21 +167,21 @@ public class AmapPlaceService implements IAmapPlaceService {
                 businessArea,
                 openHours,
                 coverUrl,
-                tags(actualSport.name(), type, businessArea),
+                tags(actualSport.getName(), type, businessArea),
                 AMAP_SOURCE);
     }
 
     private String buildKeywords(SportType sport, String keyword) {
-        if (isAllSport(sport.code()) && keyword != null && !keyword.isBlank()) {
+        if (isAllSport(sport.getCode()) && keyword != null && !keyword.isBlank()) {
             return keyword.trim();
         }
         if (keyword == null || keyword.isBlank()) {
-            return String.join("|", sport.keywords());
+            return String.join("|", sport.getKeywords());
         }
         String trimmed = keyword.trim();
-        boolean alreadySportKeyword = sport.keywords().stream().anyMatch(trimmed::contains)
-                || trimmed.contains(sport.name());
-        return alreadySportKeyword ? trimmed : trimmed + " " + sport.name();
+        boolean alreadySportKeyword = sport.getKeywords().stream().anyMatch(trimmed::contains)
+                || trimmed.contains(sport.getName());
+        return alreadySportKeyword ? trimmed : trimmed + " " + sport.getName();
     }
 
     private SportType searchSport(String sportCode) {
@@ -189,20 +189,20 @@ public class AmapPlaceService implements IAmapPlaceService {
             return sportCatalogService.require(sportCode);
         }
         List<String> keywords = sportCatalogService.list().stream()
-                .flatMap(sport -> sport.keywords().stream())
+                .flatMap(sport -> sport.getKeywords().stream())
                 .distinct()
                 .toList();
         return new SportType("all", "全部运动", keywords);
     }
 
     private SportType detectSport(JsonNode poi, SportType requestedSport) {
-        if (!isAllSport(requestedSport.code())) {
+        if (!isAllSport(requestedSport.getCode())) {
             return requestedSport;
         }
         String haystack = (text(poi, "name") + " " + text(poi, "type") + " " + text(poi, "address"));
         return sportCatalogService.list().stream()
-                .filter(sport -> haystack.contains(sport.name())
-                        || sport.keywords().stream().anyMatch(haystack::contains))
+                .filter(sport -> haystack.contains(sport.getName())
+                        || sport.getKeywords().stream().anyMatch(haystack::contains))
                 .findFirst()
                 .orElse(requestedSport);
     }

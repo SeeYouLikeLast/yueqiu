@@ -1,11 +1,19 @@
 package com.hm.badminton.dto;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.math.BigDecimal;
 
-public record SeckillOrderMessage(
-        Long orderId,
-        Long activityId,
-        Long productId,
-        Long userId,
-        BigDecimal amount) {
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class SeckillOrderMessage {
+    private Long orderId;
+    private Integer type;
+    private Long activityId;
+    private Long productId;
+    private Long userId;
+    private BigDecimal amount;
 }

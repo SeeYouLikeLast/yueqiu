@@ -19,6 +19,9 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -67,7 +70,7 @@ public class AuthService implements IAuthService {
     }
 
     public CodeResponse sendCode(CodeRequest request) {
-        String phone = normalizePhone(request.phone());
+        String phone = normalizePhone(request.getPhone());
         assertPhone(phone);
         String code = String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
         redisTemplate.opsForValue().set(RedisConstants.LOGIN_CODE_KEY + phone, code, codeTtl);
@@ -76,19 +79,19 @@ public class AuthService implements IAuthService {
 
     @Transactional
     public LoginResponse register(RegisterRequest request) {
-        String phone = normalizePhone(request.phone());
-        String email = normalizeEmail(request.email());
-        String username = normalizeUsername(request.username());
+        String phone = normalizePhone(request.getPhone());
+        String email = normalizeEmail(request.getEmail());
+        String username = normalizeUsername(request.getUsername());
         assertUnique(RedisConstants.BLOOM_USER_PHONE_KEY, "phone", phone, "手机号已注册");
         assertUnique(RedisConstants.BLOOM_USER_EMAIL_KEY, "email", email, "邮箱已注册");
         assertUnique(RedisConstants.BLOOM_USER_USERNAME_KEY, "username", username, "用户名已存在");
 
-        String nickname = request.nickname() == null || request.nickname().isBlank()
+        String nickname = request.getNickname() == null || request.getNickname().isBlank()
                 ? "羽友" + phone.substring(phone.length() - 4)
-                : request.nickname().trim();
-        String city = request.city() == null || request.city().isBlank() ? "西安" : request.city().trim();
-        String level = request.level() == null || request.level().isBlank() ? "新手" : request.level().trim();
-        String passwordHash = passwordService.encode(request.password());
+                : request.getNickname().trim();
+        String city = request.getCity() == null || request.getCity().isBlank() ? "西安" : request.getCity().trim();
+        String level = request.getLevel() == null || request.getLevel().isBlank() ? "新手" : request.getLevel().trim();
+        String passwordHash = passwordService.encode(request.getPassword());
 
         UserAccount account = new UserAccount();
         account.setPhone(phone);
@@ -122,16 +125,16 @@ public class AuthService implements IAuthService {
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
-        if ((request.phone() != null && !request.phone().isBlank()) || (request.code() != null && !request.code().isBlank())) {
+        if ((request.getPhone() != null && !request.getPhone().isBlank()) || (request.getCode() != null && !request.getCode().isBlank())) {
             return loginByCode(request);
         }
         return loginByPassword(request);
     }
 
     private LoginResponse loginByCode(LoginRequest request) {
-        String phone = normalizePhone(request.phone());
+        String phone = normalizePhone(request.getPhone());
         assertPhone(phone);
-        String code = request.code() == null ? "" : request.code().trim();
+        String code = request.getCode() == null ? "" : request.getCode().trim();
         String cachedCode = redisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + phone);
         if (cachedCode == null || !cachedCode.equals(code)) {
             throw new BusinessException(401, "验证码错误或已过期");
@@ -146,14 +149,14 @@ public class AuthService implements IAuthService {
     }
 
     private LoginResponse loginByPassword(LoginRequest request) {
-        if (request.account() == null || request.account().isBlank() || request.password() == null || request.password().isBlank()) {
+        if (request.getAccount() == null || request.getAccount().isBlank() || request.getPassword() == null || request.getPassword().isBlank()) {
             throw new BusinessException(400, "手机号和验证码不能为空");
         }
-        String account = request.account().trim().toLowerCase(Locale.ROOT);
+        String account = request.getAccount().trim().toLowerCase(Locale.ROOT);
         UserAccount user = userMapper.selectOne(new QueryWrapper<UserAccount>()
                 .eq("status", 1)
                 .and(wrapper -> wrapper.eq("phone", account).or().eq("email", account).or().eq("username", account)));
-        if (user == null || !passwordService.matches(request.password(), user.getPasswordHash())) {
+        if (user == null || !passwordService.matches(request.getPassword(), user.getPasswordHash())) {
             throw new BusinessException(401, "账号或密码错误");
         }
         LoginUser loginUser = new LoginUser(user.getId(), user.getPhone(), user.getNickname(), user.getCity(), user.getLevel());
@@ -161,7 +164,7 @@ public class AuthService implements IAuthService {
     }
 
     public Map<String, Object> me(LoginUser user) {
-        UserAccount account = userMapper.selectById(user.id());
+        UserAccount account = userMapper.selectById(user.getId());
         if (account == null) {
             throw new BusinessException(404, "用户不存在");
         }
@@ -185,7 +188,7 @@ public class AuthService implements IAuthService {
         if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
             throw new BusinessException(404, "用户不存在");
         }
-        Long currentUserId = currentUser == null ? null : currentUser.id();
+        Long currentUserId = currentUser == null ? null : currentUser.getId();
         boolean isMe = currentUserId != null && currentUserId.equals(userId);
         boolean followed = currentUserId != null && !isMe && followService.isFollowed(currentUserId, userId);
         return new UserPublicProfile(
@@ -206,10 +209,10 @@ public class AuthService implements IAuthService {
             return;
         }
         Map<String, String> values = new HashMap<>();
-        putIfText(values, "city", request.city());
-        putIfText(values, "preciseAddress", request.preciseAddress());
-        if (request.lng() != null) values.put("lng", String.valueOf(request.lng()));
-        if (request.lat() != null) values.put("lat", String.valueOf(request.lat()));
+        putIfText(values, "city", request.getCity());
+        putIfText(values, "preciseAddress", request.getPreciseAddress());
+        if (request.getLng() != null) values.put("lng", String.valueOf(request.getLng()));
+        if (request.getLat() != null) values.put("lat", String.valueOf(request.getLat()));
         if (values.isEmpty()) {
             return;
         }
@@ -217,18 +220,18 @@ public class AuthService implements IAuthService {
         redisTemplate.opsForHash().putAll(key, values);
         redisTemplate.expire(key, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
 
-        if (request.city() != null && !request.city().isBlank()) {
+        if (request.getCity() != null && !request.getCity().isBlank()) {
             UserAccount user = new UserAccount();
             user.setId(userId);
-            user.setCity(request.city().trim());
+            user.setCity(request.getCity().trim());
             userMapper.updateById(user);
         }
-        if (request.city() != null && !request.city().isBlank() && request.lng() != null && request.lat() != null) {
+        if (request.getCity() != null && !request.getCity().isBlank() && request.getLng() != null && request.getLat() != null) {
             PlayerProfileEntity profile = new PlayerProfileEntity();
             profile.setUserId(userId);
-            profile.setCity(request.city().trim());
-            profile.setLongitude(request.lng());
-            profile.setLatitude(request.lat());
+            profile.setCity(request.getCity().trim());
+            profile.setLongitude(request.getLng());
+            profile.setLatitude(request.getLat());
             playerProfileMapper.updateById(profile);
         }
     }
@@ -273,11 +276,11 @@ public class AuthService implements IAuthService {
     private String createLoginToken(LoginUser user) {
         String token = UUID.randomUUID().toString().replace("-", "");
         Map<String, String> userMap = new HashMap<>();
-        userMap.put("id", String.valueOf(user.id()));
-        userMap.put("phone", nullToEmpty(user.phone()));
-        userMap.put("nickname", nullToEmpty(user.nickname()));
-        userMap.put("city", nullToEmpty(user.city()));
-        userMap.put("level", nullToEmpty(user.level()));
+        userMap.put("id", String.valueOf(user.getId()));
+        userMap.put("phone", nullToEmpty(user.getPhone()));
+        userMap.put("nickname", nullToEmpty(user.getNickname()));
+        userMap.put("city", nullToEmpty(user.getCity()));
+        userMap.put("level", nullToEmpty(user.getLevel()));
         redisTemplate.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY + token, userMap);
         redisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
         return token;
@@ -353,30 +356,68 @@ public class AuthService implements IAuthService {
         return username == null || username.isBlank() ? null : username.trim().toLowerCase(Locale.ROOT);
     }
 
-    public record RegisterRequest(
-            @NotBlank(message = "手机号不能为空")
-            @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号格式不正确") String phone,
-            @Email(message = "邮箱格式不正确") String email,
-            @Size(min = 3, max = 24, message = "用户名长度 3-24 位") String username,
-            @NotBlank(message = "密码不能为空") @Size(min = 6, max = 32, message = "密码长度 6-32 位") String password,
-            String nickname,
-            String city,
-            String level) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RegisterRequest {
+        @NotBlank(message = "\u624b\u673a\u53f7\u4e0d\u80fd\u4e3a\u7a7a")
+        @Pattern(regexp = "^1[3-9]\\d{9}$", message = "\u624b\u673a\u53f7\u683c\u5f0f\u4e0d\u6b63\u786e")
+        private String phone;
+        @Email(message = "\u90ae\u7bb1\u683c\u5f0f\u4e0d\u6b63\u786e")
+        private String email;
+        @Size(min = 3, max = 24, message = "\u7528\u6237\u540d\u957f\u5ea6 3-24 \u4f4d")
+        private String username;
+        @NotBlank(message = "\u5bc6\u7801\u4e0d\u80fd\u4e3a\u7a7a")
+        @Size(min = 6, max = 32, message = "\u5bc6\u7801\u957f\u5ea6 6-32 \u4f4d")
+        private String password;
+        private String nickname;
+        private String city;
+        private String level;
     }
 
-    public record CodeRequest(@NotBlank(message = "手机号不能为空") String phone) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CodeRequest {
+        @NotBlank(message = "\u624b\u673a\u53f7\u4e0d\u80fd\u4e3a\u7a7a")
+        private String phone;
     }
 
-    public record CodeResponse(String phone, String code, long expireSeconds) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CodeResponse {
+        private String phone;
+        private String code;
+        private long expireSeconds;
     }
 
-    public record LoginRequest(String account, String password, String phone, String code) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class LoginRequest {
+        private String account;
+        private String password;
+        private String phone;
+        private String code;
     }
 
-    public record LoginResponse(String token, LoginUser user) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class LoginResponse {
+        private String token;
+        private LoginUser user;
     }
 
-    public record LocationRequest(String city, String preciseAddress, Double lng, Double lat) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class LocationRequest {
+        private String city;
+        private String preciseAddress;
+        private Double lng;
+        private Double lat;
     }
 
 }

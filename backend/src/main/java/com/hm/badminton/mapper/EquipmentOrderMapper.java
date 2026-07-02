@@ -1,6 +1,9 @@
 package com.hm.badminton.mapper;
 
 import com.hm.badminton.entity.OrderSummary;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Mapper;
@@ -16,7 +19,7 @@ public interface EquipmentOrderMapper {
 
     @Select("""
             select id, user_id, total_amount, status, address, created_at
-            from orders
+            from order_equipment
             where user_id = #{userId}
             order by created_at desc
             """)
@@ -32,7 +35,7 @@ public interface EquipmentOrderMapper {
 
     @Select("""
             select product_id, product_name, cover_url, price, quantity
-            from order_items
+            from order_equipment_item
             where order_id = #{orderId}
             order by id
             """)
@@ -45,12 +48,15 @@ public interface EquipmentOrderMapper {
     })
     List<OrderSummary.OrderItem> selectItems(@Param("orderId") Long orderId);
 
-    record OrderRow(
-            Long id,
-            Long userId,
-            BigDecimal totalAmount,
-            String status,
-            String address,
-            LocalDateTime createdAt) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    class OrderRow {
+        private Long id;
+        private Long userId;
+        private BigDecimal totalAmount;
+        private String status;
+        private String address;
+        private LocalDateTime createdAt;
     }
 }

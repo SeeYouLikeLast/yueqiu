@@ -131,13 +131,13 @@ public class FileStorageService implements IFileStorageService {
         FileMetadata metadata = detail(id);
         try {
             var stream = minioClient.getObject(GetObjectArgs.builder()
-                    .bucket(metadata.bucketName())
-                    .object(metadata.objectName())
+                    .bucket(metadata.getBucketName())
+                    .object(metadata.getObjectName())
                     .build());
-            String encoded = URLEncoder.encode(metadata.originalFilename(), StandardCharsets.UTF_8).replace("+", "%20");
+            String encoded = URLEncoder.encode(metadata.getOriginalFilename(), StandardCharsets.UTF_8).replace("+", "%20");
             return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(metadata.contentType()))
-                    .contentLength(metadata.fileSize())
+                    .contentType(MediaType.parseMediaType(metadata.getContentType()))
+                    .contentLength(metadata.getFileSize())
                     .header(HttpHeaders.CONTENT_DISPOSITION,
                             ContentDisposition.attachment().filename(encoded, StandardCharsets.UTF_8).build().toString())
                     .body(new InputStreamResource(stream));
@@ -151,8 +151,8 @@ public class FileStorageService implements IFileStorageService {
         try {
             String url = minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
-                    .bucket(metadata.bucketName())
-                    .object(metadata.objectName())
+                    .bucket(metadata.getBucketName())
+                    .object(metadata.getObjectName())
                     .expiry(60 * 30)
                     .build());
             return Map.of("url", url);
@@ -166,8 +166,8 @@ public class FileStorageService implements IFileStorageService {
         FileMetadata metadata = detail(id);
         try {
             minioClient.removeObject(RemoveObjectArgs.builder()
-                    .bucket(metadata.bucketName())
-                    .object(metadata.objectName())
+                    .bucket(metadata.getBucketName())
+                    .object(metadata.getObjectName())
                     .build());
         } catch (Exception e) {
             throw new BusinessException(500, "删除 MinIO 文件失败：" + e.getMessage());

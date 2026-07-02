@@ -22,6 +22,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { api, clearToken, getToken, PageResult, setToken } from './api/client'
+import { locateWithAmapFirst } from './api/amapGeolocation'
 
 type Tab = 'home' | 'seckill' | 'social' | 'equipment' | 'profile'
 type VenueSaleType = '' | 'TIME_PACKAGE' | 'COURT_SLOT' | 'COACH_LESSON'
@@ -52,7 +53,7 @@ type Place = {
   source: string
 }
 
-type VenueProduct = {
+type VenueItem = {
   id: number
   venueId?: number
   amapPlaceId?: string
@@ -72,7 +73,7 @@ type VenueProduct = {
   availableStock: number
 }
 
-type VenueProductInventory = {
+type VenueInventory = {
   id: number
   productId: number
   courtName?: string
@@ -121,6 +122,7 @@ type EquipmentOrder = {
 
 type SeckillOrder = {
   id: number
+  type: number
   activityId: number
   productId: number
   productName: string
@@ -142,7 +144,7 @@ type CartItem = {
   amount: number
 }
 
-type Product = {
+type EquipmentItem = {
   id: number
   sportCode: string
   categoryId: number
@@ -259,6 +261,15 @@ type RegeoLocation = {
 type BlogChannel = 'follow' | 'recommend' | 'sport'
 type ProfileMode = 'me' | 'public'
 
+type ProfileOrderCard = {
+  key: string
+  title: string
+  subtitle: string
+  meta: string
+  amount: number
+  status: string
+  code: string
+}
 type BlogPost = {
   id: number
   userId: number
@@ -317,15 +328,15 @@ const selectedPlace = ref<Place | null>(null)
 const placeDetailTab = ref<'deals' | 'reviews'>('deals')
 const dealFilter = ref<'all' | 'discount'>('all')
 const venueSaleView = ref<{ productType: VenueSaleType; title: string; subtitle: string } | null>(null)
-const venueProducts = ref<Record<string, VenueProduct[]>>({})
-const venueSaleProducts = ref<VenueProduct[]>([])
+const venueItems = ref<Record<string, VenueItem[]>>({})
+const venueSaleItems = ref<VenueItem[]>([])
 const venueReviews = ref<VenueReview[]>([])
-const inventoriesByProduct = ref<Record<number, VenueProductInventory[]>>({})
+const inventoriesByVenueItem = ref<Record<number, VenueInventory[]>>({})
 const categories = ref<Category[]>([])
 const seckillCategories = ref<Category[]>([])
 const productCategorySport = ref('')
 const seckillCategorySport = ref('')
-const products = ref<Product[]>([])
+const products = ref<EquipmentItem[]>([])
 const seckillActivities = ref<SeckillActivity[]>([])
 const blogs = ref<BlogPost[]>([])
 const blogChannel = ref<BlogChannel>('recommend')
@@ -345,7 +356,7 @@ const cartCount = ref(0)
 const cartLoaded = ref(false)
 const ordersLoaded = ref(false)
 const codeCountdown = ref(0)
-const buyingProductId = ref<number | null>(null)
+const buyingVenueItemId = ref<number | null>(null)
 const purchaseNotice = ref('')
 const profileView = ref<ProfileView>('orders')
 const profileMode = ref<ProfileMode>('me')
@@ -374,8 +385,8 @@ const showPhoneHeader = computed(() => !(activeTab.value === 'home' && selectedP
 const showDiscoveryHeader = computed(() => activeTab.value !== 'profile')
 const showCategoryHeader = computed(() => activeTab.value === 'equipment' && Boolean(selectedSport.value))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
-const hasMoreVenueSales = computed(() => venueSaleProducts.value.length < venueSalesTotal.value)
-const hasMoreProducts = computed(() => products.value.length < productsTotal.value)
+const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
+const hasMoreEquipmentItems = computed(() => products.value.length < productsTotal.value)
 const hasMoreSocial = computed(() => players.value.length < playersTotal.value || activities.value.length < activitiesTotal.value)
 const hasMoreBlogs = computed(() => blogs.value.length < blogsTotal.value)
 const hasMoreProfileBlogs = computed(() => profileBlogs.value.length < profileBlogsTotal.value)
@@ -387,15 +398,63 @@ const profileCity = computed(() => profileMode.value === 'public' ? viewedUserPr
 const profileLevel = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.level : userProfile.value?.level)
 const profilePreferTime = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.preferTime : userProfile.value?.prefer_time)
 const profileCreatedAt = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.createdAt : userProfile.value?.created_at)
-const paidVenueOrderList = computed(() => venueOrders.value.filter((order) => order.status === '已支付'))
-const paidEquipmentOrderList = computed(() => equipmentOrders.value.filter((order) => order.status === '已支付'))
-const paidSeckillOrderList = computed(() => seckillOrders.value.filter((order) => ['已支付', '已抢到'].includes(order.status)))
-const profileVenueOrders = computed(() => profileView.value === 'paid' ? paidVenueOrderList.value : venueOrders.value)
-const profileEquipmentOrders = computed(() => profileView.value === 'paid' ? paidEquipmentOrderList.value : equipmentOrders.value)
-const profileSeckillOrders = computed(() => profileView.value === 'paid' ? paidSeckillOrderList.value : seckillOrders.value)
-const selectedPlaceProducts = computed(() => {
+const paidStatus = (status: string) => ['已支付', '已抢到', '已使用'].includes(status)
+const visibleVenueOrders = computed(() => profileView.value === 'paid'
+  ? venueOrders.value.filter((order) => paidStatus(order.status))
+  : venueOrders.value)
+const visibleEquipmentOrders = computed(() => profileView.value === 'paid'
+  ? equipmentOrders.value.filter((order) => paidStatus(order.status))
+  : equipmentOrders.value)
+const visibleSeckillOrders = computed(() => profileView.value === 'paid'
+  ? seckillOrders.value.filter((order) => paidStatus(order.status))
+  : seckillOrders.value)
+const profileVenueOrderCards = computed<ProfileOrderCard[]>(() => [
+  ...visibleVenueOrders.value.map((order) => ({
+    key: `venue-${order.id}`,
+    title: order.productTitle,
+    subtitle: order.venueName,
+    meta: `${order.serviceDate} ${order.startTime.slice(0, 5)}-${order.endTime.slice(0, 5)}`,
+    amount: order.amount,
+    status: order.status,
+    code: order.verifyCode
+  })),
+  ...visibleSeckillOrders.value
+    .filter((order) => order.type === 1)
+    .map((order) => ({
+      key: `seckill-venue-${order.id}`,
+      title: order.productName,
+      subtitle: '秒杀场所',
+      meta: formatDateTime(order.createdAt),
+      amount: order.amount,
+      status: order.status,
+      code: `#${order.id}`
+    }))
+])
+const profileEquipmentOrderCards = computed<ProfileOrderCard[]>(() => [
+  ...visibleSeckillOrders.value
+    .filter((order) => order.type === 2)
+    .map((order) => ({
+      key: `seckill-equipment-${order.id}`,
+      title: order.productName,
+      subtitle: '秒杀装备',
+      meta: formatDateTime(order.createdAt),
+      amount: order.amount,
+      status: order.status,
+      code: `#${order.id}`
+    })),
+  ...visibleEquipmentOrders.value.map((order) => ({
+    key: `equipment-${order.id}`,
+    title: equipmentOrderTitle(order),
+    subtitle: order.address,
+    meta: `${formatDateTime(order.createdAt)} · 共 ${equipmentOrderQuantity(order)} 件`,
+    amount: order.totalAmount,
+    status: order.status,
+    code: `#${order.id}`
+  }))
+])
+const selectedPlaceVenueItems = computed(() => {
   if (!selectedPlace.value) return []
-  const records = saleProducts(selectedPlace.value)
+  const records = saleVenueItems(selectedPlace.value)
   if (dealFilter.value === 'discount') {
     return records.filter((item) => item.originalPrice && Number(item.originalPrice) > Number(item.price))
   }
@@ -645,13 +704,13 @@ function reviewRankFor(place: Place) {
   return (index % VENUE_TEMPLATE_COUNT) + 1
 }
 
-function placeForProduct(product: VenueProduct) {
+function placeForEquipmentItem(product: VenueItem) {
   if (!places.value.length) return null
   const rank = product.placeRank || Number(product.venueName) || 1
   return places.value[(Math.max(1, rank) - 1) % places.value.length] || null
 }
 
-function productWithPlaceContext(product: VenueProduct, place?: Place | null) {
+function productWithPlaceContext(product: VenueItem, place?: Place | null) {
   if (!place) return product
   return {
     ...product,
@@ -688,9 +747,9 @@ async function loadPlaces(page = 1, append = false) {
   }
 }
 
-async function loadVenueProductsForPlace(place: Place) {
-  if (hasLoadedProducts(place)) {
-    return venueProducts.value[place.id] || []
+async function loadVenueItemsForPlace(place: Place) {
+  if (hasLoadedVenueItems(place)) {
+    return venueItems.value[place.id] || []
   }
   try {
     const params = new URLSearchParams({
@@ -699,57 +758,57 @@ async function loadVenueProductsForPlace(place: Place) {
     })
     const productSport = selectedSport.value || place.sportCode
     if (productSport) params.set('sport', productSport)
-    const productsForPlace = await api<VenueProduct[]>(`/api/venue-products?${params}`)
-    const mappedProducts = productsForPlace.map((product) => productWithPlaceContext(product, place))
-    venueProducts.value = {
-      ...venueProducts.value,
-      [place.id]: mappedProducts
+    const productsForPlace = await api<VenueItem[]>(`/api/items/1?${params}`)
+    const mappedVenueItems = productsForPlace.map((product) => productWithPlaceContext(product, place))
+    venueItems.value = {
+      ...venueItems.value,
+      [place.id]: mappedVenueItems
     }
-    return mappedProducts
+    return mappedVenueItems
   } catch {
-    venueProducts.value = {
-      ...venueProducts.value,
+    venueItems.value = {
+      ...venueItems.value,
       [place.id]: []
     }
     return []
   }
 }
 
-async function loadVenueSaleProducts(page = 1, append = false) {
+async function loadVenueSaleItems(page = 1, append = false) {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
-  if (venueSaleView.value?.productType) params.set('productType', venueSaleView.value.productType)
+  if (venueSaleView.value?.productType) params.set('category', venueSaleView.value.productType)
   setTrimmedParam(params, 'keyword', placeQuery.keyword)
   setPagingParams(params, page, 12, 12)
-  const result = await api<PageResult<VenueProduct>>(`/api/venue-products/sales?${params}`)
-  const mappedRecords = result.records.map((product) => productWithPlaceContext(product, placeForProduct(product)))
-  venueSaleProducts.value = append ? appendById(venueSaleProducts.value, mappedRecords) : mappedRecords
+  const result = await api<PageResult<VenueItem>>(`/api/items/1?${params}`)
+  const mappedRecords = result.records.map((product) => productWithPlaceContext(product, placeForEquipmentItem(product)))
+  venueSaleItems.value = append ? appendById(venueSaleItems.value, mappedRecords) : mappedRecords
   venueSalesPage.value = result.page
   venueSalesTotal.value = result.total
 }
 
-async function loadProducts(page = 1, append = false) {
+async function loadEquipmentItems(page = 1, append = false) {
   if (productCategorySport.value !== selectedSport.value) {
-    await loadProductCategories()
+    await loadEquipmentItemCategories()
   }
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
   if (productQuery.categoryId) params.set('categoryId', productQuery.categoryId)
   setTrimmedParam(params, 'keyword', productQuery.keyword)
   setPagingParams(params, page, PRODUCT_PAGE_SIZE, 12)
-  const result = await api<PageResult<Product>>(`/api/equipment/products?${params}`)
+  const result = await api<PageResult<EquipmentItem>>(`/api/items/2?${params}`)
   products.value = append ? appendById(products.value, result.records) : result.records
   productsPage.value = result.page
   productsTotal.value = result.total
 }
 
-async function loadProductCategories() {
+async function loadEquipmentItemCategories() {
   if (!selectedSport.value) {
     categories.value = []
     productCategorySport.value = selectedSport.value
     return
   }
-  categories.value = await api<Category[]>(`/api/equipment/categories?${new URLSearchParams({ sport: selectedSport.value })}`)
+  categories.value = await api<Category[]>(`/api/categories/2?${new URLSearchParams({ sport: selectedSport.value })}`)
   productCategorySport.value = selectedSport.value
 }
 
@@ -757,7 +816,7 @@ async function loadSeckill() {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
   if (productQuery.categoryId) params.set('categoryId', productQuery.categoryId)
-  seckillActivities.value = await api<SeckillActivity[]>(`/api/seckill/activities?${params}`)
+  seckillActivities.value = await api<SeckillActivity[]>(`/api/seckill/2?${params}`)
 }
 
 async function loadBlogs(page = 1, append = false) {
@@ -786,7 +845,7 @@ async function loadSeckillCategories() {
     return
   }
   const categoryParams = new URLSearchParams({ sport: selectedSport.value })
-  seckillCategories.value = await api<Category[]>(`/api/equipment/categories?${categoryParams}`)
+  seckillCategories.value = await api<Category[]>(`/api/categories/2?${categoryParams}`)
   seckillCategorySport.value = selectedSport.value
 }
 
@@ -833,7 +892,7 @@ async function loadVenueOrders() {
     venueOrders.value = []
     return
   }
-  venueOrders.value = await api<VenueOrder[]>('/api/venue/orders')
+  venueOrders.value = await api<VenueOrder[]>('/api/orders/1')
 }
 
 async function loadEquipmentOrders() {
@@ -841,7 +900,7 @@ async function loadEquipmentOrders() {
     equipmentOrders.value = []
     return
   }
-  equipmentOrders.value = await api<EquipmentOrder[]>('/api/equipment/orders')
+  equipmentOrders.value = await api<EquipmentOrder[]>('/api/orders/2')
 }
 
 async function loadSeckillOrders() {
@@ -849,7 +908,11 @@ async function loadSeckillOrders() {
     seckillOrders.value = []
     return
   }
-  seckillOrders.value = await api<SeckillOrder[]>('/api/seckill/orders')
+  const [venueResult, equipmentResult] = await Promise.all([
+    api<SeckillOrder[]>('/api/seckill/1/orders'),
+    api<SeckillOrder[]>('/api/seckill/2/orders')
+  ])
+  seckillOrders.value = [...venueResult, ...equipmentResult]
 }
 
 async function loadOrderBundle(force = false) {
@@ -911,7 +974,7 @@ async function loadMyProfileHome(force = false) {
 async function loadCurrentTab() {
   const tasks: Promise<unknown>[] = []
   if (activeTab.value === 'home') {
-    tasks.push(venueSaleView.value ? loadVenueSaleProducts() : loadPlaces())
+    tasks.push(venueSaleView.value ? loadVenueSaleItems() : loadPlaces())
   }
   if (activeTab.value === 'seckill') {
     tasks.push(loadBlogs())
@@ -921,7 +984,7 @@ async function loadCurrentTab() {
     tasks.push(ensureActivityPlaceOptions())
   }
   if (activeTab.value === 'equipment') {
-    tasks.push(loadProducts())
+    tasks.push(loadEquipmentItems())
     tasks.push(loadSeckill())
   }
   if (activeTab.value === 'profile') {
@@ -946,7 +1009,7 @@ async function loadMoreCurrentTab() {
   if (loading.value || loadingMore.value) return
   if (activeTab.value === 'home' && venueSaleView.value && !hasMoreVenueSales.value) return
   if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value) return
-  if (activeTab.value === 'equipment' && !hasMoreProducts.value) return
+  if (activeTab.value === 'equipment' && !hasMoreEquipmentItems.value) return
   if (activeTab.value === 'social' && !hasMoreSocial.value) return
   if (activeTab.value === 'seckill' && !hasMoreBlogs.value) return
   if (activeTab.value === 'profile' && (!hasMoreProfileBlogs.value || profileOrderPageVisible.value)) return
@@ -956,12 +1019,12 @@ async function loadMoreCurrentTab() {
   try {
     if (activeTab.value === 'home') {
       if (venueSaleView.value) {
-        await loadVenueSaleProducts(venueSalesPage.value + 1, true)
+        await loadVenueSaleItems(venueSalesPage.value + 1, true)
       } else {
         await loadPlaces(placesPage.value + 1, true)
       }
     } else if (activeTab.value === 'equipment') {
-      await loadProducts(productsPage.value + 1, true)
+      await loadEquipmentItems(productsPage.value + 1, true)
     } else if (activeTab.value === 'social') {
       const nextPage = Math.max(playersPage.value, activitiesPage.value) + 1
       await loadSocial(nextPage, true)
@@ -1089,9 +1152,9 @@ async function changeSport(code: string) {
   activityForm.sportCode = code || 'badminton'
   selectedPlace.value = null
   venueReviews.value = []
-  venueSaleProducts.value = []
-  venueProducts.value = {}
-  inventoriesByProduct.value = {}
+  venueSaleItems.value = []
+  venueItems.value = {}
+  inventoriesByVenueItem.value = {}
   products.value = []
   categories.value = []
   seckillCategories.value = []
@@ -1104,13 +1167,13 @@ async function changeSport(code: string) {
   await wrap(loadCurrentTab)
 }
 
-async function selectProductCategory(categoryId: string) {
+async function selectEquipmentItemCategory(categoryId: string) {
   productQuery.categoryId = categoryId
   products.value = []
   productsPage.value = 1
   productsTotal.value = 0
   await wrap(async () => {
-    await Promise.all([loadProducts(), loadSeckill()])
+    await Promise.all([loadEquipmentItems(), loadSeckill()])
   })
 }
 
@@ -1251,7 +1314,7 @@ async function openBlogRelated(blog: BlogPost) {
     productsPage.value = 1
     productsTotal.value = 0
     await wrap(async () => {
-      await Promise.all([loadProducts(), loadSeckill()])
+      await Promise.all([loadEquipmentItems(), loadSeckill()])
     })
     return
   }
@@ -1274,13 +1337,13 @@ function searchPlaces() {
       if (venueSaleView.value) {
         venueSalesPage.value = 1
         venueSalesTotal.value = 0
-        await loadVenueSaleProducts()
+        await loadVenueSaleItems()
         return
       }
       selectedPlace.value = null
       venueReviews.value = []
-      venueProducts.value = {}
-      inventoriesByProduct.value = {}
+      venueItems.value = {}
+      inventoriesByVenueItem.value = {}
       placesPage.value = 1
       placesTotal.value = 0
       await loadPlaces()
@@ -1297,7 +1360,7 @@ function searchPlaces() {
     if (activeTab.value === 'equipment') {
       productsPage.value = 1
       productsTotal.value = 0
-      await Promise.all([loadProducts(), loadSeckill()])
+      await Promise.all([loadEquipmentItems(), loadSeckill()])
       return
     }
     if (activeTab.value === 'seckill') {
@@ -1312,20 +1375,13 @@ function searchPlaces() {
 
 async function useCurrentLocation() {
   await wrap(async () => {
-    if (!navigator.geolocation) throw new Error('当前浏览器不支持定位')
     locating.value = true
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 60000
-        })
-      })
-      const accuracy = Math.round(position.coords.accuracy)
+      const located = await locateWithAmapFirst()
+      const accuracy = Math.round(located.accuracy)
       locationAccuracy.value = accuracy
-      placeQuery.lng = Number(position.coords.longitude.toFixed(6))
-      placeQuery.lat = Number(position.coords.latitude.toFixed(6))
+      placeQuery.lng = located.lng
+      placeQuery.lat = located.lat
       try {
         const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
           lng: String(placeQuery.lng),
@@ -1349,9 +1405,10 @@ async function useCurrentLocation() {
         })
       }
       await loadCurrentTab()
+      const sourceLabel = located.source === 'amap' ? '高德高精度定位' : '浏览器定位'
       message.value = accuracy > 1000
-        ? `已使用当前位置，定位精度约 ${accuracy} 米；当前多半是电脑/Wi-Fi 网络定位`
-        : `已使用当前位置，定位精度约 ${accuracy} 米`
+        ? `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米；当前可能仍是电脑/Wi-Fi 网络定位`
+        : `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米`
     } catch (error) {
       throw new Error(geolocationMessage(error))
     } finally {
@@ -1359,17 +1416,10 @@ async function useCurrentLocation() {
     }
   })
 }
-
 function geolocationMessage(error: unknown) {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    const code = Number((error as { code: number }).code)
-    if (code === 1) return '定位权限被拒绝，请在浏览器地址栏允许位置权限'
-    if (code === 2) return '暂时无法获取当前位置，请检查系统定位服务'
-    if (code === 3) return '定位超时，请稍后重试'
-  }
+  if (error instanceof Error) return error.message
   return '获取当前位置失败'
 }
-
 async function showNearbyPlaces() {
   activeTab.value = 'home'
   venueSaleView.value = null
@@ -1387,14 +1437,14 @@ async function openVenueSalePage(productType: VenueSaleType, title: string, subt
   selectedPlace.value = null
   venueReviews.value = []
   venueSaleView.value = { productType, title, subtitle }
-  venueSaleProducts.value = []
+  venueSaleItems.value = []
   venueSalesPage.value = 1
   venueSalesTotal.value = 0
   await wrap(async () => {
     if (!places.value.length) {
       await loadPlaces()
     }
-    await loadVenueSaleProducts()
+    await loadVenueSaleItems()
   })
   await nextTick()
   document.getElementById('venue-sale-page')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1402,7 +1452,7 @@ async function openVenueSalePage(productType: VenueSaleType, title: string, subt
 
 async function closeVenueSalePage() {
   venueSaleView.value = null
-  venueSaleProducts.value = []
+  venueSaleItems.value = []
   venueSalesPage.value = 1
   venueSalesTotal.value = 0
   if (!places.value.length) {
@@ -1423,7 +1473,7 @@ async function selectPlace(place: Place) {
   dealFilter.value = 'all'
   purchaseNotice.value = ''
   await wrap(async () => {
-    await Promise.all([loadVenueProductsForPlace(place), loadVenueReviewsForPlace(place)])
+    await Promise.all([loadVenueItemsForPlace(place), loadVenueReviewsForPlace(place)])
   })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
@@ -1445,14 +1495,15 @@ async function loadVenueReviewsForPlace(place: Place) {
   venueReviews.value = await api<VenueReview[]>(`/api/venues/${reviewRankFor(place)}/reviews?size=5`)
 }
 
-async function buyVenueProduct(product: VenueProduct) {
+async function buyVenueItem(product: VenueItem) {
   if (!requireLogin('请先登录后购买场所套餐')) return
   await wrap(async () => {
-    buyingProductId.value = product.id
+    buyingVenueItemId.value = product.id
     purchaseNotice.value = ''
-    const paid = await api<VenueOrder>(`/api/venue-products/${product.id}/quick-pay`, {
+    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/api/orders/1', {
       method: 'POST',
       body: JSON.stringify({
+        productId: product.id,
         venueId: product.venueId || null,
         amapPlaceId: product.amapPlaceId || null,
         venueName: product.venueName
@@ -1460,14 +1511,14 @@ async function buyVenueProduct(product: VenueProduct) {
     })
     ordersLoaded.value = false
     product.availableStock = Math.max(0, product.availableStock - 1)
-    purchaseNotice.value = `购买成功，核销码 ${paid.verifyCode}`
+    purchaseNotice.value = `购买成功，核销码 ${created.verifyCode}`
     message.value = '购买成功，可在“我的”查看订单'
   }).finally(() => {
-    buyingProductId.value = null
+    buyingVenueItemId.value = null
   })
 }
 
-async function addCart(product: Product) {
+async function addCart(product: EquipmentItem) {
   if (!requireLogin('请先登录后加入购物车')) return
   await wrap(async () => {
     await api('/api/equipment/cart', {
@@ -1490,11 +1541,11 @@ async function checkoutCart() {
     return
   }
   await wrap(async () => {
-    const created = await api<{ orderId: number }>('/api/equipment/orders', {
+    const created = await api<{ orderId: number }>('/api/orders/2', {
       method: 'POST',
       body: JSON.stringify({ address: profileAddress() })
     })
-    await api(`/api/equipment/orders/${created.orderId}/pay`, { method: 'POST' })
+    await api(`/api/orders/2/${created.orderId}/pay`, { method: 'POST' })
     cartItems.value = []
     cartCount.value = 0
     cartLoaded.value = true
@@ -1513,7 +1564,7 @@ async function showProfileCart() {
 async function submitSeckill(activityId: number) {
   if (!requireLogin('请先登录后参与秒杀')) return
   await wrap(async () => {
-    const result = await api<{ orderId: number }>(`/api/seckill/activities/${activityId}/orders`, { method: 'POST' })
+    const result = await api<{ orderId: number }>(`/api/seckill/2/${activityId}`, { method: 'POST' })
     message.value = `抢购请求已进入队列，订单号 ${result.orderId}`
     ordersLoaded.value = false
     await loadSeckill()
@@ -1611,19 +1662,19 @@ function equipmentOrderQuantity(order: EquipmentOrder) {
   return order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0
 }
 
-function saleProducts(place: Place) {
-  return venueProducts.value[place.id] || []
+function saleVenueItems(place: Place) {
+  return venueItems.value[place.id] || []
 }
 
-function hasLoadedProducts(place: Place) {
-  return Object.prototype.hasOwnProperty.call(venueProducts.value, place.id)
+function hasLoadedVenueItems(place: Place) {
+  return Object.prototype.hasOwnProperty.call(venueItems.value, place.id)
 }
 
-function firstInventory(product: VenueProduct) {
-  return (inventoriesByProduct.value[product.id] || []).find((item) => item.availableStock > 0)
+function firstInventory(product: VenueItem) {
+  return (inventoriesByVenueItem.value[product.id] || []).find((item) => item.availableStock > 0)
 }
 
-function inventoryText(product: VenueProduct) {
+function inventoryText(product: VenueItem) {
   const inventory = firstInventory(product)
   if (!inventory) return product.productTypeName
   return `${inventory.serviceDate.slice(5)} ${inventory.startTime.slice(0, 5)}-${inventory.endTime.slice(0, 5)}`
@@ -1741,12 +1792,12 @@ onBeforeUnmount(() => {
 
       <div v-if="showCategoryHeader" class="category-scroll header-category-row">
         <template v-if="activeTab === 'equipment'">
-          <button :class="{ active: !productQuery.categoryId }" @click="selectProductCategory('')">全部分类</button>
+          <button :class="{ active: !productQuery.categoryId }" @click="selectEquipmentItemCategory('')">全部分类</button>
           <button
             v-for="category in categories"
             :key="category.id"
             :class="{ active: productQuery.categoryId === String(category.id) }"
-            @click="selectProductCategory(String(category.id))"
+            @click="selectEquipmentItemCategory(String(category.id))"
           >
             {{ category.name }}
           </button>
@@ -1855,9 +1906,9 @@ onBeforeUnmount(() => {
               <button type="button" :class="{ active: dealFilter === 'discount' }" @click="dealFilter = 'discount'">特价</button>
             </div>
             <div v-if="purchaseNotice" class="purchase-notice">{{ purchaseNotice }}</div>
-            <div v-if="!hasLoadedProducts(selectedPlace)" class="empty-box">正在加载该场馆售卖项目</div>
-            <div v-else-if="!selectedPlaceProducts.length" class="empty-box">该场馆暂未配置线上售卖项目</div>
-            <article v-for="item in selectedPlaceProducts" :key="item.id" class="detail-deal-row">
+            <div v-if="!hasLoadedVenueItems(selectedPlace)" class="empty-box">正在加载该场馆售卖项目</div>
+            <div v-else-if="!selectedPlaceVenueItems.length" class="empty-box">该场馆暂未配置线上售卖项目</div>
+            <article v-for="item in selectedPlaceVenueItems" :key="item.id" class="detail-deal-row">
               <img
                 :src="item.coverUrl || selectedPlace.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
                 :alt="item.title"
@@ -1872,8 +1923,8 @@ onBeforeUnmount(() => {
                   <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
                 </div>
               </div>
-              <button class="primary pill-buy" @click="buyVenueProduct(item)" :disabled="buyingProductId === item.id || item.availableStock <= 0">
-                {{ buyingProductId === item.id ? '购买中' : '抢购' }}
+              <button class="primary pill-buy" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || item.availableStock <= 0">
+                {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
               </button>
             </article>
           </section>
@@ -1933,8 +1984,8 @@ onBeforeUnmount(() => {
               <div class="tag-row">
                 <span v-for="tag in place.facilities.slice(0, 3)" :key="tag">{{ tag }}</span>
               </div>
-              <div class="sale-preview" v-if="saleProducts(place).length">
-                <span v-for="item in saleProducts(place).slice(0, 3)" :key="item.id" :class="typeClass(item.productType)">
+              <div class="sale-preview" v-if="saleVenueItems(place).length">
+                <span v-for="item in saleVenueItems(place).slice(0, 3)" :key="item.id" :class="typeClass(item.productType)">
                   {{ item.productTypeName }} {{ yuan(item.price) }}
                 </span>
               </div>
@@ -1954,9 +2005,9 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-if="purchaseNotice" class="purchase-notice">{{ purchaseNotice }}</div>
-            <div v-if="!hasLoadedProducts(place)" class="empty-box">正在加载该场所售卖项目</div>
-            <div v-else-if="!saleProducts(place).length" class="empty-box">该场所暂未配置线上售卖项目</div>
-            <article v-for="item in saleProducts(place)" :key="item.id" class="service-row">
+            <div v-if="!hasLoadedVenueItems(place)" class="empty-box">正在加载该场所售卖项目</div>
+            <div v-else-if="!saleVenueItems(place).length" class="empty-box">该场所暂未配置线上售卖项目</div>
+            <article v-for="item in saleVenueItems(place)" :key="item.id" class="service-row">
               <div>
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
                 <h3>{{ item.title }}</h3>
@@ -1966,8 +2017,8 @@ onBeforeUnmount(() => {
               <div class="buy-side">
                 <strong>{{ yuan(item.price) }}</strong>
                 <span v-if="item.originalPrice">{{ yuan(item.originalPrice || 0) }}</span>
-                <button class="primary" @click="buyVenueProduct(item)" :disabled="buyingProductId === item.id">
-                  {{ buyingProductId === item.id ? '购买中' : '购买' }}
+                <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id">
+                  {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
                 </button>
               </div>
             </article>
@@ -1987,8 +2038,8 @@ onBeforeUnmount(() => {
             <button class="ghost" @click="closeVenueSalePage"><ChevronLeft :size="16" /> 返回</button>
           </div>
 
-          <div v-if="!venueSaleProducts.length" class="empty-box">暂无可购买项目</div>
-          <article v-for="item in venueSaleProducts" :key="item.id" class="venue-sale-row">
+          <div v-if="!venueSaleItems.length" class="empty-box">暂无可购买项目</div>
+          <article v-for="item in venueSaleItems" :key="item.id" class="venue-sale-row">
             <img :src="item.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'" :alt="item.title" />
             <div>
               <div class="sale-row-head">
@@ -2006,14 +2057,14 @@ onBeforeUnmount(() => {
                   <strong>{{ yuan(item.price) }}</strong>
                   <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
                 </div>
-                <button class="primary" @click="buyVenueProduct(item)" :disabled="buyingProductId === item.id || item.availableStock <= 0">
-                  {{ buyingProductId === item.id ? '购买中' : '购买' }}
+                <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || item.availableStock <= 0">
+                  {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
                 </button>
               </div>
             </div>
           </article>
           <div v-if="loadingMore" class="load-more-state">正在加载更多可订项目</div>
-          <div v-else-if="venueSaleProducts.length && !hasMoreVenueSales" class="load-more-state muted-state">已经到底了</div>
+          <div v-else-if="venueSaleItems.length && !hasMoreVenueSales" class="load-more-state muted-state">已经到底了</div>
         </section>
       </section>
 
@@ -2184,7 +2235,7 @@ onBeforeUnmount(() => {
           <button @click="addCart(product)">加购</button>
         </article>
         <div v-if="loadingMore" class="load-more-state">正在加载更多装备</div>
-        <div v-else-if="products.length && !hasMoreProducts" class="load-more-state muted-state">已经到底了</div>
+        <div v-else-if="products.length && !hasMoreEquipmentItems" class="load-more-state muted-state">已经到底了</div>
       </section>
 
       <section v-else-if="activeTab === 'profile'" class="page-stack">
@@ -2354,39 +2405,17 @@ onBeforeUnmount(() => {
               <strong>场所订单</strong>
             </div>
           </div>
-          <div v-if="!profileVenueOrders.length" class="empty-box">暂无场所订单</div>
-          <article v-for="order in profileVenueOrders" :key="order.id" class="order-card">
+          <div v-if="!profileVenueOrderCards.length" class="empty-box">暂无场所订单</div>
+          <article v-for="order in profileVenueOrderCards" :key="order.key" class="order-card">
             <div>
-              <h3>{{ order.productTitle }}</h3>
-              <p>{{ order.venueName }}</p>
-              <small>{{ order.serviceDate }} {{ order.startTime.slice(0, 5) }}-{{ order.endTime.slice(0, 5) }}</small>
+              <h3>{{ order.title }}</h3>
+              <p>{{ order.subtitle }}</p>
+              <small>{{ order.meta }}</small>
             </div>
             <div class="order-side">
               <strong>{{ yuan(order.amount) }}</strong>
               <span>{{ order.status }}</span>
-              <em>{{ order.verifyCode }}</em>
-            </div>
-          </article>
-        </section>
-
-        <section v-if="profileMode === 'me' && loggedIn && profileOrderPageVisible && (profileView === 'orders' || profileView === 'paid')" class="profile-orders">
-          <div class="section-title compact-title">
-            <div>
-              <span>我的</span>
-              <strong>秒杀订单</strong>
-            </div>
-          </div>
-          <div v-if="!profileSeckillOrders.length" class="empty-box">暂无秒杀订单</div>
-          <article v-for="order in profileSeckillOrders" :key="order.id" class="order-card">
-            <div>
-              <h3>{{ order.productName }}</h3>
-              <p>秒杀装备</p>
-              <small>{{ formatDateTime(order.createdAt) }}</small>
-            </div>
-            <div class="order-side">
-              <strong>{{ yuan(order.amount) }}</strong>
-              <span>{{ order.status }}</span>
-              <em>#{{ order.id }}</em>
+              <em>{{ order.code }}</em>
             </div>
           </article>
         </section>
@@ -2398,17 +2427,17 @@ onBeforeUnmount(() => {
               <strong>装备订单</strong>
             </div>
           </div>
-          <div v-if="!profileEquipmentOrders.length" class="empty-box">暂无装备订单</div>
-          <article v-for="order in profileEquipmentOrders" :key="order.id" class="order-card">
+          <div v-if="!profileEquipmentOrderCards.length" class="empty-box">暂无装备订单</div>
+          <article v-for="order in profileEquipmentOrderCards" :key="order.key" class="order-card">
             <div>
-              <h3>{{ equipmentOrderTitle(order) }}</h3>
-              <p>{{ order.address }}</p>
-              <small>{{ formatDateTime(order.createdAt) }} · 共 {{ equipmentOrderQuantity(order) }} 件</small>
+              <h3>{{ order.title }}</h3>
+              <p>{{ order.subtitle }}</p>
+              <small>{{ order.meta }}</small>
             </div>
             <div class="order-side">
-              <strong>{{ yuan(order.totalAmount) }}</strong>
+              <strong>{{ yuan(order.amount) }}</strong>
               <span>{{ order.status }}</span>
-              <em>#{{ order.id }}</em>
+              <em>{{ order.code }}</em>
             </div>
           </article>
         </section>

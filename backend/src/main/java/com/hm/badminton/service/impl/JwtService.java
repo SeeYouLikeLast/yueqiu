@@ -2,6 +2,9 @@ package com.hm.badminton.service.impl;
 
 import com.hm.badminton.dto.LoginUser;
 import com.hm.badminton.service.IJwtService;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -26,7 +29,7 @@ public class JwtService implements IJwtService {
 
     public String createToken(LoginUser user) {
         long expiresAt = Instant.now().getEpochSecond() + expireSeconds;
-        String payload = user.id() + ":" + nullToEmpty(user.phone()) + ":" + expiresAt;
+        String payload = user.getId() + ":" + nullToEmpty(user.getPhone()) + ":" + expiresAt;
         String encodedPayload = base64(payload.getBytes(StandardCharsets.UTF_8));
         return encodedPayload + "." + sign(encodedPayload);
     }
@@ -57,7 +60,7 @@ public class JwtService implements IJwtService {
             mac.init(new SecretKeySpec(secret, "HmacSHA256"));
             return base64(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            throw new IllegalStateException("无法生成 token 签名", e);
+            throw new IllegalStateException("Failed to sign token", e);
         }
     }
 
@@ -69,7 +72,13 @@ public class JwtService implements IJwtService {
         return value == null ? "" : value;
     }
 
-    public record TokenPayload(Long userId, String phone, long expiresAt) {
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TokenPayload {
+        private Long userId;
+        private String phone;
+        private long expiresAt;
     }
 }
 

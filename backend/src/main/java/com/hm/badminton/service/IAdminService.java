@@ -8,7 +8,7 @@ public interface IAdminService {
 
     List<Map<String, Object>> hotVenues();
 
-    List<Map<String, Object>> hotProducts();
+    List<Map<String, Object>> hotEquipments();
 
     List<Map<String, Object>> latestReviews();
 }
