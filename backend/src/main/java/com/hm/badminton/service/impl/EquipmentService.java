@@ -89,8 +89,14 @@ public class EquipmentService implements IEquipmentService {
         equipmentMapper.deleteCart(userId, itemId);
     }
 
+    @Override
+    public void clearCart(Long userId) {
+        equipmentMapper.deleteCartByUser(userId);
+    }
+
     @Transactional
     public Long createOrder(Long userId, CreateOrderRequest request) {
+        boolean fromCart = request.getItems() == null || request.getItems().isEmpty();
         List<OrderEquipment> equipment = loadOrderEquipments(userId, request.getItems());
         if (equipment.isEmpty()) {
             throw new BusinessException("购物车为空");
@@ -111,7 +117,9 @@ public class EquipmentService implements IEquipmentService {
             }
             equipmentMapper.insertOrderItem(orderId, item.getProductId(), item.getName(), item.getCoverUrl(), item.getPrice(), item.getQuantity());
         }
-        equipmentMapper.deleteCartByUser(userId);
+        if (fromCart) {
+            equipmentMapper.deleteCartByUser(userId);
+        }
         return orderId;
     }
 

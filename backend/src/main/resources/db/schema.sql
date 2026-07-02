@@ -18,6 +18,7 @@ drop table if exists sport_activities;
 drop table if exists player_profiles;
 drop table if exists file_metadata;
 drop table if exists order_venue;
+drop table if exists cart_venue;
 drop table if exists venue_inventory;
 drop table if exists venue;
 drop table if exists coaches;
@@ -233,6 +234,18 @@ create table order_venue (
   key idx_order_venue_user (user_id, created_at),
   key idx_order_venue_product (product_id, inventory_id),
   key idx_order_venue_verify (verify_code)
+) engine=InnoDB default charset=utf8mb4;
+
+create table cart_venue (
+  id bigint primary key auto_increment,
+  user_id bigint not null,
+  product_id bigint not null,
+  inventory_id bigint not null,
+  quantity int not null default 1,
+  created_at datetime not null default current_timestamp,
+  updated_at datetime not null default current_timestamp on update current_timestamp,
+  unique key uk_cart_venue_user_item (user_id, product_id, inventory_id),
+  key idx_cart_venue_user (user_id)
 ) engine=InnoDB default charset=utf8mb4;
 
 create table equipment_categories (

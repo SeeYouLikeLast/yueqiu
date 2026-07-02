@@ -2,9 +2,9 @@ package com.hm.badminton.controller;
 
 import com.hm.badminton.utils.UserContext;
 import com.hm.badminton.common.ApiResponse;
-import com.hm.badminton.entity.SeckillActivity;
 import com.hm.badminton.entity.SeckillOrder;
 import com.hm.badminton.service.ISeckillService;
+import com.hm.badminton.vo.SeckillActivityVO;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,10 +28,13 @@ public class SeckillController {
     }
 
     @GetMapping("/{type:[12]}")
-    public ApiResponse<List<SeckillActivity>> typedActivities(@PathVariable Integer type,
-                                                              @RequestParam(required = false) String sport,
-                                                              @RequestParam(required = false) Long categoryId) {
-        return ApiResponse.ok(seckillService.list(type, sport, categoryId));
+    public ApiResponse<List<SeckillActivityVO>> typedActivities(@PathVariable Integer type,
+                                                                @RequestParam(required = false) String sport,
+                                                                @RequestParam(required = false) Long categoryId) {
+        return ApiResponse.ok(seckillService.list(type, sport, categoryId)
+                .stream()
+                .map(SeckillActivityVO::from)
+                .toList());
     }
 
     @PostMapping("/{type:[12]}/{seckillId}")

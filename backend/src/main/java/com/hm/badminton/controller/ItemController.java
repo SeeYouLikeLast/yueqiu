@@ -1,10 +1,13 @@
 package com.hm.badminton.controller;
 
 import com.hm.badminton.common.ApiResponse;
+import com.hm.badminton.common.PageResult;
 import com.hm.badminton.constants.TradeType;
-import com.hm.badminton.entity.VenueInventory;
 import com.hm.badminton.service.IEquipmentService;
 import com.hm.badminton.service.IVenueItemService;
+import com.hm.badminton.vo.EquipmentVO;
+import com.hm.badminton.vo.VenueInventoryVO;
+import com.hm.badminton.vo.VenueItemVO;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,25 +45,41 @@ public class ItemController {
         int tradeType = TradeType.require(type);
         if (tradeType == TradeType.VENUE) {
             if (amapPlaceId != null || venueId != null || placeRank != null) {
-                return ApiResponse.ok(venueItemService.items(sport, amapPlaceId, venueId, placeRank, limit));
+                return ApiResponse.ok(venueItemService.items(sport, amapPlaceId, venueId, placeRank, limit)
+                        .stream()
+                        .map(VenueItemVO::from)
+                        .toList());
             }
-            return ApiResponse.ok(venueItemService.saleItems(sport, category, keyword, page, size));
+            var result = venueItemService.saleItems(sport, category, keyword, page, size);
+            return ApiResponse.ok(new PageResult<>(
+                    result.getRecords().stream().map(VenueItemVO::from).toList(),
+                    result.getTotal(),
+                    result.getPage(),
+                    result.getSize()));
         }
-        return ApiResponse.ok(equipmentService.items(sport, categoryId, keyword, page, size));
+        var result = equipmentService.items(sport, categoryId, keyword, page, size);
+        return ApiResponse.ok(new PageResult<>(
+                result.getRecords().stream().map(EquipmentVO::from).toList(),
+                result.getTotal(),
+                result.getPage(),
+                result.getSize()));
     }
 
     @GetMapping("/{type:[12]}/{id}")
     public ApiResponse<?> detail(@PathVariable Integer type, @PathVariable Long id) {
         int tradeType = TradeType.require(type);
         return ApiResponse.ok(tradeType == TradeType.VENUE
-                ? venueItemService.detail(id)
-                : equipmentService.detail(id));
+                ? VenueItemVO.from(venueItemService.detail(id))
+                : EquipmentVO.from(equipmentService.detail(id)));
     }
 
     @GetMapping("/1/{id}/inventories")
-    public ApiResponse<List<VenueInventory>> venueInventories(
+    public ApiResponse<List<VenueInventoryVO>> venueInventories(
             @PathVariable Long id,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return ApiResponse.ok(venueItemService.inventories(id, date));
+        return ApiResponse.ok(venueItemService.inventories(id, date)
+                .stream()
+                .map(VenueInventoryVO::from)
+                .toList());
     }
 }

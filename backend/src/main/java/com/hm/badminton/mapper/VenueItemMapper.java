@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 
 import com.hm.badminton.entity.VenueInventory;
+import com.hm.badminton.entity.VenueCartItem;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Insert;
@@ -13,6 +14,7 @@ import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Delete;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -227,6 +229,57 @@ public interface VenueItemMapper {
                                 @Param("venueId") Long venueId,
                                 @Param("amapPlaceId") String amapPlaceId,
                                 @Param("venueName") String venueName);
+
+    @Select("select count(*) from cart_venue where user_id = #{userId} and product_id = #{productId} and inventory_id = #{inventoryId}")
+    Integer countVenueCart(@Param("userId") Long userId,
+                           @Param("productId") Long productId,
+                           @Param("inventoryId") Long inventoryId);
+
+    @Update("""
+            update cart_venue
+            set updated_at = now()
+            where user_id = #{userId} and product_id = #{productId} and inventory_id = #{inventoryId}
+            """)
+    int touchVenueCart(@Param("userId") Long userId,
+                       @Param("productId") Long productId,
+                       @Param("inventoryId") Long inventoryId);
+
+    @Insert("insert into cart_venue(user_id, product_id, inventory_id, quantity) values (#{userId}, #{productId}, #{inventoryId}, 1)")
+    int insertVenueCart(@Param("userId") Long userId,
+                        @Param("productId") Long productId,
+                        @Param("inventoryId") Long inventoryId);
+
+    @Select("""
+            select c.id, p.id as product_id, i.id as inventory_id, p.title as product_name,
+                   p.venue_name, p.cover_url, i.price, c.quantity, i.price * c.quantity as amount,
+                   i.service_date, i.start_time, i.end_time
+            from cart_venue c
+            join venue p on p.id = c.product_id
+            join venue_inventory i on i.id = c.inventory_id and i.product_id = c.product_id
+            where c.user_id = #{userId}
+            order by c.updated_at desc
+            """)
+    @ConstructorArgs({
+            @Arg(column = "id", javaType = Long.class),
+            @Arg(column = "product_id", javaType = Long.class),
+            @Arg(column = "inventory_id", javaType = Long.class),
+            @Arg(column = "product_name", javaType = String.class),
+            @Arg(column = "venue_name", javaType = String.class),
+            @Arg(column = "cover_url", javaType = String.class),
+            @Arg(column = "price", javaType = BigDecimal.class),
+            @Arg(column = "quantity", javaType = Integer.class),
+            @Arg(column = "amount", javaType = BigDecimal.class),
+            @Arg(column = "service_date", javaType = LocalDate.class),
+            @Arg(column = "start_time", javaType = LocalTime.class),
+            @Arg(column = "end_time", javaType = LocalTime.class)
+    })
+    List<VenueCartItem> selectVenueCart(@Param("userId") Long userId);
+
+    @Delete("delete from cart_venue where id = #{itemId} and user_id = #{userId}")
+    int deleteVenueCart(@Param("userId") Long userId, @Param("itemId") Long itemId);
+
+    @Delete("delete from cart_venue where user_id = #{userId}")
+    int deleteVenueCartByUser(@Param("userId") Long userId);
 
     @Update("""
             update order_venue

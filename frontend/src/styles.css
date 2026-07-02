@@ -895,6 +895,28 @@ button.ghost {
   border-radius: 999px;
 }
 
+.dual-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dual-action button {
+  min-height: 34px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.compact-actions {
+  margin-top: 6px;
+}
+
+.product-actions {
+  flex-direction: column;
+}
+
 .review-score-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1329,6 +1351,12 @@ p {
 .cart-summary button {
   min-height: 34px;
   padding: 0 12px;
+}
+
+.mini-delete {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 #profile-cart {

@@ -2,11 +2,12 @@ package com.hm.badminton.service.impl;
 
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.common.PageResult;
-import com.hm.badminton.entity.VenueOrder;
-import com.hm.badminton.entity.VenueItem;
+import com.hm.badminton.entity.VenueCartItem;
 import com.hm.badminton.entity.VenueInventory;
-import com.hm.badminton.mapper.VenueOrderMapper;
+import com.hm.badminton.entity.VenueItem;
+import com.hm.badminton.entity.VenueOrder;
 import com.hm.badminton.mapper.VenueItemMapper;
+import com.hm.badminton.mapper.VenueOrderMapper;
 import com.hm.badminton.service.ISportCatalogService;
 import com.hm.badminton.service.IVenueItemService;
 import jakarta.validation.constraints.NotNull;
@@ -16,9 +17,7 @@ import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -31,13 +30,14 @@ public class VenueItemService implements IVenueItemService {
     private final VenueOrderMapper venueOrderMapper;
 
     public VenueItemService(VenueItemMapper venueItemMapper,
-                               ISportCatalogService sportCatalogService,
-                               VenueOrderMapper venueOrderMapper) {
+                            ISportCatalogService sportCatalogService,
+                            VenueOrderMapper venueOrderMapper) {
         this.venueItemMapper = venueItemMapper;
         this.sportCatalogService = sportCatalogService;
         this.venueOrderMapper = venueOrderMapper;
     }
 
+    @Override
     public List<VenueItem> items(String sportCode, String amapPlaceId, Long venueId, Integer placeRank, int limit) {
         int safeLimit = Math.min(Math.max(limit, 1), 30);
         String normalizedSport = null;
@@ -51,6 +51,7 @@ public class VenueItemService implements IVenueItemService {
                 .toList();
     }
 
+    @Override
     public PageResult<VenueItem> saleItems(String sportCode, String productType, String keyword, int page, int size) {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 30);
@@ -68,10 +69,7 @@ public class VenueItemService implements IVenueItemService {
         return new PageResult<>(records, total == null ? 0 : total, safePage, safeSize);
     }
 
-    private boolean isAllSport(String sportCode) {
-        return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
-    }
-
+    @Override
     public VenueItem detail(Long productId) {
         VenueItem product = toItem(venueItemMapper.selectItem(productId));
         if (product == null) {
@@ -80,24 +78,52 @@ public class VenueItemService implements IVenueItemService {
         return product;
     }
 
+    @Override
     public List<VenueInventory> inventories(Long productId, LocalDate date) {
         detail(productId);
         return venueItemMapper.selectInventories(productId, date);
     }
 
+    @Override
+    @Transactional
+    public void addCart(Long userId, OrderCreateRequest request) {
+        loadSale(request.getProductId(), request.getInventoryId());
+        Integer count = venueItemMapper.countVenueCart(userId, request.getProductId(), request.getInventoryId());
+        if (count != null && count > 0) {
+            venueItemMapper.touchVenueCart(userId, request.getProductId(), request.getInventoryId());
+        } else {
+            venueItemMapper.insertVenueCart(userId, request.getProductId(), request.getInventoryId());
+        }
+    }
+
+    @Override
+    public List<VenueCartItem> cart(Long userId) {
+        return venueItemMapper.selectVenueCart(userId);
+    }
+
+    @Override
+    public void removeCart(Long userId, Long itemId) {
+        venueItemMapper.deleteVenueCart(userId, itemId);
+    }
+
+    @Override
+    public void clearCart(Long userId) {
+        venueItemMapper.deleteVenueCartByUser(userId);
+    }
+
+    @Override
     @Transactional
     public VenueOrder createOrder(Long userId, OrderCreateRequest request) {
         VenueItemMapper.VenueItemSale sale = loadSale(request.getProductId(), request.getInventoryId());
         if (sale.getAvailableStock() <= 0) {
-            throw new BusinessException("该时段库存已售罄");
+            throw new BusinessException("该时段已售罄");
         }
         int updated = venueItemMapper.deductInventory(request.getProductId(), request.getInventoryId());
         if (updated == 0) {
-            throw new BusinessException("该时段库存已售罄");
+            throw new BusinessException("该时段已售罄");
         }
 
         VenueItemMapper.InsertVenueOrderRow row = new VenueItemMapper.InsertVenueOrderRow();
-        String verifyCode = verifyCode();
         row.setUserId(userId);
         row.setProductId(sale.getProductId());
         row.setInventoryId(sale.getInventoryId());
@@ -110,29 +136,12 @@ public class VenueItemService implements IVenueItemService {
         row.setStartTime(sale.getStartTime());
         row.setEndTime(sale.getEndTime());
         row.setAmount(sale.getPrice());
-        row.setVerifyCode(verifyCode);
+        row.setVerifyCode(verifyCode());
         venueItemMapper.insertVenueOrder(row);
         return order(userId, row.getId());
     }
 
-    @Transactional
-    public VenueOrder quickPay(Long userId, Long productId, VenueContextRequest request) {
-        Long inventoryId = venueItemMapper.selectFirstAvailableInventoryId(productId);
-        if (inventoryId == null) {
-            throw new BusinessException("该项目暂无可售时段");
-        }
-        VenueOrder order = createOrder(userId, new OrderCreateRequest(productId, inventoryId));
-        applyVenueContext(userId, order.getId(), request);
-        return pay(userId, order.getId());
-    }
-
-    private void applyVenueContext(Long userId, Long orderId, VenueContextRequest request) {
-        if (request == null || request.getVenueName() == null || request.getVenueName().isBlank()) {
-            return;
-        }
-        venueItemMapper.updateOrderVenueContext(userId, orderId, request.getVenueId(), request.getAmapPlaceId(), request.getVenueName().trim());
-    }
-
+    @Override
     @Transactional
     public VenueOrder pay(Long userId, Long orderId) {
         int updated = venueItemMapper.payVenueOrder(userId, orderId);
@@ -142,6 +151,7 @@ public class VenueItemService implements IVenueItemService {
         return order(userId, orderId);
     }
 
+    @Override
     public VenueOrder order(Long userId, Long orderId) {
         VenueOrder order = venueOrderMapper.selectByIdAndUserId(orderId, userId, VenueOrderMapper.ORDER_COLUMNS);
         if (order == null) {
@@ -150,8 +160,13 @@ public class VenueItemService implements IVenueItemService {
         return order;
     }
 
+    @Override
     public List<VenueOrder> myOrders(Long userId) {
         return venueOrderMapper.selectByUserId(userId, VenueOrderMapper.ORDER_COLUMNS);
+    }
+
+    private boolean isAllSport(String sportCode) {
+        return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
     }
 
     private VenueItemMapper.VenueItemSale loadSale(Long productId, Long inventoryId) {
@@ -220,16 +235,4 @@ public class VenueItemService implements IVenueItemService {
         @NotNull
         private Long inventoryId;
     }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class VenueContextRequest {
-        private Long venueId;
-        private String amapPlaceId;
-        private String venueName;
-    }
-
 }
-
-

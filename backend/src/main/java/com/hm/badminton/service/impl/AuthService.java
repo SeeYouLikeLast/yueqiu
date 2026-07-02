@@ -210,7 +210,6 @@ public class AuthService implements IAuthService {
         }
         Map<String, String> values = new HashMap<>();
         putIfText(values, "city", request.getCity());
-        putIfText(values, "preciseAddress", request.getPreciseAddress());
         if (request.getLng() != null) values.put("lng", String.valueOf(request.getLng()));
         if (request.getLat() != null) values.put("lat", String.valueOf(request.getLat()));
         if (values.isEmpty()) {
@@ -277,10 +276,7 @@ public class AuthService implements IAuthService {
         String token = UUID.randomUUID().toString().replace("-", "");
         Map<String, String> userMap = new HashMap<>();
         userMap.put("id", String.valueOf(user.getId()));
-        userMap.put("phone", nullToEmpty(user.getPhone()));
-        userMap.put("nickname", nullToEmpty(user.getNickname()));
         userMap.put("city", nullToEmpty(user.getCity()));
-        userMap.put("level", nullToEmpty(user.getLevel()));
         redisTemplate.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY + token, userMap);
         redisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
         return token;

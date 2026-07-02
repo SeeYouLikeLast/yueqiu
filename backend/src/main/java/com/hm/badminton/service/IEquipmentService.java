@@ -22,6 +22,8 @@ public interface IEquipmentService {
 
     void removeCart(Long userId, Long itemId);
 
+    void clearCart(Long userId);
+
     Long createOrder(Long userId, EquipmentService.CreateOrderRequest request);
 
     void pay(Long userId, Long orderId);

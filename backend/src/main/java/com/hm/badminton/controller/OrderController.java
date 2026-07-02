@@ -1,6 +1,5 @@
 package com.hm.badminton.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.constants.TradeType;
@@ -41,19 +40,12 @@ public class OrderController {
     }
 
     @PostMapping("/{type:[12]}")
-    public ApiResponse<?> create(@PathVariable Integer type, @RequestBody JsonNode body) {
+    public ApiResponse<?> create(@PathVariable Integer type, @RequestBody Object body) {
         Long userId = userContext.requireUserId();
         int tradeType = TradeType.require(type);
         if (tradeType == TradeType.VENUE) {
-            if (!body.hasNonNull("inventoryId")) {
-                Long productId = body.path("productId").asLong();
-                VenueItemService.VenueContextRequest request =
-                        objectMapper.convertValue(body, VenueItemService.VenueContextRequest.class);
-                VenueOrder order = venueItemService.quickPay(userId, productId, request);
-                return ApiResponse.ok(Map.of("orderId", order.getId(), "verifyCode", order.getVerifyCode(), "order", order));
-            }
             VenueItemService.OrderCreateRequest request = objectMapper.convertValue(body, VenueItemService.OrderCreateRequest.class);
-            VenueOrder order = venueItemService.createOrder(userId, request);
+            var order = venueItemService.createOrder(userId, request);
             return ApiResponse.ok(Map.of("orderId", order.getId(), "verifyCode", order.getVerifyCode(), "order", order));
         }
         EquipmentService.CreateOrderRequest request = objectMapper.convertValue(body, EquipmentService.CreateOrderRequest.class);

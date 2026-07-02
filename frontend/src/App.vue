@@ -70,7 +70,7 @@ type VenueItem = {
   tags: string[]
   useRule: string
   refundRule: string
-  availableStock: number
+  purchasable: boolean
 }
 
 type VenueInventory = {
@@ -82,11 +82,8 @@ type VenueInventory = {
   serviceDate: string
   startTime: string
   endTime: string
-  totalStock: number
-  availableStock: number
-  soldStock: number
   price: number
-  status: string
+  purchasable: boolean
 }
 
 type VenueOrder = {
@@ -134,14 +131,16 @@ type SeckillOrder = {
 
 type CartItem = {
   id: number
+  type: number
   productId: number
+  inventoryId?: number
   productName: string
   brand: string
   coverUrl: string
   price: number
   quantity: number
-  stock: number
   amount: number
+  meta: string
 }
 
 type EquipmentItem = {
@@ -154,7 +153,6 @@ type EquipmentItem = {
   description: string
   coverUrl: string
   price: number
-  stock: number
   score: number
   sold: number
 }
@@ -175,7 +173,7 @@ type SeckillActivity = {
   coverUrl: string
   originalPrice: number
   seckillPrice: number
-  stock: number
+  purchasable: boolean
 }
 
 type Player = {
@@ -882,7 +880,7 @@ async function loadCartItems(force = false) {
     return
   }
   if (cartLoaded.value && !force) return
-  cartItems.value = await api<CartItem[]>('/api/equipment/cart')
+  cartItems.value = await api<CartItem[]>('/api/cart')
   cartCount.value = cartItems.value.reduce((sum, item) => sum + item.quantity, 0)
   cartLoaded.value = true
 }
@@ -1500,17 +1498,20 @@ async function buyVenueItem(product: VenueItem) {
   await wrap(async () => {
     buyingVenueItemId.value = product.id
     purchaseNotice.value = ''
-    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/api/orders/1', {
+    const inventory = await ensureVenueInventory(product)
+    if (!inventory) {
+      message.value = '该项目暂无可购买时段'
+      return
+    }
+    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/api/payments', {
       method: 'POST',
       body: JSON.stringify({
+        type: 1,
         productId: product.id,
-        venueId: product.venueId || null,
-        amapPlaceId: product.amapPlaceId || null,
-        venueName: product.venueName
+        inventoryId: inventory.id
       })
     })
     ordersLoaded.value = false
-    product.availableStock = Math.max(0, product.availableStock - 1)
     purchaseNotice.value = `购买成功，核销码 ${created.verifyCode}`
     message.value = '购买成功，可在“我的”查看订单'
   }).finally(() => {
@@ -1521,13 +1522,41 @@ async function buyVenueItem(product: VenueItem) {
 async function addCart(product: EquipmentItem) {
   if (!requireLogin('请先登录后加入购物车')) return
   await wrap(async () => {
-    await api('/api/equipment/cart', {
+    await api('/api/cart', {
       method: 'POST',
-      body: JSON.stringify({ productId: product.id, quantity: 1 })
+      body: JSON.stringify({ type: 2, productId: product.id, quantity: 1 })
     })
     cartCount.value += 1
     cartLoaded.value = false
   }, '已加入购物车')
+}
+
+async function addVenueCart(product: VenueItem) {
+  if (!requireLogin('请先登录后加入购物车')) return
+  await wrap(async () => {
+    const inventory = await ensureVenueInventory(product)
+    if (!inventory) {
+      message.value = '该项目暂无可购买时段'
+      return
+    }
+    await api('/api/cart', {
+      method: 'POST',
+      body: JSON.stringify({ type: 1, productId: product.id, inventoryId: inventory.id, quantity: 1 })
+    })
+    cartCount.value += 1
+    cartLoaded.value = false
+  }, '已加入购物车')
+}
+
+async function buyEquipmentNow(product: EquipmentItem) {
+  if (!requireLogin('请先登录后购买装备')) return
+  await wrap(async () => {
+    await api('/api/payments', {
+      method: 'POST',
+      body: JSON.stringify({ type: 2, productId: product.id, quantity: 1, address: profileAddress() })
+    })
+    ordersLoaded.value = false
+  }, '装备订单已支付')
 }
 
 function profileAddress() {
@@ -1541,11 +1570,10 @@ async function checkoutCart() {
     return
   }
   await wrap(async () => {
-    const created = await api<{ orderId: number }>('/api/orders/2', {
+    await api<{ orderId: number }>('/api/payments/cart', {
       method: 'POST',
       body: JSON.stringify({ address: profileAddress() })
     })
-    await api(`/api/orders/2/${created.orderId}/pay`, { method: 'POST' })
     cartItems.value = []
     cartCount.value = 0
     cartLoaded.value = true
@@ -1555,10 +1583,19 @@ async function checkoutCart() {
 
 async function showProfileCart() {
   if (!requireLogin('请先登录后查看购物车')) return
-  if (activeTab.value !== 'profile') {
-    await switchTab('profile')
-  }
+  activeTab.value = 'profile'
+  profileMode.value = 'me'
+  viewedUserProfile.value = null
   await openProfileView('cart')
+}
+
+async function removeCartItem(item: CartItem) {
+  await wrap(async () => {
+    await api(`/api/cart/${item.type}/${item.id}`, { method: 'DELETE' })
+    cartItems.value = cartItems.value.filter((record) => !(record.type === item.type && record.id === item.id))
+    cartCount.value = cartItems.value.reduce((sum, record) => sum + record.quantity, 0)
+    cartLoaded.value = true
+  }, '已移出购物车')
 }
 
 async function submitSeckill(activityId: number) {
@@ -1670,8 +1707,25 @@ function hasLoadedVenueItems(place: Place) {
   return Object.prototype.hasOwnProperty.call(venueItems.value, place.id)
 }
 
+async function ensureVenueInventories(product: VenueItem) {
+  if (Object.prototype.hasOwnProperty.call(inventoriesByVenueItem.value, product.id)) {
+    return inventoriesByVenueItem.value[product.id] || []
+  }
+  const inventories = await api<VenueInventory[]>(`/api/items/1/${product.id}/inventories`)
+  inventoriesByVenueItem.value = {
+    ...inventoriesByVenueItem.value,
+    [product.id]: inventories
+  }
+  return inventories
+}
+
+async function ensureVenueInventory(product: VenueItem) {
+  const inventories = await ensureVenueInventories(product)
+  return inventories.find((item) => item.purchasable) || null
+}
+
 function firstInventory(product: VenueItem) {
-  return (inventoriesByVenueItem.value[product.id] || []).find((item) => item.availableStock > 0)
+  return (inventoriesByVenueItem.value[product.id] || []).find((item) => item.purchasable)
 }
 
 function inventoryText(product: VenueItem) {
@@ -1916,16 +1970,19 @@ onBeforeUnmount(() => {
               <div class="detail-deal-main">
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
                 <h3>{{ item.title }}</h3>
-                <p>{{ inventoryText(item) }} · 剩余 {{ item.availableStock }}</p>
+                <p>{{ inventoryText(item) }} · {{ item.purchasable ? '可购买' : '已售罄' }}</p>
                 <small>{{ item.useRule }}</small>
                 <div class="detail-price-line">
                   <strong>{{ yuan(item.price) }}</strong>
                   <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
                 </div>
               </div>
-              <button class="primary pill-buy" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || item.availableStock <= 0">
-                {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
-              </button>
+              <div class="dual-action">
+                <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
+                <button class="primary pill-buy" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
+                  {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+                </button>
+              </div>
             </article>
           </section>
 
@@ -2011,7 +2068,7 @@ onBeforeUnmount(() => {
               <div>
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
                 <h3>{{ item.title }}</h3>
-                <p>{{ inventoryText(item) }} · 剩余 {{ item.availableStock }}</p>
+                <p>{{ inventoryText(item) }} · {{ item.purchasable ? '可购买' : '已售罄' }}</p>
                 <small>{{ item.useRule }}</small>
               </div>
               <div class="buy-side">
@@ -2044,7 +2101,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="sale-row-head">
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
-                <small>剩余 {{ item.availableStock }}</small>
+                <small>{{ item.purchasable ? '可购买' : '已售罄' }}</small>
               </div>
               <h3>{{ item.title }}</h3>
               <p>{{ item.venueName }}</p>
@@ -2057,9 +2114,12 @@ onBeforeUnmount(() => {
                   <strong>{{ yuan(item.price) }}</strong>
                   <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
                 </div>
-                <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || item.availableStock <= 0">
-                  {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
-                </button>
+                <div class="dual-action compact-actions">
+                  <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
+                  <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
+                    {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+                  </button>
+                </div>
               </div>
             </div>
           </article>
@@ -2221,7 +2281,7 @@ onBeforeUnmount(() => {
               <strong>{{ yuan(activity.seckillPrice) }}</strong>
               <em>{{ yuan(activity.originalPrice) }}</em>
             </div>
-            <button class="primary" @click="submitSeckill(activity.id)">抢购</button>
+            <button class="primary" @click="submitSeckill(activity.id)" :disabled="!activity.purchasable">抢购</button>
           </article>
         </section>
         <article v-for="product in products" :key="product.id" class="product-row">
@@ -2232,7 +2292,10 @@ onBeforeUnmount(() => {
             <p>{{ product.description }}</p>
             <strong>{{ yuan(product.price) }}</strong>
           </div>
-          <button @click="addCart(product)">加购</button>
+          <div class="dual-action product-actions">
+            <button @click="addCart(product)">加购</button>
+            <button class="primary" @click="buyEquipmentNow(product)">抢购</button>
+          </div>
         </article>
         <div v-if="loadingMore" class="load-more-state">正在加载更多装备</div>
         <div v-else-if="products.length && !hasMoreEquipmentItems" class="load-more-state muted-state">已经到底了</div>
@@ -2374,21 +2437,21 @@ onBeforeUnmount(() => {
           <div class="section-title compact-title">
             <div>
               <span>我的</span>
-              <strong>购物车装备</strong>
+              <strong>购物车</strong>
             </div>
-            <button v-if="loggedIn && cartItems.length" class="ghost" @click="checkoutCart">结算</button>
           </div>
-          <div v-if="!cartItems.length" class="empty-box">购物车暂无装备</div>
+          <div v-if="!cartItems.length" class="empty-box">购物车暂无商品</div>
           <article v-for="item in cartItems" :key="item.id" class="cart-item-row">
             <img :src="item.coverUrl" :alt="item.productName" />
             <div>
               <h3>{{ item.productName }}</h3>
               <p>{{ item.brand }}</p>
-              <small>{{ yuan(item.price) }} × {{ item.quantity }} · 库存 {{ item.stock }}</small>
+              <small>{{ item.meta }} · {{ yuan(item.price) }} × {{ item.quantity }}</small>
             </div>
             <div class="order-side">
               <strong>{{ yuan(item.amount) }}</strong>
               <span>已加购</span>
+              <button type="button" class="ghost mini-delete" @click="removeCartItem(item)">删除</button>
             </div>
           </article>
           <div v-if="loggedIn && cartItems.length" class="cart-summary">

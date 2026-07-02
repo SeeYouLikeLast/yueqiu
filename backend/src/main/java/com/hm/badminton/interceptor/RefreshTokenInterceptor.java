@@ -47,13 +47,13 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
 
         userContext.set(new LoginUser(
                 Long.valueOf(value(entries, "id")),
-                value(entries, "phone"),
-                value(entries, "nickname"),
+                null,
+                null,
                 value(entries, "city"),
-                value(entries, "level"),
+                null,
                 doubleValue(entries, "lng"),
                 doubleValue(entries, "lat"),
-                value(entries, "preciseAddress")));
+                null));
         redisTemplate.expire(key, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
         return true;
     }
