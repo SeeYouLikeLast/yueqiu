@@ -24,9 +24,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -91,6 +94,16 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             throw new BusinessException(409, "不能重复抢购");
         }
 
+        // 提前生成订单号并序列化消息，序列化失败不触发库存回滚
+        long orderId = idGenerator.nextId();
+        String payload = serializeSeckillMessage(new SeckillOrderMessage(
+                orderId,
+                tradeType,
+                activity.getId(),
+                activity.getProductId(),
+                userId,
+                activity.getSeckillPrice()));
+
         boolean preDeducted = false;
         try {
             Long code = tryRedisPreDeduct(userId, tradeType, activityId);
@@ -105,14 +118,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             }
             preDeducted = true;
 
-            long orderId = idGenerator.nextId();
-            sendSeckillOrderMessage(new SeckillOrderMessage(
-                    orderId,
-                    tradeType,
-                    activity.getId(),
-                    activity.getProductId(),
-                    userId,
-                    activity.getSeckillPrice()));
+            sendSeckillOrderMessage(payload);
             return orderId;
         } catch (RuntimeException e) {
             if (preDeducted) {
@@ -181,15 +187,20 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         }
     }
 
-    private void sendSeckillOrderMessage(SeckillOrderMessage message) {
+    private String serializeSeckillMessage(SeckillOrderMessage message) {
         try {
-            String payload = objectMapper.writeValueAsString(message);
-            rocketMQTemplate.syncSend(MqConstants.SECKILL_ORDER_TOPIC, payload, 3000);
+            return objectMapper.writeValueAsString(message);
         } catch (JsonProcessingException e) {
-            log.warn("秒杀订单消息序列化失败, orderId={}: {}", message.getOrderId(), e.getMessage());
+            log.error("秒杀订单序列化失败, orderId={}: {}", message.getOrderId(), e.getMessage());
             throw new BusinessException(503, "秒杀下单失败，请稍后再试");
+        }
+    }
+
+    private void sendSeckillOrderMessage(String payload) {
+        try {
+            rocketMQTemplate.syncSend(MqConstants.SECKILL_ORDER_TOPIC, payload, 3000);
         } catch (Exception e) {
-            log.warn("秒杀订单消息发送失败, orderId={}: {}", message.getOrderId(), e.getMessage());
+            log.warn("秒杀订单消息发送失败: {}", e.getMessage());
             throw new BusinessException(503, "秒杀下单失败，请稍后再试");
         }
     }
@@ -215,13 +226,56 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     }
 
     private SeckillActivity getActivity(int type, Long activityId) {
+        // 1. 先从 Redis 读缓存
+        String metaKey = activityMetaKey(type, activityId);
+        Map<Object, Object> cached = redisTemplate.opsForHash().entries(metaKey);
+        if (!cached.isEmpty()) {
+            return mapToActivity(cached);
+        }
+        // 2. 缓存未命中才查数据库（兜底）
         SeckillActivity activity = type == TradeType.VENUE
                 ? seckillMapper.selectVenueActivity(activityId)
                 : seckillMapper.selectEquipmentActivity(activityId);
         if (activity == null) {
             throw new BusinessException(404, "秒杀活动不存在");
         }
+        // 3. 回填缓存
+        cacheActivityMeta(activity);
         return activity;
+    }
+
+    private void cacheActivityMeta(SeckillActivity activity) {
+        String metaKey = activityMetaKey(activity.getType(), activity.getId());
+        Map<String, String> fields = new HashMap<>();
+        fields.put("id", String.valueOf(activity.getId()));
+        fields.put("type", String.valueOf(activity.getType()));
+        fields.put("productId", String.valueOf(activity.getProductId()));
+        fields.put("seckillPrice", activity.getSeckillPrice().toPlainString());
+        fields.put("startAt", activity.getStartAt().toString());
+        fields.put("endAt", activity.getEndAt().toString());
+        Duration ttl = seckillCacheTtl(activity);
+        redisTemplate.opsForHash().putAll(metaKey, fields);
+        redisTemplate.expire(metaKey, ttl);
+    }
+
+    private SeckillActivity mapToActivity(Map<Object, Object> fields) {
+        SeckillActivity activity = new SeckillActivity();
+        activity.setId(Long.valueOf(str(fields, "id")));
+        activity.setType(Integer.valueOf(str(fields, "type")));
+        activity.setProductId(Long.valueOf(str(fields, "productId")));
+        activity.setSeckillPrice(new BigDecimal(str(fields, "seckillPrice")));
+        activity.setStartAt(LocalDateTime.parse(str(fields, "startAt")));
+        activity.setEndAt(LocalDateTime.parse(str(fields, "endAt")));
+        return activity;
+    }
+
+    private String str(Map<Object, Object> map, String key) {
+        Object value = map.get(key);
+        return value == null ? "" : value.toString();
+    }
+
+    private String activityMetaKey(int type, Long activityId) {
+        return RedisConstants.SECKILL_ACTIVITY_KEY + type + ":" + activityId;
     }
 
     private void preloadActivity(SeckillActivity activity, List<Long> userIds) {
@@ -235,12 +289,16 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             redisTemplate.opsForSet().add(userKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
         }
         redisTemplate.expire(userKey, ttl);
+
+        // 预热活动元数据，让 submit 不再查数据库
+        cacheActivityMeta(activity);
     }
 
     private void deleteLegacyActivityKeys(Long activityId) {
         redisTemplate.delete(List.of(
                 RedisConstants.SECKILL_STOCK_KEY + activityId,
-                RedisConstants.SECKILL_USER_KEY + activityId
+                RedisConstants.SECKILL_USER_KEY + activityId,
+                RedisConstants.SECKILL_ACTIVITY_KEY + activityId
         ));
     }
 

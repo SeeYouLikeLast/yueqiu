@@ -3,6 +3,7 @@ package com.hm.badminton.mq;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.constants.MqConstants;
+import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.dto.SeckillOrderMessage;
 import com.hm.badminton.service.trade.impl.SeckillOrderMessageService;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
@@ -12,6 +13,7 @@ import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,7 +21,8 @@ import org.springframework.stereotype.Component;
         topic = MqConstants.SECKILL_ORDER_TOPIC,
         consumerGroup = MqConstants.SECKILL_ORDER_CONSUMER_GROUP,
         consumeMode = ConsumeMode.CONCURRENTLY,
-        messageModel = MessageModel.CLUSTERING
+        messageModel = MessageModel.CLUSTERING,
+        maxReconsumeTimes = MqConstants.SECKILL_ORDER_MAX_RECONSUME_TIMES
 )
 public class SeckillOrderConsumer implements RocketMQListener<String> {
 
@@ -27,10 +30,14 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
 
     private final SeckillOrderMessageService orderMessageService;
     private final ObjectMapper objectMapper;
+    private final StringRedisTemplate redisTemplate;
 
-    public SeckillOrderConsumer(SeckillOrderMessageService orderMessageService, ObjectMapper objectMapper) {
+    public SeckillOrderConsumer(SeckillOrderMessageService orderMessageService,
+                                ObjectMapper objectMapper,
+                                StringRedisTemplate redisTemplate) {
         this.orderMessageService = orderMessageService;
         this.objectMapper = objectMapper;
+        this.redisTemplate = redisTemplate;
     }
 
     @Override
@@ -50,6 +57,21 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
             log.info("秒杀订单重复消息已忽略, userId={}, activityId={}", message.getUserId(), message.getActivityId());
         } catch (BusinessException e) {
             log.warn("秒杀订单异步创建失败, orderId={}, reason={}", message.getOrderId(), e.getMessage());
+            rollbackRedisPreDeduct(message);
+        }
+    }
+
+    private void rollbackRedisPreDeduct(SeckillOrderMessage message) {
+        try {
+            String stockKey = RedisConstants.SECKILL_STOCK_KEY + message.getType() + ":" + message.getActivityId();
+            String userKey = RedisConstants.SECKILL_USER_KEY + message.getType() + ":" + message.getActivityId();
+            redisTemplate.opsForValue().increment(stockKey);
+            redisTemplate.opsForSet().remove(userKey, String.valueOf(message.getUserId()));
+            log.info("秒杀订单补偿回滚成功, orderId={}, userId={}, activityId={}",
+                    message.getOrderId(), message.getUserId(), message.getActivityId());
+        } catch (Exception e) {
+            log.error("秒杀订单补偿回滚失败, orderId={}, userId={}, activityId={}, 需要人工处理",
+                    message.getOrderId(), message.getUserId(), message.getActivityId(), e);
         }
     }
 }
