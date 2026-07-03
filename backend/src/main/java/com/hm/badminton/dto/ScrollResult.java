@@ -14,3 +14,4 @@ public class ScrollResult<T> {
     private Long minTime;
     private Integer offset;
 }
+

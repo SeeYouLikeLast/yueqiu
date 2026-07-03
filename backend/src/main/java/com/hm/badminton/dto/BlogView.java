@@ -30,3 +30,4 @@ public class BlogView {
     private Boolean followed;
     private LocalDateTime createdAt;
 }
+

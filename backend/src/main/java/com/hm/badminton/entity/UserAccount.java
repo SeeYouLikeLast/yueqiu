@@ -37,3 +37,4 @@ public class UserAccount implements Serializable {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
+

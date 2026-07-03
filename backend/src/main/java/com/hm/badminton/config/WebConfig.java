@@ -29,7 +29,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .order(0);
         registry.addInterceptor(loginInterceptor)
                 .addPathPatterns(
-                        "/admin/**",
                         "/auth/me",
                         "/auth/location",
                         "/blogs/of/follow",
@@ -38,15 +37,8 @@ public class WebConfig implements WebMvcConfigurer {
                         "/payments/**",
                         "/follows/**",
                         "/seckill/*/*",
-                        "/seckill/*/orders",
-                        "/seckill/all/orders",
-                        "/seckill/preload",
                         "/social/profile/me",
-                        "/social/activities/*/join",
-                        "/social/activities/*/cancel",
-                        "/venues/reviews",
-                        "/venues/*/favorite",
-                        "/venues/favorites/me")
+                        "/social/activities/*/join")
                 .order(1);
     }
 
@@ -60,4 +52,5 @@ public class WebConfig implements WebMvcConfigurer {
                 .maxAge(3600);
     }
 }
+
 

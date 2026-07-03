@@ -36,3 +36,4 @@ public class AmapPlace implements Serializable {
     private List<String> facilities;
     private String source;
 }
+

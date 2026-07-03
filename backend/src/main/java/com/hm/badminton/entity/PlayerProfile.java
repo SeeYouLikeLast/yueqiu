@@ -32,3 +32,4 @@ public class PlayerProfile implements Serializable {
     private Boolean allowInvite;
     private Double distanceMeters;
 }
+

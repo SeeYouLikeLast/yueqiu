@@ -28,3 +28,4 @@ public class Follow implements Serializable {
     private Long followUserId;
     private LocalDateTime createdAt;
 }
+

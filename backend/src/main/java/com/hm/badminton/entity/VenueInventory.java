@@ -34,3 +34,4 @@ public class VenueInventory implements Serializable {
     private BigDecimal price;
     private String status;
 }
+

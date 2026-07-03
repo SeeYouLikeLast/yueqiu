@@ -40,3 +40,4 @@ public class VenueItem implements Serializable {
     private LocalDateTime saleStartAt;
     private LocalDateTime saleEndAt;
 }
+

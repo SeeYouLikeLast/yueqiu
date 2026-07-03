@@ -34,3 +34,4 @@ public class SeckillActivity implements Serializable {
     private LocalDateTime endAt;
     private Integer status;
 }
+

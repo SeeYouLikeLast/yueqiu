@@ -29,3 +29,4 @@ public class VenueReview implements Serializable {
     private Integer likes;
     private LocalDateTime createdAt;
 }
+

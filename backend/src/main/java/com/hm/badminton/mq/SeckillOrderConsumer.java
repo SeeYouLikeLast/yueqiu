@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.constants.MqConstants;
 import com.hm.badminton.dto.SeckillOrderMessage;
-import com.hm.badminton.service.impl.SeckillOrderMessageService;
+import com.hm.badminton.service.trade.impl.SeckillOrderMessageService;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.MessageModel;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
@@ -39,17 +39,17 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
         try {
             message = objectMapper.readValue(payload, SeckillOrderMessage.class);
         } catch (Exception e) {
-            log.warn("秒杀订单消息反序列化失败，payload={}", payload, e);
+            log.warn("秒杀订单消息反序列化失败, payload={}", payload, e);
             return;
         }
 
         try {
             orderMessageService.createOrder(message);
-            log.info("秒杀订单异步落库成功，orderId={}", message.getOrderId());
+            log.info("秒杀订单异步创建成功, orderId={}", message.getOrderId());
         } catch (DuplicateKeyException e) {
-            log.info("秒杀订单重复消息已幂等忽略，userId={}, activityId={}", message.getUserId(), message.getActivityId());
+            log.info("秒杀订单重复消息已忽略, userId={}, activityId={}", message.getUserId(), message.getActivityId());
         } catch (BusinessException e) {
-            log.warn("秒杀订单业务拒绝，orderId={}, reason={}", message.getOrderId(), e.getMessage());
+            log.warn("秒杀订单异步创建失败, orderId={}, reason={}", message.getOrderId(), e.getMessage());
         }
     }
 }

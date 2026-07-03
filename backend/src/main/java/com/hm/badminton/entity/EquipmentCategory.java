@@ -23,3 +23,4 @@ public class EquipmentCategory implements Serializable {
     private String icon;
     private Integer sort;
 }
+

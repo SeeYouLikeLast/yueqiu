@@ -41,3 +41,4 @@ public class VenueInventoryVO {
                 inventory.getAvailableStock() != null && inventory.getAvailableStock() > 0);
     }
 }
+

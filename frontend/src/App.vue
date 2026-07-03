@@ -99,36 +99,6 @@ type VenueOrder = {
   verifyCode: string
 }
 
-type EquipmentOrderItem = {
-  productId: number
-  productName: string
-  coverUrl: string
-  price: number
-  quantity: number
-}
-
-type EquipmentOrder = {
-  id: number
-  userId: number
-  totalAmount: number
-  status: string
-  address: string
-  createdAt: string
-  items: EquipmentOrderItem[]
-}
-
-type SeckillOrder = {
-  id: number
-  type: number
-  activityId: number
-  productId: number
-  productName: string
-  userId: number
-  amount: number
-  status: string
-  createdAt: string
-}
-
 type CartItem = {
   id: number
   type: number
@@ -342,9 +312,8 @@ const blogSport = ref('')
 const blogKeyword = ref('')
 const players = ref<Player[]>([])
 const activities = ref<SportActivity[]>([])
-const venueOrders = ref<VenueOrder[]>([])
-const equipmentOrders = ref<EquipmentOrder[]>([])
-const seckillOrders = ref<SeckillOrder[]>([])
+const venueOrders = ref<ProfileOrderCard[]>([])
+const equipmentOrders = ref<ProfileOrderCard[]>([])
 const cartItems = ref<CartItem[]>([])
 const userProfile = ref<UserProfile | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
@@ -403,53 +372,8 @@ const visibleVenueOrders = computed(() => profileView.value === 'paid'
 const visibleEquipmentOrders = computed(() => profileView.value === 'paid'
   ? equipmentOrders.value.filter((order) => paidStatus(order.status))
   : equipmentOrders.value)
-const visibleSeckillOrders = computed(() => profileView.value === 'paid'
-  ? seckillOrders.value.filter((order) => paidStatus(order.status))
-  : seckillOrders.value)
-const profileVenueOrderCards = computed<ProfileOrderCard[]>(() => [
-  ...visibleVenueOrders.value.map((order) => ({
-    key: `venue-${order.id}`,
-    title: order.productTitle,
-    subtitle: order.venueName,
-    meta: `${order.serviceDate} ${order.startTime.slice(0, 5)}-${order.endTime.slice(0, 5)}`,
-    amount: order.amount,
-    status: order.status,
-    code: order.verifyCode
-  })),
-  ...visibleSeckillOrders.value
-    .filter((order) => order.type === 1)
-    .map((order) => ({
-      key: `seckill-venue-${order.id}`,
-      title: order.productName,
-      subtitle: '秒杀场所',
-      meta: formatDateTime(order.createdAt),
-      amount: order.amount,
-      status: order.status,
-      code: `#${order.id}`
-    }))
-])
-const profileEquipmentOrderCards = computed<ProfileOrderCard[]>(() => [
-  ...visibleSeckillOrders.value
-    .filter((order) => order.type === 2)
-    .map((order) => ({
-      key: `seckill-equipment-${order.id}`,
-      title: order.productName,
-      subtitle: '秒杀装备',
-      meta: formatDateTime(order.createdAt),
-      amount: order.amount,
-      status: order.status,
-      code: `#${order.id}`
-    })),
-  ...visibleEquipmentOrders.value.map((order) => ({
-    key: `equipment-${order.id}`,
-    title: equipmentOrderTitle(order),
-    subtitle: order.address,
-    meta: `${formatDateTime(order.createdAt)} · 共 ${equipmentOrderQuantity(order)} 件`,
-    amount: order.totalAmount,
-    status: order.status,
-    code: `#${order.id}`
-  }))
-])
+const profileVenueOrderCards = computed<ProfileOrderCard[]>(() => visibleVenueOrders.value)
+const profileEquipmentOrderCards = computed<ProfileOrderCard[]>(() => visibleEquipmentOrders.value)
 const selectedPlaceVenueItems = computed(() => {
   if (!selectedPlace.value) return []
   const records = saleVenueItems(selectedPlace.value)
@@ -607,7 +531,6 @@ function resetLoginState() {
   userProfile.value = null
   venueOrders.value = []
   equipmentOrders.value = []
-  seckillOrders.value = []
   cartItems.value = []
   profileBlogs.value = []
   viewedUserProfile.value = null
@@ -890,7 +813,7 @@ async function loadVenueOrders() {
     venueOrders.value = []
     return
   }
-  venueOrders.value = await api<VenueOrder[]>('/api/orders/1')
+  venueOrders.value = await api<ProfileOrderCard[]>('/api/orders/1')
 }
 
 async function loadEquipmentOrders() {
@@ -898,31 +821,18 @@ async function loadEquipmentOrders() {
     equipmentOrders.value = []
     return
   }
-  equipmentOrders.value = await api<EquipmentOrder[]>('/api/orders/2')
-}
-
-async function loadSeckillOrders() {
-  if (!loggedIn.value) {
-    seckillOrders.value = []
-    return
-  }
-  const [venueResult, equipmentResult] = await Promise.all([
-    api<SeckillOrder[]>('/api/seckill/1/orders'),
-    api<SeckillOrder[]>('/api/seckill/2/orders')
-  ])
-  seckillOrders.value = [...venueResult, ...equipmentResult]
+  equipmentOrders.value = await api<ProfileOrderCard[]>('/api/orders/2')
 }
 
 async function loadOrderBundle(force = false) {
   if (!loggedIn.value) {
     venueOrders.value = []
     equipmentOrders.value = []
-    seckillOrders.value = []
     ordersLoaded.value = false
     return
   }
   if (ordersLoaded.value && !force) return
-  await Promise.all([loadVenueOrders(), loadEquipmentOrders(), loadSeckillOrders()])
+  await Promise.all([loadVenueOrders(), loadEquipmentOrders()])
   ordersLoaded.value = true
 }
 
@@ -1689,14 +1599,6 @@ function reviewImages(review: VenueReview) {
 
 function reviewDate(value?: string) {
   return formatDateTime(value).slice(5, 10)
-}
-
-function equipmentOrderTitle(order: EquipmentOrder) {
-  return order.items?.length ? order.items.map((item) => item.productName).join('、') : '装备订单'
-}
-
-function equipmentOrderQuantity(order: EquipmentOrder) {
-  return order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0
 }
 
 function saleVenueItems(place: Place) {

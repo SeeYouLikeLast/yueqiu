@@ -28,3 +28,4 @@ public class CartItem implements Serializable {
     private Integer stock;
     private BigDecimal amount;
 }
+

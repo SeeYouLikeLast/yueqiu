@@ -35,3 +35,4 @@ public class Venue implements Serializable {
     private Double distanceMeters;
     private LocalDateTime createdAt;
 }
+

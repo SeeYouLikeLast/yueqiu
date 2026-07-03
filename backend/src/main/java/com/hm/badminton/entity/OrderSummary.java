@@ -44,3 +44,4 @@ public class OrderSummary implements Serializable {
         private Integer quantity;
     }
 }
+

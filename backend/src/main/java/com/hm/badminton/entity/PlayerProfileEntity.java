@@ -36,3 +36,4 @@ public class PlayerProfileEntity implements Serializable {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
+

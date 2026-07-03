@@ -22,3 +22,4 @@ public class SportType implements Serializable {
     private String name;
     private List<String> keywords;
 }
+

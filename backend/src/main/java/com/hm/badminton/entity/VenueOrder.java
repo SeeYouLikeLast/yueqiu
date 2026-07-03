@@ -42,3 +42,4 @@ public class VenueOrder implements Serializable {
     private LocalDateTime usedAt;
     private LocalDateTime createdAt;
 }
+

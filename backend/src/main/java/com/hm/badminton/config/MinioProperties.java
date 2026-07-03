@@ -15,3 +15,4 @@ public class MinioProperties {
     private String secretKey = "minioadmin123";
     private String bucket = "hm-badminton";
 }
+

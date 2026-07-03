@@ -41,12 +41,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "1问题.md",
+                "file": "项目启动与关闭.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "1问题"
+              "title": "项目启动与关闭"
             }
           }
         ],
@@ -185,13 +185,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "1问题.md",
+                "file": "项目启动与关闭.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "1问题 的大纲"
+              "title": "项目启动与关闭 的大纲"
             }
           }
         ],
@@ -214,11 +214,11 @@
   },
   "active": "b087386fe7809a7c",
   "lastOpenFiles": [
+    "数据存储分工-MySQL-Redis-MinIO.md",
+    "1问题.md",
     "后端HMDP分层结构与API转发.md",
     "项目启动与关闭.md",
     "羽动羽毛球点评项目规划.md",
-    "WSL-Docker-MySQL-Redis-环境配置.md",
-    "1问题.md",
-    "数据存储分工-MySQL-Redis-MinIO.md"
+    "WSL-Docker-MySQL-Redis-环境配置.md"
   ]
 }

@@ -20,3 +20,4 @@ public class UserPublicProfile {
     private boolean followed;
     private boolean isMe;
 }
+

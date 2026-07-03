@@ -40,3 +40,4 @@ public class Blog implements Serializable {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
+

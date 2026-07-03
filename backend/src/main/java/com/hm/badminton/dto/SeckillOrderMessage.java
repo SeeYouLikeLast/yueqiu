@@ -17,3 +17,4 @@ public class SeckillOrderMessage {
     private Long userId;
     private BigDecimal amount;
 }
+

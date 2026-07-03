@@ -48,3 +48,4 @@ public class SeckillActivityVO {
                 activity.getStatus());
     }
 }
+

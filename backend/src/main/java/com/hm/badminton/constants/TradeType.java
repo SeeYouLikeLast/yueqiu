@@ -15,7 +15,7 @@ public final class TradeType {
             throw new BusinessException(400, "业务类型不能为空");
         }
         if (type != VENUE && type != EQUIPMENT) {
-            throw new BusinessException(400, "业务类型只支持 1=场馆商品，2=装备商品");
+            throw new BusinessException(400, "业务类型只支持 1=场所商品，2=装备商品");
         }
         return type;
     }
@@ -27,7 +27,8 @@ public final class TradeType {
         try {
             return require(Integer.parseInt(type.trim()));
         } catch (NumberFormatException e) {
-            throw new BusinessException(400, "业务类型只支持 1=场馆商品，2=装备商品");
+            throw new BusinessException(400, "业务类型只支持 1=场所商品，2=装备商品");
         }
     }
 }
+

@@ -21,7 +21,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})
     public ResponseEntity<ApiResponse<Void>> validation(Exception e) {
-        return fail(422, "参数校验失败：" + e.getMessage());
+        return fail(422, "参数校验失败: " + e.getMessage());
     }
 
     @ExceptionHandler(DuplicateKeyException.class)
@@ -36,12 +36,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
     public ResponseEntity<ApiResponse<Void>> notFound(Exception e) {
-        return fail(404, "接口不存在");
+        return fail(404, "资源不存在");
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> other(Exception e) {
-        return fail(500, "系统繁忙，请稍后再试");
+        return fail(500, "系统异常，请稍后再试");
     }
 
     private ResponseEntity<ApiResponse<Void>> fail(int code, String message) {

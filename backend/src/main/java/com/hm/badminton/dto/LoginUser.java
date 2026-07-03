@@ -21,3 +21,4 @@ public class LoginUser {
         this(id, phone, nickname, city, level, null, null, null);
     }
 }
+

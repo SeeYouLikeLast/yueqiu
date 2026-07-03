@@ -16,3 +16,4 @@ public class HmBadmintonApplication {
         SpringApplication.run(HmBadmintonApplication.class, args);
     }
 }
+

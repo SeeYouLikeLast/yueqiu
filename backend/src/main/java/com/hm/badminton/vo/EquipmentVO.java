@@ -41,3 +41,4 @@ public class EquipmentVO {
                 equipment.getSold());
     }
 }
+

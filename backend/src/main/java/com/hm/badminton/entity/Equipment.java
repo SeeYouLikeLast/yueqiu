@@ -34,3 +34,4 @@ public class Equipment implements Serializable {
     private Integer status;
     private LocalDateTime createdAt;
 }
+
