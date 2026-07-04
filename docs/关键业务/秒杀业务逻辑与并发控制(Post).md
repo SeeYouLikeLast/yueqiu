@@ -119,7 +119,7 @@ backend/src/main/java/com/hm/badminton/constants/RedisConstants.java
 | `seckill:stock:{type}:{activityId}`               | String | Redis 中的秒杀库存 |
 | `seckill:users:{type}:{activityId}`               | Set    | 已成功预扣的用户集合   |
 | `lock:seckill:order:{type}:{activityId}:{userId}` | Lock   | 用户级分布式锁      |
-| `seckill:activity:{type}:{activityId}`            | Hash   | 秒杀活动元数据缓存    |
+| `seckill:activity:{type}:{activityId}`            | String(JSON) | 秒杀活动元数据缓存，保存 `data + expireTime` |
 
 例如：
 
@@ -137,6 +137,8 @@ TTL 设计：
 ```
 
 随机抖动用于降低大量秒杀 key 同时过期造成的缓存雪崩风险。
+
+其中 `seckill:activity:{type}:{activityId}` 已改为逻辑过期热点缓存：Redis key 本身不依赖物理 TTL，value 中保存逻辑过期时间。逻辑过期后请求仍先返回旧活动数据，并由拿到重建锁的线程异步刷新缓存，避免秒杀活动热点 key 过期时大量请求同时访问 MySQL。
 
 ## 5. Redisson 分布式锁
 
@@ -709,4 +711,3 @@ MySQL 唯一索引兜底一人一单
 Redis Cluster key 设计
 场所/装备真实库存一致性
 ```
-

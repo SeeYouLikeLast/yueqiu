@@ -55,16 +55,30 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "关键业务/秒杀业务逻辑与并发控制.md",
+                "file": "1问题.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "秒杀业务逻辑与并发控制"
+              "title": "1问题"
+            }
+          },
+          {
+            "id": "a5afe527593a4681",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "关键业务/redis防穿透、雪崩、击穿（Get）.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "redis防穿透、雪崩、击穿（Get）"
             }
           }
         ],
-        "currentTab": 3
+        "currentTab": 4
       }
     ],
     "direction": "vertical"
@@ -199,13 +213,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "关键业务/秒杀业务逻辑与并发控制.md",
+                "file": "关键业务/redis防穿透、雪崩、击穿（Get）.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "秒杀业务逻辑与并发控制 的大纲"
+              "title": "redis防穿透、雪崩、击穿（Get） 的大纲"
             }
           }
         ],
@@ -213,7 +227,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 225.5
+    "width": 311.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -226,15 +240,17 @@
       "bases:新建数据库": false
     }
   },
-  "active": "96f42c74b91e818f",
+  "active": "a5afe527593a4681",
   "lastOpenFiles": [
-    "关键业务",
-    "数据存储分工-MySQL-Redis-MinIO.md",
-    "羽动羽毛球点评项目规划.md",
-    "WSL-Docker-MySQL-Redis-环境配置.md",
+    "关键业务/秒杀业务逻辑与并发控制(Post).md",
+    "关键业务/redis防穿透、雪崩、击穿（Get）.md",
+    "2原理.md",
     "1问题.md",
-    "关键业务/秒杀业务逻辑与并发控制.md",
+    "数据存储分工-MySQL-Redis-MinIO.md",
+    "WSL-Docker-MySQL-Redis-环境配置.md",
+    "羽动羽毛球点评项目规划.md",
     "项目启动与关闭.md",
+    "关键业务",
     "后端HMDP分层结构与API转发.md",
     "关键模块作用.md"
   ]

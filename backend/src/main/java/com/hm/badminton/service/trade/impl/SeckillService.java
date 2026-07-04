@@ -11,6 +11,7 @@ import com.hm.badminton.entity.SeckillActivity;
 import com.hm.badminton.entity.SeckillOrder;
 import com.hm.badminton.mapper.trade.SeckillMapper;
 import com.hm.badminton.service.trade.ISeckillService;
+import com.hm.badminton.utils.CacheClient;
 import com.hm.badminton.utils.IdGenerator;
 import com.hm.badminton.utils.RedisTtl;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -24,12 +25,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -46,6 +44,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final DefaultRedisScript<Long> seckillScript;
+    private final CacheClient cacheClient;
 
     public SeckillService(SeckillMapper seckillMapper,
                           StringRedisTemplate redisTemplate,
@@ -53,7 +52,8 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
                           RocketMQTemplate rocketMQTemplate,
                           ObjectMapper objectMapper,
                           IdGenerator idGenerator,
-                          DefaultRedisScript<Long> seckillScript) {
+                          DefaultRedisScript<Long> seckillScript,
+                          CacheClient cacheClient) {
         this.seckillMapper = seckillMapper;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
@@ -61,6 +61,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         this.objectMapper = objectMapper;
         this.idGenerator = idGenerator;
         this.seckillScript = seckillScript;
+        this.cacheClient = cacheClient;
     }
 
     @Override
@@ -219,61 +220,20 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     }
 
     private SeckillActivity getActivity(int type, Long activityId) {
-        // 1. 先从 Redis 读缓存
-        String metaKey = activityMetaKey(type, activityId);
-        Map<Object, Object> cached = redisTemplate.opsForHash().entries(metaKey);
-        if (!cached.isEmpty()) {
-            if (RedisConstants.CACHE_NULL_VALUE.equals(str(cached, "_null"))) {
-                throw new BusinessException(404, "秒杀活动不存在");
-            }
-            return mapToActivity(cached);
-        }
-        // 2. 缓存未命中才查数据库（兜底）
-        SeckillActivity activity = type == TradeType.VENUE
-                ? seckillMapper.selectVenueActivity(activityId)
-                : seckillMapper.selectEquipmentActivity(activityId);
-        if (activity == null) {
-            cacheNullActivity(metaKey);
-            throw new BusinessException(404, "秒杀活动不存在");
-        }
-        // 3. 回填缓存
-        cacheActivityMeta(activity);
-        return activity;
+        return cacheClient.queryWithLogicalExpire(
+                activityMetaKey(type, activityId),
+                SeckillActivity.class,
+                () -> type == TradeType.VENUE
+                        ? seckillMapper.selectVenueActivity(activityId)
+                        : seckillMapper.selectEquipmentActivity(activityId),
+                RedisConstants.CACHE_LOGICAL_TTL,
+                "秒杀活动不存在");
     }
 
     private void cacheActivityMeta(SeckillActivity activity) {
-        String metaKey = activityMetaKey(activity.getType(), activity.getId());
-        Map<String, String> fields = new HashMap<>();
-        fields.put("id", String.valueOf(activity.getId()));
-        fields.put("type", String.valueOf(activity.getType()));
-        fields.put("productId", String.valueOf(activity.getProductId()));
-        fields.put("seckillPrice", activity.getSeckillPrice().toPlainString());
-        fields.put("startAt", activity.getStartAt().toString());
-        fields.put("endAt", activity.getEndAt().toString());
-        Duration ttl = seckillCacheTtl(activity);
-        redisTemplate.opsForHash().putAll(metaKey, fields);
-        redisTemplate.expire(metaKey, ttl);
-    }
-
-    private void cacheNullActivity(String metaKey) {
-        redisTemplate.opsForHash().put(metaKey, "_null", RedisConstants.CACHE_NULL_VALUE);
-        redisTemplate.expire(metaKey, RedisConstants.CACHE_NULL_TTL);
-    }
-
-    private SeckillActivity mapToActivity(Map<Object, Object> fields) {
-        SeckillActivity activity = new SeckillActivity();
-        activity.setId(Long.valueOf(str(fields, "id")));
-        activity.setType(Integer.valueOf(str(fields, "type")));
-        activity.setProductId(Long.valueOf(str(fields, "productId")));
-        activity.setSeckillPrice(new BigDecimal(str(fields, "seckillPrice")));
-        activity.setStartAt(LocalDateTime.parse(str(fields, "startAt")));
-        activity.setEndAt(LocalDateTime.parse(str(fields, "endAt")));
-        return activity;
-    }
-
-    private String str(Map<Object, Object> map, String key) {
-        Object value = map.get(key);
-        return value == null ? "" : value.toString();
+        cacheClient.setWithLogicalExpire(activityMetaKey(activity.getType(), activity.getId()),
+                activity,
+                RedisConstants.CACHE_LOGICAL_TTL);
     }
 
     private String activityMetaKey(int type, Long activityId) {
