@@ -35,6 +35,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.time.LocalDateTime;
 
 @Service
 public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
@@ -86,26 +87,33 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
 
     @Override
     public ScrollResult<BlogView> followFeed(Long maxTime, Integer offset, LoginUser currentUser) {
+        // 1. 未登录用户无关注流，直接返回空
         if (currentUser == null) {
             return new ScrollResult<>(Collections.emptyList(), 0L, 0);
         }
+        // 2. 规范化分页参数：maxTime 为上一页最小 score（游标），offset 为同 score 已拉取条数
         long max = maxTime == null ? Long.MAX_VALUE : maxTime;
         int safeOffset = offset == null ? 0 : Math.max(offset, 0);
+        // 3. 从 Redis ZSet 按 score 倒序拉取 feed 中的博客 ID
         Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
                 .reverseRangeByScoreWithScores(RedisConstants.FEED_KEY + currentUser.getId(), 0, max, safeOffset, DEFAULT_SIZE);
+        // 4. feed 为空时降级到数据库直接查关注用户的博客
         if (tuples == null || tuples.isEmpty()) {
             PageResult<BlogView> fallback = listFollowBlogs(1, DEFAULT_SIZE, currentUser);
             return new ScrollResult<>(fallback.getRecords(), 0L, 0);
         }
+        // 5. 从 ZSet 结果中提取博客 ID 列表
         List<Long> ids = tuples.stream()
                 .map(ZSetOperations.TypedTuple::getValue)
                 .filter(Objects::nonNull)
                 .map(Long::valueOf)
                 .toList();
+        // 6. 批量查询博客并过滤已删除/下架的（status != 1），保留 ZSet 原始顺序
         Map<Long, Blog> blogMap = listByIds(ids).stream()
                 .filter(blog -> Integer.valueOf(1).equals(blog.getStatus()))
                 .collect(Collectors.toMap(Blog::getId, Function.identity()));
         List<Blog> blogs = ids.stream().map(blogMap::get).filter(Objects::nonNull).toList();
+        // 7. 计算下一页游标：minTime = 本批最小 score，sameCount = 与 minTime 相同 score 的条目数
         List<ZSetOperations.TypedTuple<String>> tupleList = new ArrayList<>(tuples);
         long minTime = tupleList.get(tupleList.size() - 1).getScore().longValue();
         int sameCount = 0;
@@ -116,6 +124,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                 break;
             }
         }
+        // 8. 填充用户视角数据（头像、昵称、点赞/关注状态）并返回
         return new ScrollResult<>(enrich(blogs, currentUser), minTime, sameCount);
     }
 
@@ -172,6 +181,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         }
         boolean updated = lambdaUpdate()
                 .set(Blog::getStatus, 0)
+                .set(Blog::getDeletedAt, LocalDateTime.now())
                 .eq(Blog::getId, blogId)
                 .eq(Blog::getUserId, userId)
                 .eq(Blog::getStatus, 1)

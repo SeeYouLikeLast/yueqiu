@@ -76,9 +76,23 @@
               "icon": "lucide-file",
               "title": "1问题"
             }
+          },
+          {
+            "id": "cdba0a6425c18b82",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "3注释.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "3注释"
+            }
           }
         ],
-        "currentTab": 4
+        "currentTab": 5
       }
     ],
     "direction": "vertical"
@@ -213,13 +227,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "1问题.md",
+                "file": "3注释.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "1问题 的大纲"
+              "title": "3注释 的大纲"
             }
           }
         ],
@@ -240,12 +254,14 @@
       "bases:新建数据库": false
     }
   },
-  "active": "a5afe527593a4681",
+  "active": "cdba0a6425c18b82",
   "lastOpenFiles": [
+    "1问题.md",
+    "Pasted image 20260704192213.png",
+    "3注释.md",
     "关键业务/redis防穿透、雪崩、击穿（Get）.md",
     "关键业务/秒杀业务逻辑与并发控制(Post).md",
     "2原理.md",
-    "1问题.md",
     "数据存储分工-MySQL-Redis-MinIO.md",
     "WSL-Docker-MySQL-Redis-环境配置.md",
     "羽动羽毛球点评项目规划.md",

@@ -31,6 +31,7 @@ drop table if exists order_equipment;
 drop table if exists cart_equipment;
 drop table if exists equipment;
 drop table if exists equipment_categories;
+drop table if exists blog_archive;
 drop table if exists blogs;
 drop table if exists follows;
 drop table if exists venue_favorites;
@@ -291,12 +292,37 @@ create table blogs (
   related_price decimal(10, 2) null,
   liked int not null default 0,
   status tinyint not null default 1,
+  deleted_at datetime null,
+  archived_at datetime null,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,
   key idx_blogs_recommend (status, liked, created_at),
   key idx_blogs_sport (sport_code, status, created_at),
   key idx_blogs_user (user_id, created_at),
+  key idx_blogs_cleanup (status, deleted_at, archived_at),
   key idx_blogs_related (related_type, related_id)
+) engine=InnoDB default charset=utf8mb4;
+
+create table blog_archive (
+  id bigint primary key,
+  user_id bigint not null,
+  sport_code varchar(32) not null,
+  title varchar(128) not null,
+  content varchar(2000) not null,
+  image_urls varchar(3000) null,
+  related_type varchar(32) not null,
+  related_id bigint not null,
+  related_title varchar(128) not null,
+  related_cover_url varchar(512) null,
+  related_price decimal(10, 2) null,
+  liked int not null default 0,
+  status tinyint not null default 0,
+  deleted_at datetime not null,
+  archived_at datetime not null default current_timestamp,
+  created_at datetime not null,
+  updated_at datetime not null,
+  key idx_blog_archive_user (user_id, created_at),
+  key idx_blog_archive_deleted_at (deleted_at)
 ) engine=InnoDB default charset=utf8mb4;
 
 create table cart_equipment (

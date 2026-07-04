@@ -37,6 +37,8 @@ public class Blog implements Serializable {
     private BigDecimal relatedPrice;
     private Integer liked;
     private Integer status;
+    private LocalDateTime deletedAt;
+    private LocalDateTime archivedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
