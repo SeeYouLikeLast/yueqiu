@@ -33,6 +33,7 @@ public class UserAccount implements Serializable {
     private String city;
     private String level;
     private String preferTime;
+    private Integer isBigV;
     private Integer status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

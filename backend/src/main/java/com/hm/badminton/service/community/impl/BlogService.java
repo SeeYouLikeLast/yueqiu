@@ -27,7 +27,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Collections;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +38,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.time.LocalDateTime;
 
 @Service
 public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
@@ -85,46 +87,67 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         return new PageResult<>(enrich(result.getRecords(), currentUser), result.getTotal(), safePage, safeSize);
     }
 
+    /**
+     * 关注流滚动分页（推拉结合模式）。
+     * 普通作者走推模式（发布时写入粉丝 inbox），大 V 走拉模式（读取大 V 的 outbox），
+     * 最后合并、去重、排序、窗口截取，返回统一时间线。
+     *
+     * @param maxTime 上一页最小 score（游标），首次传 null
+     * @param offset  与 maxTime 同 score 的已拉取条数（防重复）
+     */
     @Override
     public ScrollResult<BlogView> followFeed(Long maxTime, Integer offset, LoginUser currentUser) {
-        // 1. 未登录用户无关注流，直接返回空
+        // 1. 未登录用户无关注流
         if (currentUser == null) {
             return new ScrollResult<>(Collections.emptyList(), 0L, 0);
         }
-        // 2. 规范化分页参数：maxTime 为上一页最小 score（游标），offset 为同 score 已拉取条数
         long max = maxTime == null ? Long.MAX_VALUE : maxTime;
         int safeOffset = offset == null ? 0 : Math.max(offset, 0);
-        // 3. 从 Redis ZSet 按 score 倒序拉取 feed 中的博客 ID
-        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
-                .reverseRangeByScoreWithScores(RedisConstants.FEED_KEY + currentUser.getId(), 0, max, safeOffset, DEFAULT_SIZE);
-        // 4. feed 为空时降级到数据库直接查关注用户的博客
-        if (tuples == null || tuples.isEmpty()) {
-            PageResult<BlogView> fallback = listFollowBlogs(1, DEFAULT_SIZE, currentUser);
-            return new ScrollResult<>(fallback.getRecords(), 0L, 0);
-        }
-        // 5. 从 ZSet 结果中提取博客 ID 列表
-        List<Long> ids = tuples.stream()
-                .map(ZSetOperations.TypedTuple::getValue)
-                .filter(Objects::nonNull)
-                .map(Long::valueOf)
+
+        // 2. 推模式：读取用户收件箱（普通作者发布时已写入）
+        List<FeedEntry> merged = new ArrayList<>();
+        merged.addAll(readFeedEntries(RedisConstants.FEED_KEY + currentUser.getId(), max));
+        // 3. 拉模式：遍历关注的大 V，读取其 outbox（outbox 空时降级 DB）
+        merged.addAll(readBigVOutboxEntries(currentUser.getId(), max));
+        // 4. 合并去重 + 排序：同一 blogId 保留 score 最大的（防止推拉重复），
+        //    然后按 score 倒序、blogId 倒序排列
+        List<FeedEntry> sorted = merged.stream()
+                .collect(Collectors.toMap(FeedEntry::blogId, Function.identity(),
+                        (a, b) -> a.score() >= b.score() ? a : b))
+                .values()
+                .stream()
+                .sorted(Comparator.comparingLong(FeedEntry::score).reversed()
+                        .thenComparing(FeedEntry::blogId, Comparator.reverseOrder()))
                 .toList();
-        // 6. 批量查询博客并过滤已删除/下架的（status != 1），保留 ZSet 原始顺序
-        Map<Long, Blog> blogMap = listByIds(ids).stream()
-                .filter(blog -> Integer.valueOf(1).equals(blog.getStatus()))
-                .collect(Collectors.toMap(Blog::getId, Function.identity()));
-        List<Blog> blogs = ids.stream().map(blogMap::get).filter(Objects::nonNull).toList();
-        // 7. 计算下一页游标：minTime = 本批最小 score，sameCount = 与 minTime 相同 score 的条目数
-        List<ZSetOperations.TypedTuple<String>> tupleList = new ArrayList<>(tuples);
-        long minTime = tupleList.get(tupleList.size() - 1).getScore().longValue();
-        int sameCount = 0;
-        for (int i = tupleList.size() - 1; i >= 0; i--) {
-            if (tupleList.get(i).getScore().longValue() == minTime) {
-                sameCount++;
-            } else {
+
+        // 5. 滚动游标偏移：跳过上一页末尾与 maxTime 同 score 的已返回条目
+        List<FeedEntry> window = new ArrayList<>(DEFAULT_SIZE);
+        int skippedSameScore = 0;
+        for (FeedEntry entry : sorted) {
+            if (maxTime != null && entry.score() == max && skippedSameScore < safeOffset) {
+                skippedSameScore++;
+                continue;
+            }
+            window.add(entry);
+            if (window.size() >= DEFAULT_SIZE) {
                 break;
             }
         }
-        // 8. 填充用户视角数据（头像、昵称、点赞/关注状态）并返回
+
+        // 6. 窗口为空时降级到数据库直接查关注用户的博客
+        if (window.isEmpty()) {
+            PageResult<BlogView> fallback = listFollowBlogs(1, DEFAULT_SIZE, currentUser);
+            return new ScrollResult<>(fallback.getRecords(), 0L, 0);
+        }
+        // 7. 批量加载博客实体，保留窗口顺序
+        List<Blog> blogs = loadBlogsByFeedEntries(window);
+        if (blogs.isEmpty()) {
+            return new ScrollResult<>(Collections.emptyList(), 0L, 0);
+        }
+        // 8. 计算下一页游标：minTime = 本窗口最小 score，sameCount = 同 score 条目数
+        long minTime = window.stream().mapToLong(FeedEntry::score).min().orElse(0L);
+        int sameCount = (int) window.stream().filter(entry -> entry.score() == minTime).count();
+        // 9. 填充用户视角数据（头像、昵称、点赞/关注状态）返回
         return new ScrollResult<>(enrich(blogs, currentUser), minTime, sameCount);
     }
 
@@ -161,10 +184,13 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         blog.setStatus(1);
         save(blog);
 
-        List<Follow> followers = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getFollowUserId, userId));
         long timestamp = System.currentTimeMillis();
-        for (Follow follower : followers) {
-            redisTemplate.opsForZSet().add(RedisConstants.FEED_KEY + follower.getUserId(), String.valueOf(blog.getId()), timestamp);
+        redisTemplate.opsForZSet().add(RedisConstants.BLOG_OUTBOX_KEY + userId, String.valueOf(blog.getId()), timestamp);
+        if (!isBigV(userId)) {
+            List<Follow> followers = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getFollowUserId, userId));
+            for (Follow follower : followers) {
+                redisTemplate.opsForZSet().add(RedisConstants.FEED_KEY + follower.getUserId(), String.valueOf(blog.getId()), timestamp);
+            }
         }
         return blog.getId();
     }
@@ -191,6 +217,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         }
         cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
         redisTemplate.delete(RedisConstants.BLOG_LIKED_KEY + blogId);
+        redisTemplate.opsForZSet().remove(RedisConstants.BLOG_OUTBOX_KEY + userId, String.valueOf(blogId));
         removeFromFollowerFeeds(userId, blogId);
     }
 
@@ -216,6 +243,83 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         for (Follow follower : followers) {
             redisTemplate.opsForZSet().remove(RedisConstants.FEED_KEY + follower.getUserId(), blogIdText);
         }
+    }
+
+    private List<FeedEntry> readFeedEntries(String key, long maxScore) {
+        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
+                .reverseRangeByScoreWithScores(key, 0, maxScore, 0, DEFAULT_SIZE * 3);
+        if (tuples == null || tuples.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return tuples.stream()
+                .map(this::toFeedEntry)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private List<FeedEntry> readBigVOutboxEntries(Long userId, long maxScore) {
+        List<Long> bigVIds = followedBigVIds(userId);
+        if (bigVIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<FeedEntry> entries = new ArrayList<>();
+        for (Long bigVId : bigVIds) {
+            List<FeedEntry> outboxEntries = readFeedEntries(RedisConstants.BLOG_OUTBOX_KEY + bigVId, maxScore);
+            entries.addAll(outboxEntries.isEmpty() ? readBigVBlogsFromDatabase(bigVId, maxScore) : outboxEntries);
+        }
+        return entries;
+    }
+
+    private List<Long> followedBigVIds(Long userId) {
+        List<Long> followUserIds = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, userId))
+                .stream()
+                .map(Follow::getFollowUserId)
+                .toList();
+        if (followUserIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return userMapper.selectByIds(followUserIds)
+                .stream()
+                .filter(user -> Integer.valueOf(1).equals(user.getStatus()))
+                .filter(user -> Integer.valueOf(1).equals(user.getIsBigV()))
+                .map(UserAccount::getId)
+                .toList();
+    }
+
+    private List<Blog> loadBlogsByFeedEntries(List<FeedEntry> entries) {
+        List<Long> ids = entries.stream().map(FeedEntry::blogId).toList();
+        Map<Long, Blog> blogMap = listByIds(ids).stream()
+                .filter(blog -> Integer.valueOf(1).equals(blog.getStatus()))
+                .collect(Collectors.toMap(Blog::getId, Function.identity()));
+        return ids.stream().map(blogMap::get).filter(Objects::nonNull).toList();
+    }
+
+    private List<FeedEntry> readBigVBlogsFromDatabase(Long bigVId, long maxScore) {
+        return list(new LambdaQueryWrapper<Blog>()
+                .eq(Blog::getStatus, 1)
+                .eq(Blog::getUserId, bigVId)
+                .orderByDesc(Blog::getCreatedAt)
+                .last("limit " + DEFAULT_SIZE))
+                .stream()
+                .map(blog -> new FeedEntry(blog.getId(), blog.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()))
+                .filter(entry -> entry.score() <= maxScore)
+                .toList();
+    }
+
+    private FeedEntry toFeedEntry(ZSetOperations.TypedTuple<String> tuple) {
+        if (tuple == null || tuple.getValue() == null || tuple.getScore() == null) {
+            return null;
+        }
+        try {
+            return new FeedEntry(Long.valueOf(tuple.getValue()), tuple.getScore().longValue());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private boolean isBigV(Long userId) {
+        UserAccount user = userMapper.selectById(userId);
+        return user != null && Integer.valueOf(1).equals(user.getIsBigV());
     }
 
     private PageResult<BlogView> listFollowBlogs(int page, int size, LoginUser currentUser) {
@@ -292,6 +396,9 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     private List<String> splitImages(String imageUrls) {
         if (imageUrls == null || imageUrls.isBlank()) return Collections.emptyList();
         return Arrays.stream(imageUrls.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList();
+    }
+
+    private record FeedEntry(Long blogId, long score) {
     }
 
 }

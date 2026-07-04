@@ -52,6 +52,7 @@ create table users (
   city varchar(64) not null default '西安',
   level varchar(32) not null default '新手',
   prefer_time varchar(128) null,
+  is_big_v tinyint not null default 0,
   status tinyint not null default 1,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,

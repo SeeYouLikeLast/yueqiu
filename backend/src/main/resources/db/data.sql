@@ -1,17 +1,17 @@
 -- ============================================================
 -- 用户数据 (10 个用户，覆盖多种运动类型和城市)
 -- ============================================================
-insert into users(id, phone, email, username, password_hash, nickname, avatar, city, level, prefer_time) values
-(1, '13800000001', 'chen@example.com', 'chenyu', '{plain}123456', '陈予', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=240&q=80', '杭州', '中级', '周二/周四晚上'),
-(2, '13800000002', 'lin@example.com', 'linhai', '{plain}123456', '林海', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '周末上午'),
-(3, '13800000003', 'momo@example.com', 'momo', '{plain}123456', '默默', 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=240&q=80', '上海', '初级', '工作日晚上'),
-(4, '13800000004', 'xiaoyu@example.com', 'xiaoyu', '{plain}123456', '小宇', 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80', '北京', '中级', '周末下午'),
-(5, '13800000005', 'coach@example.com', 'coachwan', '{plain}123456', '万教练', 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '每天晚上'),
-(6, '13800000006', 'zhao@example.com', 'coachzhao', '{plain}123456', '赵教练', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=240&q=80', '北京', '高级', '周末全天'),
-(7, '13800000007', 'fish@example.com', 'xiaoyuer', '{plain}123456', '小鱼儿', 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=240&q=80', '杭州', '初级', '周五晚上/周末'),
-(8, '13800000008', 'zhuang@example.com', 'dazhuang', '{plain}123456', '大壮', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=240&q=80', '上海', '中级', '每天晚上'),
-(9, '13800000009', 'tennis@example.com', 'tennismaster', '{plain}123456', '网球达人', 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '周三/周六下午'),
-(10, '13800000010', 'volley@example.com', 'volleyboy', '{plain}123456', '排球小子', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=240&q=80', '杭州', '初级', '周末下午');
+insert into users(id, phone, email, username, password_hash, nickname, avatar, city, level, prefer_time, is_big_v) values
+(1, '13800000001', 'chen@example.com', 'chenyu', '{plain}123456', '陈予', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=240&q=80', '杭州', '中级', '周二/周四晚上', 0),
+(2, '13800000002', 'lin@example.com', 'linhai', '{plain}123456', '林海', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '周末上午', 1),
+(3, '13800000003', 'momo@example.com', 'momo', '{plain}123456', '默默', 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=240&q=80', '上海', '初级', '工作日晚上', 0),
+(4, '13800000004', 'xiaoyu@example.com', 'xiaoyu', '{plain}123456', '小宇', 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80', '北京', '中级', '周末下午', 0),
+(5, '13800000005', 'coach@example.com', 'coachwan', '{plain}123456', '万教练', 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '每天晚上', 0),
+(6, '13800000006', 'zhao@example.com', 'coachzhao', '{plain}123456', '赵教练', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=240&q=80', '北京', '高级', '周末全天', 0),
+(7, '13800000007', 'fish@example.com', 'xiaoyuer', '{plain}123456', '小鱼儿', 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=240&q=80', '杭州', '初级', '周五晚上/周末', 0),
+(8, '13800000008', 'zhuang@example.com', 'dazhuang', '{plain}123456', '大壮', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=240&q=80', '上海', '中级', '每天晚上', 0),
+(9, '13800000009', 'tennis@example.com', 'tennismaster', '{plain}123456', '网球达人', 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=240&q=80', '杭州', '高级', '周三/周六下午', 0),
+(10, '13800000010', 'volley@example.com', 'volleyboy', '{plain}123456', '排球小子', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=240&q=80', '杭州', '初级', '周末下午', 0);
 
 -- ============================================================
 -- 关注关系 (用于关注流推送，仿 HMDP follows 集合)
@@ -22,14 +22,21 @@ insert into follows(user_id, follow_user_id) values
 (1, 7),
 (2, 1),
 (2, 7),
+(3, 2),
 (3, 8),
+(4, 2),
 (4, 6),
 (5, 1),
+(5, 2),
+(6, 2),
 (6, 4),
 (7, 1),
 (7, 2),
+(8, 2),
 (8, 3),
+(9, 2),
 (9, 10),
+(10, 2),
 (10, 9);
 
 -- ============================================================

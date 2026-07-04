@@ -160,6 +160,9 @@ type Player = {
   playStyle: string
   availableTime: string
   intro: string
+  allowInvite?: boolean
+  longitude?: number
+  latitude?: number
   distanceMeters?: number
 }
 
@@ -336,6 +339,7 @@ const venueOrders = ref<ProfileOrderCard[]>([])
 const equipmentOrders = ref<ProfileOrderCard[]>([])
 const cartItems = ref<CartItem[]>([])
 const userProfile = ref<UserProfile | null>(null)
+const socialProfile = ref<Player | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
 const profileBlogs = ref<BlogPost[]>([])
 const selectedBlog = ref<BlogPost | null>(null)
@@ -351,6 +355,7 @@ const profileView = ref<ProfileView>('orders')
 const profileMode = ref<ProfileMode>('me')
 const publicProfileReturnTab = ref<Tab>('seckill')
 const profileOrderPageVisible = ref(false)
+const profileEditorVisible = ref(false)
 const loadingMore = ref(false)
 const placesPage = ref(1)
 const placesTotal = ref(0)
@@ -386,9 +391,9 @@ const profileTitle = computed(() => profileMode.value === 'public' ? 'TA 的主�
 const profileSubtitle = computed(() => profileMode.value === 'public' ? '球友主页' : '个人中心')
 const profileAvatar = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.avatar : userProfile.value?.avatar)
 const profileNickname = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.nickname : userProfile.value?.nickname)
-const profileCity = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.city : userProfile.value?.city)
-const profileLevel = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.level : userProfile.value?.level)
-const profilePreferTime = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.preferTime : userProfile.value?.prefer_time)
+const profileCity = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.city : socialProfile.value?.city || userProfile.value?.city)
+const profileLevel = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.level : socialProfile.value?.level || userProfile.value?.level)
+const profilePreferTime = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.preferTime : socialProfile.value?.availableTime || userProfile.value?.prefer_time)
 const profileCreatedAt = computed(() => profileMode.value === 'public' ? viewedUserProfile.value?.createdAt : userProfile.value?.created_at)
 const paidStatus = (status: string) => ['已支付', '已抢到', '已使用'].includes(status)
 const visibleVenueOrders = computed(() => profileView.value === 'paid'
@@ -486,6 +491,19 @@ const activityForm = reactive({
   maxPlayers: 4,
   levelRequired: '中级',
   feeType: 'AA'
+})
+
+const profileForm = reactive({
+  sportCode: 'badminton',
+  city: '西安',
+  area: '未央区',
+  longitude: 108.946465,
+  latitude: 34.347269,
+  level: '中级',
+  playStyle: '双打',
+  availableTime: '周末下午',
+  intro: '想找固定球友，工作日晚上和周末都可以约。',
+  allowInvite: true
 })
 
 const blogPublishForm = reactive({
@@ -605,6 +623,7 @@ function resetLoginState() {
   clearToken()
   authToken.value = ''
   userProfile.value = null
+  socialProfile.value = null
   venueOrders.value = []
   equipmentOrders.value = []
   cartItems.value = []
@@ -619,6 +638,7 @@ function resetLoginState() {
   profileMode.value = 'me'
   publicProfileReturnTab.value = 'seckill'
   profileOrderPageVisible.value = false
+  profileEditorVisible.value = false
 }
 
 function handleRequestError(error: unknown) {
@@ -951,6 +971,18 @@ async function loadUserProfile() {
   userProfile.value = await api<UserProfile>('/api/auth/me')
 }
 
+async function loadSocialProfile() {
+  if (!loggedIn.value) {
+    socialProfile.value = null
+    return
+  }
+  try {
+    socialProfile.value = await api<Player>('/api/social/profile/me')
+  } catch {
+    socialProfile.value = null
+  }
+}
+
 async function ensureUserProfile() {
   if (!loggedIn.value || userProfile.value) return
   try {
@@ -981,6 +1013,9 @@ async function loadMyProfileHome(force = false) {
   }
   if (force || !userProfile.value) {
     await loadUserProfile()
+  }
+  if (force || !socialProfile.value) {
+    await loadSocialProfile()
   }
   if (userProfile.value) {
     await loadProfileBlogs(userProfile.value.id)
@@ -1069,6 +1104,7 @@ async function switchTab(tab: Tab) {
   activeTab.value = tab
   selectedBlog.value = null
   blogComposerVisible.value = false
+  profileEditorVisible.value = false
   if (tab === 'profile') {
     profileMode.value = 'me'
     viewedUserProfile.value = null
@@ -1476,11 +1512,66 @@ async function openBlogRelated(blog: BlogPost) {
 async function openProfileView(view: ProfileView) {
   profileView.value = view
   profileOrderPageVisible.value = true
+  profileEditorVisible.value = false
   await wrap(() => loadProfileViewData(view))
 }
 
 function closeProfileOrderPage() {
   profileOrderPageVisible.value = false
+}
+
+function fillProfileForm(profile?: Player | null) {
+  profileForm.sportCode = profile?.sportCode || selectedSport.value || 'badminton'
+  profileForm.city = profile?.city || userProfile.value?.city || placeQuery.city || '西安'
+  profileForm.area = profile?.area || locationLabel.value.replace(profileForm.city, '').trim() || '未央区'
+  profileForm.longitude = profile?.longitude ?? placeQuery.lng
+  profileForm.latitude = profile?.latitude ?? placeQuery.lat
+  profileForm.level = profile?.level || userProfile.value?.level || '中级'
+  profileForm.playStyle = profile?.playStyle || '双打'
+  profileForm.availableTime = profile?.availableTime || userProfile.value?.prefer_time || '周末下午'
+  profileForm.intro = profile?.intro || '想找固定球友，工作日晚上和周末都可以约。'
+  profileForm.allowInvite = profile?.allowInvite ?? true
+}
+
+async function openProfileEditor() {
+  if (!requireLogin('请先登录后编辑球友资料')) return
+  await wrap(async () => {
+    if (!socialProfile.value) {
+      await loadSocialProfile()
+    }
+    fillProfileForm(socialProfile.value)
+    profileEditorVisible.value = true
+  })
+}
+
+function closeProfileEditor() {
+  profileEditorVisible.value = false
+}
+
+async function saveSocialProfile() {
+  if (!profileForm.city.trim() || !profileForm.area.trim() || !profileForm.level.trim()) {
+    message.value = '请补全城市、区域和水平'
+    return
+  }
+  await wrap(async () => {
+    await api('/api/social/profile/me', {
+      method: 'POST',
+      body: JSON.stringify({
+        sportCode: profileForm.sportCode,
+        city: profileForm.city.trim(),
+        area: profileForm.area.trim(),
+        longitude: profileForm.longitude,
+        latitude: profileForm.latitude,
+        level: profileForm.level.trim(),
+        playStyle: profileForm.playStyle.trim(),
+        availableTime: profileForm.availableTime.trim(),
+        intro: profileForm.intro.trim(),
+        allowInvite: profileForm.allowInvite
+      })
+    })
+    await Promise.all([loadUserProfile(), loadSocialProfile()])
+    profileEditorVisible.value = false
+  }, '球友资料已更新')
 }
 
 function searchPlaces() {
@@ -1931,9 +2022,11 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="auth-hero">
-        <div class="auth-mark"><Zap :size="24" /></div>
-        <h1>球动</h1>
-        <p>约场、买课、找搭子</p>
+        <div class="auth-mark">
+          <img src="/Icon.png" alt="约个球" />
+        </div>
+        <h1>约个球</h1>
+        <p>上球搭子，约个球</p>
       </div>
 
       <section class="auth-panel">
@@ -2569,7 +2662,10 @@ onBeforeUnmount(() => {
                 <span>{{ profileLevel || '新手' }}</span>
               </div>
             </div>
-            <button v-if="profileMode === 'me'" class="ghost" @click="logout">退出</button>
+            <div v-if="profileMode === 'me'" class="profile-actions">
+              <button class="ghost" type="button" @click="openProfileEditor">编辑</button>
+              <button class="ghost" type="button" @click="logout">退出</button>
+            </div>
             <button
               v-else
               class="ghost"
@@ -2583,6 +2679,8 @@ onBeforeUnmount(() => {
           <div class="profile-detail">
             <span v-if="profileMode === 'me'">用户名：{{ userProfile?.username || '未设置' }}</span>
             <span v-if="profileMode === 'me'">邮箱：{{ userProfile?.email || '未绑定' }}</span>
+            <span v-if="profileMode === 'me'">运动：{{ sportNameByCode(socialProfile?.sportCode || selectedSport || 'badminton') }}</span>
+            <span v-if="profileMode === 'me'">打法：{{ socialProfile?.playStyle || '双打' }}</span>
             <span>偏好：{{ profilePreferTime || '工作日晚上 / 周末下午' }}</span>
             <span>加入：{{ formatDateTime(profileCreatedAt) }}</span>
           </div>
@@ -2600,6 +2698,61 @@ onBeforeUnmount(() => {
               <ShoppingCart :size="27" />
               <span>购物车</span>
             </button>
+          </div>
+        </section>
+
+        <section v-if="profileMode === 'me' && loggedIn && !profileOrderPageVisible && profileEditorVisible" class="profile-editor-panel">
+          <div class="sheet-title">
+            <div>
+              <span>球友资料</span>
+              <strong>编辑约球名片</strong>
+            </div>
+            <button class="ghost icon-only" type="button" @click="closeProfileEditor" aria-label="关闭"><X :size="18" /></button>
+          </div>
+          <div class="profile-form-grid">
+            <label>
+              <span>常打运动</span>
+              <select v-model="profileForm.sportCode">
+                <option v-for="sport in sports" :key="sport.code" :value="sport.code">{{ sport.name }}</option>
+              </select>
+            </label>
+            <label>
+              <span>水平</span>
+              <select v-model="profileForm.level">
+                <option>新手</option>
+                <option>初级</option>
+                <option>中级</option>
+                <option>高级</option>
+              </select>
+            </label>
+            <label>
+              <span>城市</span>
+              <input v-model="profileForm.city" placeholder="西安" />
+            </label>
+            <label>
+              <span>区域</span>
+              <input v-model="profileForm.area" placeholder="未央区" />
+            </label>
+            <label>
+              <span>打法/位置</span>
+              <input v-model="profileForm.playStyle" placeholder="双打、单打、守门员..." />
+            </label>
+            <label>
+              <span>可约时间</span>
+              <input v-model="profileForm.availableTime" placeholder="工作日晚上 / 周末下午" />
+            </label>
+            <label class="wide">
+              <span>个人介绍</span>
+              <textarea v-model="profileForm.intro" maxlength="120" placeholder="写一句方便别人判断是否合拍的话" />
+            </label>
+            <label class="toggle-row wide">
+              <span>允许球友邀请我参加活动</span>
+              <input v-model="profileForm.allowInvite" type="checkbox" />
+            </label>
+          </div>
+          <div class="sheet-actions">
+            <button type="button" @click="closeProfileEditor">取消</button>
+            <button class="primary" type="button" @click="saveSocialProfile">保存资料</button>
           </div>
         </section>
 

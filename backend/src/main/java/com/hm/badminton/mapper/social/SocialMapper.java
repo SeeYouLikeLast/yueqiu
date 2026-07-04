@@ -210,8 +210,10 @@ public interface SocialMapper {
             set current_players = current_players + 1,
                 status = case when current_players + 1 >= max_players then '已满员' else '招募中' end
             where id = #{activityId}
+              and status = '招募中'
+              and current_players < max_players
             """)
-    int increaseActivityPlayers(@Param("activityId") Long activityId);
+    int increaseActivityPlayersIfAvailable(@Param("activityId") Long activityId);
 
     @Select("""
             select a.id, a.creator_id, u.nickname as creator_name, a.sport_code, a.venue_id,

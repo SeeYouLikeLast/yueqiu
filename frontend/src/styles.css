@@ -125,9 +125,15 @@ textarea {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  color: #ffffff;
-  background: #15845f;
-  box-shadow: 0 16px 32px rgba(21, 132, 95, 0.22);
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 16px 32px rgba(21, 132, 95, 0.16);
+}
+
+.auth-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .auth-hero h1 {
@@ -1874,6 +1880,22 @@ p {
   font-size: 13px;
 }
 
+.profile-actions {
+  display: grid;
+  gap: 7px;
+  justify-items: end;
+}
+
+.profile-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.icon-text {
+  gap: 5px;
+}
+
 .profile-tags,
 .profile-detail,
 .profile-stats,
@@ -1911,6 +1933,89 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profile-editor-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #dfe8dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(22, 38, 29, 0.08);
+}
+
+.sheet-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sheet-title span {
+  display: block;
+  color: #6c786f;
+  font-size: 12px;
+}
+
+.sheet-title strong {
+  display: block;
+  color: #0f1d16;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-form-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.profile-form-grid label > span {
+  color: #657168;
+  font-size: 12px;
+}
+
+.profile-form-grid .wide,
+.toggle-row {
+  grid-column: 1 / -1;
+}
+
+.profile-form-grid textarea {
+  min-height: 78px;
+}
+
+.toggle-row {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid #dbe6d8;
+  border-radius: 8px;
+  background: #f9fbf6;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #15845f;
+}
+
+.sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+
+.sheet-actions button {
+  min-height: 42px;
 }
 
 .profile-stats {
