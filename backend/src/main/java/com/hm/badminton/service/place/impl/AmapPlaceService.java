@@ -1,14 +1,17 @@
 package com.hm.badminton.service.place.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.common.PageResult;
 import com.hm.badminton.config.AmapProperties;
+import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.entity.AmapPlace;
 import com.hm.badminton.entity.SportType;
 import com.hm.badminton.service.place.IAmapPlaceService;
 import com.hm.badminton.service.catalog.ISportCatalogService;
+import com.hm.badminton.utils.CacheClient;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -17,6 +20,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -27,14 +31,17 @@ public class AmapPlaceService implements IAmapPlaceService {
     private final AmapProperties amapProperties;
     private final ISportCatalogService sportCatalogService;
     private final ObjectMapper objectMapper;
+    private final CacheClient cacheClient;
     private final RestClient restClient;
 
     public AmapPlaceService(AmapProperties amapProperties,
                             ISportCatalogService sportCatalogService,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            CacheClient cacheClient) {
         this.amapProperties = amapProperties;
         this.sportCatalogService = sportCatalogService;
         this.objectMapper = objectMapper;
+        this.cacheClient = cacheClient;
         this.restClient = RestClient.create();
     }
 
@@ -56,7 +63,7 @@ public class AmapPlaceService implements IAmapPlaceService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), Math.min(Math.max(1, amapProperties.getPageSize()), 25));
         int safeRadius = Math.min(Math.max(radius == null ? amapProperties.getRadius() : radius, 100), 50000);
-        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(amapProperties.getEndpoint())
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(amapProperties.getEndpoint())
                 .queryParam("key", amapProperties.getKey())
                 .queryParam("location", lng + "," + lat)
                 .queryParam("radius", safeRadius)
@@ -75,6 +82,7 @@ public class AmapPlaceService implements IAmapPlaceService {
 
         JsonNode root = callAmap(uri);
         String status = root.path("status").asText();
+        // 高德接口里通常 status = "1" 表示返回成功
         if (!"1".equals(status)) {
             String info = root.path("info").asText("unknown");
             String infoCode = root.path("infocode").asText("");
@@ -99,7 +107,13 @@ public class AmapPlaceService implements IAmapPlaceService {
         if (lng == null || lat == null) {
             throw new BusinessException(422, "逆地理编码需要提供 lng 和 lat");
         }
-        URI uri = UriComponentsBuilder.fromHttpUrl("https://restapi.amap.com/v3/geocode/regeo")
+        String cacheKey = RedisConstants.AMAP_REGEOCODE_KEY + roundedLocation(lng, lat);
+        return cacheClient.querySimple(cacheKey, new TypeReference<>() {
+        }, () -> requestReverseGeocode(lng, lat), RedisConstants.AMAP_REGEOCODE_TTL);
+    }
+
+    private Map<String, Object> requestReverseGeocode(Double lng, Double lat) {
+        URI uri = UriComponentsBuilder.fromUriString("https://restapi.amap.com/v3/geocode/regeo")
                 .queryParam("key", amapProperties.getKey())
                 .queryParam("location", lng + "," + lat)
                 .queryParam("extensions", "base")
@@ -129,6 +143,10 @@ public class AmapPlaceService implements IAmapPlaceService {
                 "formattedAddress", text(regeocode, "formatted_address"),
                 "shortAddress", shortAddress.isBlank() ? text(regeocode, "formatted_address") : shortAddress
         );
+    }
+
+    private String roundedLocation(Double lng, Double lat) {
+        return String.format(Locale.ROOT, "%.4f,%.4f", lng, lat);
     }
 
     private JsonNode callAmap(URI uri) {

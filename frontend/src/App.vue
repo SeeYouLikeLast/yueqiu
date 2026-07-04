@@ -11,11 +11,14 @@ import {
   LogIn,
   MapPin,
   MessageCircle,
+  PenLine,
   Phone,
   Search,
+  Send,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
+  Trash2,
   UserRound,
   Users,
   X,
@@ -258,6 +261,23 @@ type BlogPost = {
   createdAt: string
 }
 
+type BlogRelatedOption = {
+  key: string
+  type: BlogPost['relatedType']
+  id: number
+  title: string
+  coverUrl?: string
+  price?: number
+  sportCode: string
+  subtitle: string
+}
+
+type ScrollResult<T> = {
+  list: T[]
+  minTime?: number
+  offset?: number
+}
+
 const fallbackSports: SportType[] = [
   { code: 'badminton', name: '羽毛球', keywords: ['羽毛球馆'] },
   { code: 'table_tennis', name: '乒乓球', keywords: ['乒乓球馆'] },
@@ -319,6 +339,8 @@ const userProfile = ref<UserProfile | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
 const profileBlogs = ref<BlogPost[]>([])
 const selectedBlog = ref<BlogPost | null>(null)
+const blogComposerVisible = ref(false)
+const blogComposerReturnTab = ref<Tab>('seckill')
 const cartCount = ref(0)
 const cartLoaded = ref(false)
 const ordersLoaded = ref(false)
@@ -342,20 +364,23 @@ const activitiesPage = ref(1)
 const activitiesTotal = ref(0)
 const blogsPage = ref(1)
 const blogsTotal = ref(0)
+const followFeedLastId = ref<number | undefined>()
+const followFeedOffset = ref(0)
+const followFeedHasMore = ref(true)
 const profileBlogsPage = ref(1)
 const profileBlogsTotal = ref(0)
 
 const loggedIn = computed(() => Boolean(authToken.value))
 const activeSport = computed(() => sports.value.find((sport) => sport.code === selectedSport.value) || ALL_SPORT)
 const cartAmount = computed(() => cartItems.value.reduce((sum, item) => sum + Number(item.amount), 0))
-const showPhoneHeader = computed(() => !(activeTab.value === 'home' && selectedPlace.value))
-const showDiscoveryHeader = computed(() => activeTab.value !== 'profile')
+const showPhoneHeader = computed(() => !blogComposerVisible.value && !(activeTab.value === 'home' && selectedPlace.value))
+const showDiscoveryHeader = computed(() => !blogComposerVisible.value && activeTab.value !== 'profile')
 const showCategoryHeader = computed(() => activeTab.value === 'equipment' && Boolean(selectedSport.value))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
 const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
 const hasMoreEquipmentItems = computed(() => products.value.length < productsTotal.value)
 const hasMoreSocial = computed(() => players.value.length < playersTotal.value || activities.value.length < activitiesTotal.value)
-const hasMoreBlogs = computed(() => blogs.value.length < blogsTotal.value)
+const hasMoreBlogs = computed(() => blogChannel.value === 'follow' ? followFeedHasMore.value : blogs.value.length < blogsTotal.value)
 const hasMoreProfileBlogs = computed(() => profileBlogs.value.length < profileBlogsTotal.value)
 const profileTitle = computed(() => profileMode.value === 'public' ? 'TA 的主页' : '我的')
 const profileSubtitle = computed(() => profileMode.value === 'public' ? '球友主页' : '个人中心')
@@ -463,6 +488,54 @@ const activityForm = reactive({
   feeType: 'AA'
 })
 
+const blogPublishForm = reactive({
+  sportCode: 'badminton',
+  title: '',
+  content: '',
+  imageText: '',
+  relatedKey: ''
+})
+
+const blogRelatedOptions = computed<BlogRelatedOption[]>(() => {
+  const records: BlogRelatedOption[] = []
+  const seen = new Set<string>()
+  const push = (option: BlogRelatedOption) => {
+    if (seen.has(option.key)) return
+    seen.add(option.key)
+    records.push(option)
+  }
+  products.value.forEach((item) => {
+    push({
+      key: `EQUIPMENT:${item.id}`,
+      type: 'EQUIPMENT',
+      id: item.id,
+      title: item.name,
+      coverUrl: item.coverUrl,
+      price: item.price,
+      sportCode: item.sportCode,
+      subtitle: `${item.brand} · ${item.categoryName}`
+    })
+  })
+  const venueProducts = [
+    ...venueSaleItems.value,
+    ...Object.values(venueItems.value).flat(),
+    ...selectedPlaceVenueItems.value
+  ]
+  venueProducts.forEach((item) => {
+    push({
+      key: `VENUE_PRODUCT:${item.id}`,
+      type: 'VENUE_PRODUCT',
+      id: item.id,
+      title: item.title,
+      coverUrl: item.coverUrl,
+      price: item.price,
+      sportCode: item.sportCode,
+      subtitle: `${item.venueName} · ${item.productTypeName}`
+    })
+  })
+  return records.filter((item) => !blogPublishForm.sportCode || item.sportCode === blogPublishForm.sportCode)
+})
+
 const locationLabel = computed(() => placeQuery.city || '当前位置')
 const preciseLocationLabel = computed(() => placeQuery.preciseAddress || `${placeQuery.lng.toFixed(4)}, ${placeQuery.lat.toFixed(4)}`)
 
@@ -502,6 +575,9 @@ function resetListPaging() {
   activitiesTotal.value = 0
   blogsPage.value = 1
   blogsTotal.value = 0
+  followFeedLastId.value = undefined
+  followFeedOffset.value = 0
+  followFeedHasMore.value = true
   profileBlogsPage.value = 1
   profileBlogsTotal.value = 0
 }
@@ -535,6 +611,7 @@ function resetLoginState() {
   profileBlogs.value = []
   viewedUserProfile.value = null
   selectedBlog.value = null
+  blogComposerVisible.value = false
   cartCount.value = 0
   cartLoaded.value = false
   ordersLoaded.value = false
@@ -589,8 +666,10 @@ async function login() {
     authToken.value = result.token
     activeTab.value = authReturnTab.value
     authPageVisible.value = false
+    const located = await refreshCurrentLocation({ reload: false, showMessage: false })
     await loadCurrentTab()
-  }, '登录成功')
+    message.value = located ? '登录成功，已刷新当前位置' : '登录成功，未获取当前位置'
+  })
 }
 
 async function loadSports() {
@@ -741,14 +820,34 @@ async function loadSeckill() {
 }
 
 async function loadBlogs(page = 1, append = false) {
+  await ensureUserProfile()
   if (blogChannel.value === 'follow' && !loggedIn.value) {
     blogs.value = []
     blogsPage.value = 1
     blogsTotal.value = 0
+    followFeedLastId.value = undefined
+    followFeedOffset.value = 0
+    followFeedHasMore.value = false
+    return
+  }
+  if (blogChannel.value === 'follow') {
+    const params = new URLSearchParams()
+    if (append && followFeedLastId.value) {
+      params.set('lastId', String(followFeedLastId.value))
+      params.set('offset', String(followFeedOffset.value))
+    }
+    const result = await api<ScrollResult<BlogPost>>(`/api/blogs/of/follow?${params}`)
+    const records = result.list || []
+    blogs.value = append ? appendById(blogs.value, records) : records
+    blogsPage.value = page
+    blogsTotal.value = blogs.value.length
+    followFeedLastId.value = result.minTime || undefined
+    followFeedOffset.value = result.offset || 0
+    followFeedHasMore.value = Boolean(result.minTime) && records.length >= BLOG_PAGE_SIZE
     return
   }
   const params = new URLSearchParams({
-    channel: blogChannel.value === 'follow' ? 'follow' : 'recommend'
+    channel: 'recommend'
   })
   if (blogChannel.value === 'sport' && blogSport.value) params.set('sport', blogSport.value)
   setTrimmedParam(params, 'keyword', blogKeyword.value)
@@ -850,6 +949,15 @@ async function loadUserProfile() {
     return
   }
   userProfile.value = await api<UserProfile>('/api/auth/me')
+}
+
+async function ensureUserProfile() {
+  if (!loggedIn.value || userProfile.value) return
+  try {
+    await loadUserProfile()
+  } catch {
+    userProfile.value = null
+  }
 }
 
 async function loadPublicProfile(userId: number) {
@@ -960,6 +1068,7 @@ function handleWindowScroll() {
 async function switchTab(tab: Tab) {
   activeTab.value = tab
   selectedBlog.value = null
+  blogComposerVisible.value = false
   if (tab === 'profile') {
     profileMode.value = 'me'
     viewedUserProfile.value = null
@@ -1097,6 +1206,9 @@ async function selectBlogChannel(channel: BlogChannel, sport = '') {
   blogs.value = []
   blogsPage.value = 1
   blogsTotal.value = 0
+  followFeedLastId.value = undefined
+  followFeedOffset.value = 0
+  followFeedHasMore.value = true
   await wrap(loadBlogs)
 }
 
@@ -1121,6 +1233,20 @@ function syncBlogFollowState(userId: number, followed: boolean) {
   }
 }
 
+function isOwnBlog(blog?: BlogPost | null) {
+  return Boolean(loggedIn.value && blog && userProfile.value?.id === blog.userId)
+}
+
+function removeBlogFromState(blogId: number) {
+  blogs.value = blogs.value.filter((item) => item.id !== blogId)
+  profileBlogs.value = profileBlogs.value.filter((item) => item.id !== blogId)
+  blogsTotal.value = Math.max(0, blogsTotal.value - 1)
+  profileBlogsTotal.value = Math.max(0, profileBlogsTotal.value - 1)
+  if (selectedBlog.value?.id === blogId) {
+    selectedBlog.value = null
+  }
+}
+
 async function toggleBlogLike(blog: BlogPost) {
   if (!requireLogin('请先登录后点赞动态')) return
   const liked = blog.isLiked
@@ -1137,6 +1263,15 @@ async function toggleBlogLike(blog: BlogPost) {
   }
 }
 
+async function deleteBlog(blog: BlogPost) {
+  if (!isOwnBlog(blog)) return
+  if (!window.confirm('确定删除这条动态吗？')) return
+  await wrap(async () => {
+    await api(`/api/blogs/${blog.id}`, { method: 'DELETE' })
+    removeBlogFromState(blog.id)
+  }, '动态已删除')
+}
+
 async function toggleBlogFollow(blog: BlogPost) {
   if (!requireLogin('请先登录后关注作者')) return
   const next = !blog.followed
@@ -1148,6 +1283,7 @@ async function toggleBlogFollow(blog: BlogPost) {
 
 async function openBlogDetail(blog: BlogPost) {
   await wrap(async () => {
+    await ensureUserProfile()
     selectedBlog.value = await api<BlogPost>(`/api/blogs/${blog.id}`)
   })
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1155,6 +1291,114 @@ async function openBlogDetail(blog: BlogPost) {
 
 function closeBlogDetail() {
   selectedBlog.value = null
+}
+
+function selectedBlogRelatedOption() {
+  return blogRelatedOptions.value.find((item) => item.key === blogPublishForm.relatedKey)
+}
+
+function fillBlogPublishDraft(option?: BlogRelatedOption) {
+  const related = option || selectedBlogRelatedOption() || blogRelatedOptions.value[0]
+  if (!related) return
+  blogPublishForm.relatedKey = related.key
+  blogPublishForm.sportCode = related.sportCode || blogPublishForm.sportCode
+  if (!blogPublishForm.title.trim()) {
+    blogPublishForm.title = `${sportNameByCode(related.sportCode)}体验：${related.title}`
+  }
+  if (!blogPublishForm.content.trim()) {
+    blogPublishForm.content = `今天体验了「${related.title}」，整体感受不错，适合周末约球或者下班后放松。`
+  }
+  if (!blogPublishForm.imageText.trim() && related.coverUrl) {
+    blogPublishForm.imageText = related.coverUrl
+  }
+}
+
+async function openBlogPublisher() {
+  if (!requireLogin('请先登录后发布动态')) return
+  blogComposerReturnTab.value = activeTab.value
+  activeTab.value = 'seckill'
+  selectedBlog.value = null
+  blogComposerVisible.value = true
+  const contextSport = blogChannel.value === 'sport' && blogSport.value ? blogSport.value : selectedSport.value
+  blogPublishForm.sportCode = contextSport || blogPublishForm.sportCode || sports.value[0]?.code || 'badminton'
+  await wrap(async () => {
+    if (!products.value.length) {
+      await loadEquipmentItems()
+    }
+    if (!venueSaleItems.value.length) {
+      await loadVenueSaleItems()
+    }
+    fillBlogPublishDraft()
+  })
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function closeBlogPublisher() {
+  blogComposerVisible.value = false
+  activeTab.value = blogComposerReturnTab.value
+}
+
+function changeBlogPublishSport() {
+  const first = blogRelatedOptions.value[0]
+  blogPublishForm.relatedKey = first?.key || ''
+  if (first && (!blogPublishForm.title.trim() || !blogPublishForm.content.trim())) {
+    fillBlogPublishDraft(first)
+  }
+}
+
+function changeBlogRelatedOption() {
+  fillBlogPublishDraft()
+}
+
+async function publishBlog() {
+  if (!requireLogin('请先登录后发布动态')) return
+  const related = selectedBlogRelatedOption()
+  if (!related) {
+    message.value = '请先选择要关联的装备或场馆团购'
+    return
+  }
+  if (!blogPublishForm.title.trim()) {
+    message.value = '请填写动态标题'
+    return
+  }
+  if (!blogPublishForm.content.trim()) {
+    message.value = '请填写动态正文'
+    return
+  }
+  const images = blogPublishForm.imageText
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  await wrap(async () => {
+    await api<{ blogId: number }>('/api/blogs', {
+      method: 'POST',
+      body: JSON.stringify({
+        sportCode: blogPublishForm.sportCode,
+        title: blogPublishForm.title,
+        content: blogPublishForm.content,
+        images,
+        relatedType: related.type,
+        relatedId: related.id,
+        relatedTitle: related.title,
+        relatedCoverUrl: related.coverUrl,
+        relatedPrice: related.price
+      })
+    })
+    blogComposerVisible.value = false
+    blogPublishForm.title = ''
+    blogPublishForm.content = ''
+    blogPublishForm.imageText = ''
+    blogPublishForm.relatedKey = ''
+    blogChannel.value = 'recommend'
+    blogSport.value = ''
+    blogsPage.value = 1
+    blogsTotal.value = 0
+    await loadBlogs()
+    if (userProfile.value) {
+      await loadProfileBlogs(userProfile.value.id)
+    }
+  }, '动态已发布')
 }
 
 async function openUserProfile(userId: number) {
@@ -1281,47 +1525,61 @@ function searchPlaces() {
   })
 }
 
-async function useCurrentLocation() {
-  await wrap(async () => {
-    locating.value = true
+async function refreshCurrentLocation(options: { reload?: boolean; showMessage?: boolean } = {}) {
+  const reload = options.reload ?? true
+  const showMessage = options.showMessage ?? true
+  locating.value = true
+  try {
+    const located = await locateWithAmapFirst()
+    const accuracy = Math.round(located.accuracy)
+    locationAccuracy.value = accuracy
+    placeQuery.lng = located.lng
+    placeQuery.lat = located.lat
     try {
-      const located = await locateWithAmapFirst()
-      const accuracy = Math.round(located.accuracy)
-      locationAccuracy.value = accuracy
-      placeQuery.lng = located.lng
-      placeQuery.lat = located.lat
-      try {
-        const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
-          lng: String(placeQuery.lng),
-          lat: String(placeQuery.lat)
-        })}`)
-        placeQuery.city = location.city || ''
-        placeQuery.preciseAddress = location.shortAddress || location.formattedAddress || ''
-      } catch {
-        placeQuery.city = ''
-        placeQuery.preciseAddress = ''
-      }
-      if (loggedIn.value) {
-        await api('/api/auth/location', {
-          method: 'PUT',
-          body: JSON.stringify({
-            city: placeQuery.city,
-            preciseAddress: placeQuery.preciseAddress,
-            lng: placeQuery.lng,
-            lat: placeQuery.lat
-          })
+      const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
+        lng: String(placeQuery.lng),
+        lat: String(placeQuery.lat)
+      })}`)
+      placeQuery.city = location.city || ''
+      placeQuery.preciseAddress = location.shortAddress || location.formattedAddress || ''
+    } catch {
+      placeQuery.city = ''
+      placeQuery.preciseAddress = ''
+    }
+    if (loggedIn.value) {
+      await api('/api/auth/location', {
+        method: 'PUT',
+        body: JSON.stringify({
+          city: placeQuery.city,
+          preciseAddress: placeQuery.preciseAddress,
+          lng: placeQuery.lng,
+          lat: placeQuery.lat
         })
-      }
+      })
+    }
+    if (reload) {
       await loadCurrentTab()
+    }
+    if (showMessage) {
       const sourceLabel = located.source === 'amap' ? '高德高精度定位' : '浏览器定位'
       message.value = accuracy > 1000
         ? `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米；当前可能仍是电脑/Wi-Fi 网络定位`
         : `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米`
-    } catch (error) {
-      throw new Error(geolocationMessage(error))
-    } finally {
-      locating.value = false
     }
+    return true
+  } catch (error) {
+    if (showMessage) {
+      throw new Error(geolocationMessage(error))
+    }
+    return false
+  } finally {
+    locating.value = false
+  }
+}
+
+async function useCurrentLocation() {
+  await wrap(async () => {
+    await refreshCurrentLocation()
   })
 }
 function geolocationMessage(error: unknown) {
@@ -1725,7 +1983,7 @@ onBeforeUnmount(() => {
           <span class="location-detail">{{ preciseLocationLabel }}</span>
         </div>
         <span v-if="loggedIn" class="login-chip"><ShieldCheck :size="15" /> 已登录</span>
-        <button v-else class="login-chip muted" @click="openAuthPage('profile')"><LogIn :size="15" /> 登录</button>
+        <button v-else class="login-chip muted" @click="openAuthPage(activeTab)"><LogIn :size="15" /> 去登录</button>
       </div>
 
       <div v-if="showDiscoveryHeader" class="search-bar">
@@ -1769,7 +2027,69 @@ onBeforeUnmount(() => {
     </div>
 
     <main class="phone-main">
-      <section v-if="selectedBlog" class="page-stack blog-detail-page">
+      <section v-if="blogComposerVisible" class="page-stack blog-publish-page">
+        <div class="section-title publish-title">
+          <div>
+            <span>分享体验</span>
+            <strong>发动态</strong>
+          </div>
+          <div class="title-actions">
+            <button class="ghost" type="button" @click="closeBlogPublisher"><ChevronLeft :size="16" /> 返回</button>
+            <button class="primary" type="button" @click="publishBlog" :disabled="loading">
+              <Send :size="16" />
+              发布
+            </button>
+          </div>
+        </div>
+
+        <section class="publish-panel">
+          <label class="form-field">
+            <span>运动类型</span>
+            <select v-model="blogPublishForm.sportCode" @change="changeBlogPublishSport">
+              <option v-for="sport in sports" :key="sport.code" :value="sport.code">{{ sport.name }}</option>
+            </select>
+          </label>
+
+          <label class="form-field">
+            <span>关联内容</span>
+            <select v-model="blogPublishForm.relatedKey" @change="changeBlogRelatedOption">
+              <option value="">选择要关联的装备或场馆团购</option>
+              <option v-for="option in blogRelatedOptions" :key="option.key" :value="option.key">
+                {{ option.title }} · {{ option.subtitle }}
+              </option>
+            </select>
+          </label>
+
+          <label class="form-field">
+            <span>标题</span>
+            <input v-model="blogPublishForm.title" maxlength="48" placeholder="比如：黄金单场适合下班后一小时强度局" />
+          </label>
+
+          <label class="form-field">
+            <span>正文</span>
+            <textarea v-model="blogPublishForm.content" maxlength="500" placeholder="写写体验、适合人群、场地或装备感受" />
+          </label>
+
+          <label class="form-field">
+            <span>图片 URL</span>
+            <textarea v-model="blogPublishForm.imageText" class="image-url-input" placeholder="每行一个图片链接，默认使用关联内容封面" />
+          </label>
+
+          <article v-if="selectedBlogRelatedOption()" class="publish-related-preview">
+            <img
+              :src="selectedBlogRelatedOption()?.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+              :alt="selectedBlogRelatedOption()?.title"
+            />
+            <div>
+              <span>{{ selectedBlogRelatedOption()?.subtitle }}</span>
+              <strong>{{ selectedBlogRelatedOption()?.title }}</strong>
+              <em v-if="selectedBlogRelatedOption()?.price">{{ yuan(selectedBlogRelatedOption()?.price || 0) }}</em>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section v-else-if="selectedBlog" class="page-stack blog-detail-page">
         <div class="section-title">
           <div>
             <span>{{ sportNameByCode(selectedBlog.sportCode) }}</span>
@@ -1806,11 +2126,17 @@ onBeforeUnmount(() => {
             <strong v-if="selectedBlog.relatedPrice">{{ yuan(selectedBlog.relatedPrice) }}</strong>
           </button>
           <div class="blog-detail-actions">
-            <button type="button" class="like-mini" :class="{ active: selectedBlog.isLiked }" @click="toggleBlogLike(selectedBlog)">
-              <Heart :size="17" />
-              {{ selectedBlog.liked }}
-            </button>
             <span>{{ formatDateTime(selectedBlog.createdAt) }}</span>
+            <div class="blog-detail-action-buttons">
+              <button v-if="isOwnBlog(selectedBlog)" type="button" class="delete-mini" @click="deleteBlog(selectedBlog)">
+                <Trash2 :size="15" />
+                删除
+              </button>
+              <button type="button" class="like-mini" :class="{ active: selectedBlog.isLiked }" @click="toggleBlogLike(selectedBlog)">
+                <Heart :size="17" />
+                {{ selectedBlog.liked }}
+              </button>
+            </div>
           </div>
         </article>
       </section>
@@ -2050,7 +2376,10 @@ onBeforeUnmount(() => {
             <span>{{ blogChannel === 'follow' ? '关注动态' : blogChannel === 'sport' ? sportNameByCode(blogSport) : '推荐内容' }}</span>
             <strong>球友社区</strong>
           </div>
-          <button class="ghost" @click="() => loadBlogs()"><Heart :size="16" /> 刷新</button>
+          <div class="title-actions">
+            <button class="primary" type="button" @click="openBlogPublisher"><PenLine :size="16" /> 发动态</button>
+            <button class="ghost" @click="() => loadBlogs()"><Heart :size="16" /> 刷新</button>
+          </div>
         </div>
 
         <div v-if="!blogs.length" class="empty-box">暂无社区动态</div>
@@ -2083,6 +2412,9 @@ onBeforeUnmount(() => {
                   @click.stop="toggleBlogFollow(blog)"
                 >
                   {{ blog.followed ? '已关注' : '关注' }}
+                </button>
+                <button v-else type="button" class="delete-mini icon-only-mini" aria-label="删除动态" @click.stop="deleteBlog(blog)">
+                  <Trash2 :size="14" />
                 </button>
                 <button type="button" class="like-mini" :class="{ active: blog.isLiked }" @click.stop="toggleBlogLike(blog)">
                   <Heart :size="15" />
@@ -2277,6 +2609,10 @@ onBeforeUnmount(() => {
               <span>{{ profileMode === 'public' ? 'TA 的' : '我的' }}</span>
               <strong>动态</strong>
             </div>
+            <button v-if="profileMode === 'me'" class="ghost" type="button" @click="openBlogPublisher">
+              <PenLine :size="15" />
+              发动态
+            </button>
           </div>
           <div v-if="!profileBlogs.length" class="empty-box">暂无动态</div>
           <div v-else class="blog-masonry">
@@ -2308,6 +2644,9 @@ onBeforeUnmount(() => {
                     @click.stop="toggleBlogFollow(blog)"
                   >
                     {{ blog.followed ? '已关注' : '关注' }}
+                  </button>
+                  <button v-else type="button" class="delete-mini icon-only-mini" aria-label="删除动态" @click.stop="deleteBlog(blog)">
+                    <Trash2 :size="14" />
                   </button>
                   <button type="button" class="like-mini" :class="{ active: blog.isLiked }" @click.stop="toggleBlogLike(blog)">
                     <Heart :size="15" />

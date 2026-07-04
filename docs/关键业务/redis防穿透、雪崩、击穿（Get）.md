@@ -66,6 +66,12 @@ public static final Duration CACHE_NULL_TTL = Duration.ofMinutes(2);
 
 注意：空值缓存只能缓解“请求不存在 id”的穿透。如果攻击者每次都构造不同随机 id，仍需要限流、鉴权、参数校验、布隆过滤器等手段配合。
 
+逆地理编码也做了短时间缓存，但它不是数据库穿透场景，而是为了减少重复调用高德：
+
+| Key | 业务 | 策略 |
+| --- | --- | --- |
+| `amap:regeo:{lng},{lat}` | 高德逆地理编码结果，经纬度保留 4 位小数 | 普通缓存，TTL 30 分钟 |
+
 ## 4. 防缓存雪崩：TTL 随机抖动
 
 当前项目使用 `RedisTtl.withJitter(...)` 给 TTL 加随机值。
@@ -97,6 +103,7 @@ public static Duration withJitter(Duration base, long maxJitterSeconds) {
 | `venue:item:{id}`                   | 30 分钟      | 最多 5 分钟    |
 | `user:profile:{id}`                 | 30 分钟      | 最多 5 分钟    |
 | `blog:{id}`                         | 30 分钟      | 最多 5 分钟    |
+| `amap:regeo:{lng},{lat}`            | 30 分钟      | 无          |
 | `seckill:stock:{type}:{activityId}` | 活动结束后 1 小时 | 最多 30 分钟   |
 | `seckill:users:{type}:{activityId}` | 活动结束后 1 小时 | 最多 30 分钟   |
 

@@ -102,7 +102,9 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                 .filter(Objects::nonNull)
                 .map(Long::valueOf)
                 .toList();
-        Map<Long, Blog> blogMap = listByIds(ids).stream().collect(Collectors.toMap(Blog::getId, Function.identity()));
+        Map<Long, Blog> blogMap = listByIds(ids).stream()
+                .filter(blog -> Integer.valueOf(1).equals(blog.getStatus()))
+                .collect(Collectors.toMap(Blog::getId, Function.identity()));
         List<Blog> blogs = ids.stream().map(blogMap::get).filter(Objects::nonNull).toList();
         List<ZSetOperations.TypedTuple<String>> tupleList = new ArrayList<>(tuples);
         long minTime = tupleList.get(tupleList.size() - 1).getScore().longValue();
@@ -160,6 +162,30 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
 
     @Override
     @Transactional
+    public void delete(Long userId, Long blogId) {
+        Blog blog = getById(blogId);
+        if (blog == null || !Integer.valueOf(1).equals(blog.getStatus())) {
+            throw new BusinessException(404, "动态不存在");
+        }
+        if (!Objects.equals(blog.getUserId(), userId)) {
+            throw new BusinessException(403, "只能删除自己的动态");
+        }
+        boolean updated = lambdaUpdate()
+                .set(Blog::getStatus, 0)
+                .eq(Blog::getId, blogId)
+                .eq(Blog::getUserId, userId)
+                .eq(Blog::getStatus, 1)
+                .update();
+        if (!updated) {
+            throw new BusinessException("删除动态失败");
+        }
+        cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
+        redisTemplate.delete(RedisConstants.BLOG_LIKED_KEY + blogId);
+        removeFromFollowerFeeds(userId, blogId);
+    }
+
+    @Override
+    @Transactional
     public void like(Long userId, Long blogId) {
         String key = RedisConstants.BLOG_LIKED_KEY + blogId;
         String member = String.valueOf(userId);
@@ -172,6 +198,14 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
             lambdaUpdate().setSql("liked = greatest(liked - 1, 0)").eq(Blog::getId, blogId).update();
         }
         cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
+    }
+
+    private void removeFromFollowerFeeds(Long userId, Long blogId) {
+        String blogIdText = String.valueOf(blogId);
+        List<Follow> followers = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getFollowUserId, userId));
+        for (Follow follower : followers) {
+            redisTemplate.opsForZSet().remove(RedisConstants.FEED_KEY + follower.getUserId(), blogIdText);
+        }
     }
 
     private PageResult<BlogView> listFollowBlogs(int page, int size, LoginUser currentUser) {
@@ -212,7 +246,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
 
     private List<BlogView> enrich(List<Blog> blogs, LoginUser currentUser) {
         if (blogs.isEmpty()) return Collections.emptyList();
-        Map<Long, UserAccount> users = userMapper.selectBatchIds(blogs.stream().map(Blog::getUserId).collect(Collectors.toSet()))
+        Map<Long, UserAccount> users = userMapper.selectByIds(blogs.stream().map(Blog::getUserId).collect(Collectors.toSet()))
                 .stream()
                 .collect(Collectors.toMap(UserAccount::getId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
         return blogs.stream()

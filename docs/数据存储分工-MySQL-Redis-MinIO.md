@@ -134,6 +134,7 @@ GET  /api/seckill/all/orders      我的秒杀订单汇总
 | `venue:item:{id}`                     | String(JSON)  | 场所售卖项目详情；不存在时写入空值防穿透                | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
 | `user:profile:{id}`                   | String(JSON)  | 用户公开主页基础信息；关注/是否本人实时计算                | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
 | `blog:{id}`                           | String(JSON)  | 博客基础详情；点赞/关注态实时计算                     | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
+| `amap:regeo:{lng},{lat}`              | String(JSON)  | 高德逆地理编码结果，经纬度保留 4 位小数后缓存              | 30 分钟                       |
 | `follows:{userId}`                    | Set           | 用户关注的博主 id                            | 永久，可由 MySQL 重建          |
 | `blog:liked:{blogId}`                 | ZSet          | 博客点赞用户，score 为点赞时间                    | 永久，可由 MySQL 重建计数        |
 | `feed:{userId}`                       | ZSet          | 关注 Feed 收件箱，score 为推送时间               | 永久，可由 MySQL 重建          |

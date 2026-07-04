@@ -8,6 +8,7 @@ import com.hm.badminton.dto.community.BlogCreateRequest;
 import com.hm.badminton.service.community.IBlogService;
 import com.hm.badminton.utils.UserContext;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +62,12 @@ public class BlogController {
     @PostMapping
     public ApiResponse<Map<String, Long>> publish(@Valid @RequestBody BlogCreateRequest request) {
         return ApiResponse.ok(Map.of("blogId", blogService.publish(userContext.requireUserId(), request)));
+    }
+
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(@PathVariable Long id) {
+        blogService.delete(userContext.requireUserId(), id);
+        return ApiResponse.ok();
     }
 
     @PutMapping("/{id}/like")

@@ -1,6 +1,7 @@
 package com.hm.badminton.utils;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.BusinessException;
@@ -15,7 +16,6 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 @Component
@@ -91,6 +91,25 @@ public class CacheClient {
             throw new BusinessException(404, notFoundMessage);
         }
         setWithLogicalExpire(key, value, logicalTtl);
+        return value;
+    }
+
+    /**
+     * 普通短缓存：适合第三方 API 结果这类非数据库详情数据。fallback 返回 null 时不写缓存。
+     */
+    public <T> T querySimple(String key, TypeReference<T> type, Supplier<T> fallback, Duration ttl) {
+        String cached = getString(key);
+        if (cached != null) {
+            try {
+                return objectMapper.readValue(cached, type);
+            } catch (Exception e) {
+                redisTemplate.delete(key);
+            }
+        }
+        T value = fallback.get();
+        if (value != null) {
+            set(key, value, ttl, 0);
+        }
         return value;
     }
 

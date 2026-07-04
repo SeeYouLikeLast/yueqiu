@@ -20,6 +20,8 @@ public interface IBlogService extends IService<Blog> {
 
     Long publish(Long userId, BlogCreateRequest request);
 
+    void delete(Long userId, Long blogId);
+
     void like(Long userId, Long blogId);
 }
 
