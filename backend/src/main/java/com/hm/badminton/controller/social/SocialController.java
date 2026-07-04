@@ -4,10 +4,11 @@ import com.hm.badminton.utils.UserContext;
 import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.LoginUser;
+import com.hm.badminton.dto.social.ActivityRequest;
+import com.hm.badminton.dto.social.ProfileRequest;
 import com.hm.badminton.entity.PlayerProfile;
 import com.hm.badminton.entity.SportActivity;
 import com.hm.badminton.service.social.ISocialService;
-import com.hm.badminton.service.social.impl.SocialService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -58,7 +59,7 @@ public class SocialController {
     }
 
     @PostMapping("/profile/me")
-    public ApiResponse<Void> saveProfile(@Valid @RequestBody SocialService.ProfileRequest request) {
+    public ApiResponse<Void> saveProfile(@Valid @RequestBody ProfileRequest request) {
         socialService.saveProfile(userContext.requireUserId(), request);
         return ApiResponse.ok();
     }
@@ -74,7 +75,7 @@ public class SocialController {
     }
 
     @PostMapping("/activities")
-    public ApiResponse<Map<String, Long>> create(@Valid @RequestBody SocialService.ActivityRequest request) {
+    public ApiResponse<Map<String, Long>> create(@Valid @RequestBody ActivityRequest request) {
         return ApiResponse.ok(Map.of("activityId", socialService.createActivity(userContext.requireUserId(), request)));
     }
 

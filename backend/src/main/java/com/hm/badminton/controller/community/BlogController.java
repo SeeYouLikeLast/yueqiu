@@ -4,8 +4,8 @@ import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.BlogView;
 import com.hm.badminton.dto.ScrollResult;
+import com.hm.badminton.dto.community.BlogCreateRequest;
 import com.hm.badminton.service.community.IBlogService;
-import com.hm.badminton.service.community.impl.BlogService;
 import com.hm.badminton.utils.UserContext;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -59,7 +59,7 @@ public class BlogController {
     }
 
     @PostMapping
-    public ApiResponse<Map<String, Long>> publish(@Valid @RequestBody BlogService.BlogCreateRequest request) {
+    public ApiResponse<Map<String, Long>> publish(@Valid @RequestBody BlogCreateRequest request) {
         return ApiResponse.ok(Map.of("blogId", blogService.publish(userContext.requireUserId(), request)));
     }
 

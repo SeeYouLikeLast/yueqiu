@@ -1,11 +1,13 @@
 package com.hm.badminton.service.trade;
 
 import com.hm.badminton.common.PageResult;
+import com.hm.badminton.dto.trade.EquipmentCartRequest;
+import com.hm.badminton.dto.trade.EquipmentCreateRequest;
+import com.hm.badminton.dto.trade.EquipmentOrderCreateRequest;
 import com.hm.badminton.entity.CartItem;
 import com.hm.badminton.entity.OrderSummary;
 import com.hm.badminton.entity.Equipment;
 import com.hm.badminton.entity.EquipmentCategory;
-import com.hm.badminton.service.trade.impl.EquipmentService;
 
 import java.util.List;
 
@@ -16,7 +18,7 @@ public interface IEquipmentService {
 
     Equipment detail(Long id);
 
-    void addCart(Long userId, EquipmentService.CartRequest request);
+    void addCart(Long userId, EquipmentCartRequest request);
 
     List<CartItem> cart(Long userId);
 
@@ -24,13 +26,13 @@ public interface IEquipmentService {
 
     void clearCart(Long userId);
 
-    Long createOrder(Long userId, EquipmentService.CreateOrderRequest request);
+    Long createOrder(Long userId, EquipmentOrderCreateRequest request);
 
     void pay(Long userId, Long orderId);
 
     List<OrderSummary> orders(Long userId);
 
-    Long createEquipment(EquipmentService.EquipmentCreateRequest request);
+    Long createEquipment(EquipmentCreateRequest request);
 }
 
 

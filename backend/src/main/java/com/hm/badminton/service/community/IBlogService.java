@@ -5,8 +5,8 @@ import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.BlogView;
 import com.hm.badminton.dto.LoginUser;
 import com.hm.badminton.dto.ScrollResult;
+import com.hm.badminton.dto.community.BlogCreateRequest;
 import com.hm.badminton.entity.Blog;
-import com.hm.badminton.service.community.impl.BlogService;
 
 public interface IBlogService extends IService<Blog> {
 
@@ -18,7 +18,7 @@ public interface IBlogService extends IService<Blog> {
 
     BlogView detail(Long id, LoginUser currentUser);
 
-    Long publish(Long userId, BlogService.BlogCreateRequest request);
+    Long publish(Long userId, BlogCreateRequest request);
 
     void like(Long userId, Long blogId);
 }

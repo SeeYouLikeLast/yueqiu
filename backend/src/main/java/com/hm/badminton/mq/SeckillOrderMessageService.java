@@ -1,9 +1,11 @@
-package com.hm.badminton.service.trade.impl;
+package com.hm.badminton.mq;
 
 import com.hm.badminton.common.BusinessException;
+import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.constants.TradeType;
 import com.hm.badminton.dto.SeckillOrderMessage;
 import com.hm.badminton.mapper.trade.SeckillMapper;
+import com.hm.badminton.utils.CacheClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,11 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class SeckillOrderMessageService {
 
     private final SeckillMapper seckillMapper;
+    private final CacheClient cacheClient;
 
-    public SeckillOrderMessageService(SeckillMapper seckillMapper) {
+    public SeckillOrderMessageService(SeckillMapper seckillMapper, CacheClient cacheClient) {
         this.seckillMapper = seckillMapper;
+        this.cacheClient = cacheClient;
     }
 
+    // RocketMQ 消费端真正落库，数据库唯一索引继续兜底一人一单。
     @Transactional
     public void createOrder(SeckillOrderMessage message) {
         int type = TradeType.require(message.getType());
@@ -36,6 +41,7 @@ public class SeckillOrderMessageService {
         } else {
             seckillMapper.insertEquipmentOrder(message.getOrderId(), message.getActivityId(), message.getProductId(), message.getUserId(), message.getAmount());
             seckillMapper.deductEquipmentStockLenient(message.getProductId());
+            cacheClient.delete(RedisConstants.EQUIPMENT_DETAIL_KEY + message.getProductId());
         }
     }
 }

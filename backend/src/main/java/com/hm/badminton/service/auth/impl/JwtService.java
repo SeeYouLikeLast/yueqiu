@@ -1,10 +1,8 @@
 package com.hm.badminton.service.auth.impl;
 
 import com.hm.badminton.dto.LoginUser;
+import com.hm.badminton.dto.auth.TokenPayload;
 import com.hm.badminton.service.auth.IJwtService;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -72,14 +70,6 @@ public class JwtService implements IJwtService {
         return value == null ? "" : value;
     }
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TokenPayload {
-        private Long userId;
-        private String phone;
-        private long expiresAt;
-    }
 }
 
 

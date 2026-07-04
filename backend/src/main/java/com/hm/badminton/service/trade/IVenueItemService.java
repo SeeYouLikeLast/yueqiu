@@ -1,11 +1,11 @@
 package com.hm.badminton.service.trade;
 
 import com.hm.badminton.common.PageResult;
+import com.hm.badminton.dto.trade.VenueOrderCreateRequest;
 import com.hm.badminton.entity.VenueOrder;
 import com.hm.badminton.entity.VenueItem;
 import com.hm.badminton.entity.VenueInventory;
 import com.hm.badminton.entity.VenueCartItem;
-import com.hm.badminton.service.trade.impl.VenueItemService;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -19,7 +19,7 @@ public interface IVenueItemService {
 
     List<VenueInventory> inventories(Long itemId, LocalDate date);
 
-    void addCart(Long userId, VenueItemService.OrderCreateRequest request);
+    void addCart(Long userId, VenueOrderCreateRequest request);
 
     List<VenueCartItem> cart(Long userId);
 
@@ -27,7 +27,7 @@ public interface IVenueItemService {
 
     void clearCart(Long userId);
 
-    VenueOrder createOrder(Long userId, VenueItemService.OrderCreateRequest request);
+    VenueOrder createOrder(Long userId, VenueOrderCreateRequest request);
 
     VenueOrder pay(Long userId, Long orderId);
 

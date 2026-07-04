@@ -2,22 +2,16 @@ package com.hm.badminton.service.social.impl;
 
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.common.PageResult;
+import com.hm.badminton.dto.social.ActivityRequest;
+import com.hm.badminton.dto.social.ProfileRequest;
 import com.hm.badminton.entity.PlayerProfile;
 import com.hm.badminton.entity.SportActivity;
 import com.hm.badminton.mapper.social.SocialMapper;
 import com.hm.badminton.service.catalog.ISportCatalogService;
 import com.hm.badminton.service.social.ISocialService;
-import jakarta.validation.constraints.Future;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
 
 @Service
 public class SocialService implements ISocialService {
@@ -154,46 +148,4 @@ public class SocialService implements ISocialService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ProfileRequest {
-        private String sportCode;
-        @NotBlank
-        private String city;
-        @NotBlank
-        private String area;
-        private Double longitude;
-        private Double latitude;
-        @NotBlank
-        private String level;
-        private String playStyle;
-        private String availableTime;
-        private String intro;
-        private Boolean allowInvite;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ActivityRequest {
-        private String sportCode;
-        private Long venueId;
-        private String placeSource;
-        private String placeId;
-        private String venueName;
-        @NotBlank
-        private String title;
-        @NotBlank
-        private String city;
-        @Future
-        private LocalDateTime startTime;
-        @Future
-        private LocalDateTime endTime;
-        @Min(2)
-        private Integer maxPlayers;
-        @NotBlank
-        private String levelRequired;
-        private String feeType;
-    }
 }

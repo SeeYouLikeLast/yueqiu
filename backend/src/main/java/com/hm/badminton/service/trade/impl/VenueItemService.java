@@ -2,6 +2,8 @@ package com.hm.badminton.service.trade.impl;
 
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.common.PageResult;
+import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.dto.trade.VenueOrderCreateRequest;
 import com.hm.badminton.entity.VenueCartItem;
 import com.hm.badminton.entity.VenueInventory;
 import com.hm.badminton.entity.VenueItem;
@@ -10,10 +12,7 @@ import com.hm.badminton.mapper.trade.VenueItemMapper;
 import com.hm.badminton.mapper.trade.VenueOrderMapper;
 import com.hm.badminton.service.catalog.ISportCatalogService;
 import com.hm.badminton.service.trade.IVenueItemService;
-import jakarta.validation.constraints.NotNull;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.hm.badminton.utils.CacheClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,13 +27,16 @@ public class VenueItemService implements IVenueItemService {
     private final VenueItemMapper venueItemMapper;
     private final ISportCatalogService sportCatalogService;
     private final VenueOrderMapper venueOrderMapper;
+    private final CacheClient cacheClient;
 
     public VenueItemService(VenueItemMapper venueItemMapper,
                             ISportCatalogService sportCatalogService,
-                            VenueOrderMapper venueOrderMapper) {
+                            VenueOrderMapper venueOrderMapper,
+                            CacheClient cacheClient) {
         this.venueItemMapper = venueItemMapper;
         this.sportCatalogService = sportCatalogService;
         this.venueOrderMapper = venueOrderMapper;
+        this.cacheClient = cacheClient;
     }
 
     @Override
@@ -71,11 +73,13 @@ public class VenueItemService implements IVenueItemService {
 
     @Override
     public VenueItem detail(Long productId) {
-        VenueItem product = toItem(venueItemMapper.selectItem(productId));
-        if (product == null) {
-            throw new BusinessException(404, "场所商品不存在");
-        }
-        return product;
+        return cacheClient.queryWithPassThrough(
+                RedisConstants.VENUE_ITEM_DETAIL_KEY + productId,
+                VenueItem.class,
+                () -> toItem(venueItemMapper.selectItem(productId)),
+                RedisConstants.CACHE_DETAIL_TTL,
+                RedisConstants.CACHE_DETAIL_JITTER_SECONDS,
+                "场所商品不存在");
     }
 
     @Override
@@ -86,7 +90,7 @@ public class VenueItemService implements IVenueItemService {
 
     @Override
     @Transactional
-    public void addCart(Long userId, OrderCreateRequest request) {
+    public void addCart(Long userId, VenueOrderCreateRequest request) {
         loadSale(request.getProductId(), request.getInventoryId());
         Integer count = venueItemMapper.countVenueCart(userId, request.getProductId(), request.getInventoryId());
         if (count != null && count > 0) {
@@ -113,7 +117,7 @@ public class VenueItemService implements IVenueItemService {
 
     @Override
     @Transactional
-    public VenueOrder createOrder(Long userId, OrderCreateRequest request) {
+    public VenueOrder createOrder(Long userId, VenueOrderCreateRequest request) {
         VenueItemMapper.VenueItemSale sale = loadSale(request.getProductId(), request.getInventoryId());
         if (sale.getAvailableStock() <= 0) {
             throw new BusinessException("该时段已售罄");
@@ -122,6 +126,7 @@ public class VenueItemService implements IVenueItemService {
         if (updated == 0) {
             throw new BusinessException("该时段已售罄");
         }
+        cacheClient.delete(RedisConstants.VENUE_ITEM_DETAIL_KEY + request.getProductId());
 
         VenueItemMapper.InsertVenueOrderRow row = new VenueItemMapper.InsertVenueOrderRow();
         row.setUserId(userId);
@@ -224,16 +229,6 @@ public class VenueItemService implements IVenueItemService {
 
     private String verifyCode() {
         return String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class OrderCreateRequest {
-        @NotNull
-        private Long productId;
-        @NotNull
-        private Long inventoryId;
     }
 }
 

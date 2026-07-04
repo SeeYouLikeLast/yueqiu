@@ -2,8 +2,13 @@ package com.hm.badminton.controller.auth;
 
 import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.dto.UserPublicProfile;
+import com.hm.badminton.dto.auth.CodeRequest;
+import com.hm.badminton.dto.auth.CodeResponse;
+import com.hm.badminton.dto.auth.LocationRequest;
+import com.hm.badminton.dto.auth.LoginRequest;
+import com.hm.badminton.dto.auth.LoginResponse;
+import com.hm.badminton.dto.auth.RegisterRequest;
 import com.hm.badminton.service.auth.IAuthService;
-import com.hm.badminton.service.auth.impl.AuthService;
 import com.hm.badminton.utils.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -31,17 +36,17 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ApiResponse<AuthService.LoginResponse> register(@Valid @RequestBody AuthService.RegisterRequest request) {
+    public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ApiResponse.ok(authService.register(request));
     }
 
     @PostMapping("/code")
-    public ApiResponse<AuthService.CodeResponse> sendCode(@Valid @RequestBody AuthService.CodeRequest request) {
+    public ApiResponse<CodeResponse> sendCode(@Valid @RequestBody CodeRequest request) {
         return ApiResponse.ok(authService.sendCode(request));
     }
 
     @PostMapping("/login")
-    public ApiResponse<AuthService.LoginResponse> login(@Valid @RequestBody AuthService.LoginRequest request) {
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok(authService.login(request));
     }
 
@@ -56,7 +61,7 @@ public class AuthController {
     }
 
     @PutMapping("/location")
-    public ApiResponse<Void> updateLocation(@RequestBody AuthService.LocationRequest body,
+    public ApiResponse<Void> updateLocation(@RequestBody LocationRequest body,
                                             HttpServletRequest request) {
         authService.updateLocation(bearerToken(request), userContext.requireUserId(), body);
         return ApiResponse.ok();
@@ -70,6 +75,5 @@ public class AuthController {
         return null;
     }
 }
-
 
 

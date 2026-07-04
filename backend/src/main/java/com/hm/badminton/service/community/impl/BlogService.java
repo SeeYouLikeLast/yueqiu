@@ -8,6 +8,7 @@ import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.BlogView;
 import com.hm.badminton.dto.LoginUser;
 import com.hm.badminton.dto.ScrollResult;
+import com.hm.badminton.dto.community.BlogCreateRequest;
 import com.hm.badminton.entity.Blog;
 import com.hm.badminton.entity.Follow;
 import com.hm.badminton.entity.UserAccount;
@@ -17,18 +18,13 @@ import com.hm.badminton.mapper.auth.UserMapper;
 import com.hm.badminton.service.community.IBlogService;
 import com.hm.badminton.service.community.IFollowService;
 import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.utils.CacheClient;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -49,15 +45,18 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     private final UserMapper userMapper;
     private final FollowMapper followMapper;
     private final IFollowService followService;
+    private final CacheClient cacheClient;
 
     public BlogService(StringRedisTemplate redisTemplate,
                        UserMapper userMapper,
                        FollowMapper followMapper,
-                       IFollowService followService) {
+                       IFollowService followService,
+                       CacheClient cacheClient) {
         this.redisTemplate = redisTemplate;
         this.userMapper = userMapper;
         this.followMapper = followMapper;
         this.followService = followService;
+        this.cacheClient = cacheClient;
     }
 
     @Override
@@ -120,10 +119,16 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
 
     @Override
     public BlogView detail(Long id, LoginUser currentUser) {
-        Blog blog = getById(id);
-        if (blog == null || !Integer.valueOf(1).equals(blog.getStatus())) {
-            throw new BusinessException(404, "博客不存在");
-        }
+        Blog blog = cacheClient.queryWithPassThrough(
+                RedisConstants.BLOG_DETAIL_KEY + id,
+                Blog.class,
+                () -> {
+                    Blog record = getById(id);
+                    return record == null || !Integer.valueOf(1).equals(record.getStatus()) ? null : record;
+                },
+                RedisConstants.CACHE_DETAIL_TTL,
+                RedisConstants.CACHE_DETAIL_JITTER_SECONDS,
+                "博客不存在");
         return enrich(List.of(blog), currentUser).get(0);
     }
 
@@ -166,6 +171,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
             redisTemplate.opsForZSet().remove(key, member);
             lambdaUpdate().setSql("liked = greatest(liked - 1, 0)").eq(Blog::getId, blogId).update();
         }
+        cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
     }
 
     private PageResult<BlogView> listFollowBlogs(int page, int size, LoginUser currentUser) {
@@ -244,26 +250,6 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         return Arrays.stream(imageUrls.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList();
     }
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class BlogCreateRequest {
-        @NotBlank
-        private String sportCode;
-        @NotBlank
-        private String title;
-        @NotBlank
-        private String content;
-        private List<String> images;
-        @NotBlank
-        private String relatedType;
-        @NotNull
-        private Long relatedId;
-        @NotBlank
-        private String relatedTitle;
-        private String relatedCoverUrl;
-        private BigDecimal relatedPrice;
-    }
 }
 
 

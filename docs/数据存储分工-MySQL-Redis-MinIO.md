@@ -129,11 +129,18 @@ GET  /api/seckill/all/orders      我的秒杀订单汇总
 | `bf:user:username` | Bitmap/String | 用户名布隆过滤器 | 永久 |
 | `seckill:stock:{type}:{seckillId}` | String | 秒杀库存，`type=1` 场馆，`type=2` 装备 | 活动结束后 1 小时 + 随机抖动 |
 | `seckill:users:{type}:{seckillId}` | Set | 已参与该秒杀的用户 id | 活动结束后 1 小时 + 随机抖动 |
+| `seckill:activity:{type}:{seckillId}` | Hash | 秒杀活动元数据；不存在时写入空值标记防穿透 | 正常：活动结束后 1 小时 + 随机抖动；空值：2 分钟 |
+| `equipment:{id}` | String(JSON) | 装备详情；不存在时写入空值防穿透 | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
+| `venue:item:{id}` | String(JSON) | 场所售卖项目详情；不存在时写入空值防穿透 | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
+| `user:profile:{id}` | String(JSON) | 用户公开主页基础信息；关注/是否本人实时计算 | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
+| `blog:{id}` | String(JSON) | 博客基础详情；点赞/关注态实时计算 | 正常：30 分钟 + 随机抖动；空值：2 分钟 |
 | `follows:{userId}` | Set | 用户关注的博主 id | 永久，可由 MySQL 重建 |
 | `blog:liked:{blogId}` | ZSet | 博客点赞用户，score 为点赞时间 | 永久，可由 MySQL 重建计数 |
 | `feed:{userId}` | ZSet | 关注 Feed 收件箱，score 为推送时间 | 永久，可由 MySQL 重建 |
 
 布隆过滤器看起来像 big key 是正常现象：Redis Bitmap 底层是 String，当前 bit size 较大时单个 key 会占用数 MB。它用于注册唯一性预判断，最终仍以 MySQL 唯一索引兜底。
+
+详情缓存采用 Cache Aside + 空值缓存策略：Redis 未命中时查询 MySQL；MySQL 查不到则写入 `__NULL__` 短 TTL 空值，防止恶意请求不存在 id 反复穿透到数据库。库存、点赞等写操作会删除对应详情缓存，避免长时间读取旧数据。
 
 ## MinIO
 

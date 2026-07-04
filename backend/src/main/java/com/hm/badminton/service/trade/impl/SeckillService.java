@@ -52,25 +52,15 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
                           RedissonClient redissonClient,
                           RocketMQTemplate rocketMQTemplate,
                           ObjectMapper objectMapper,
-                          IdGenerator idGenerator) {
+                          IdGenerator idGenerator,
+                          DefaultRedisScript<Long> seckillScript) {
         this.seckillMapper = seckillMapper;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
         this.rocketMQTemplate = rocketMQTemplate;
         this.objectMapper = objectMapper;
         this.idGenerator = idGenerator;
-        this.seckillScript = new DefaultRedisScript<>("""
-                local stock = tonumber(redis.call('get', KEYS[1]) or '0')
-                if stock <= 0 then
-                  return 1
-                end
-                if redis.call('sismember', KEYS[2], ARGV[1]) == 1 then
-                  return 2
-                end
-                redis.call('decr', KEYS[1])
-                redis.call('sadd', KEYS[2], ARGV[1])
-                return 0
-                """, Long.class);
+        this.seckillScript = seckillScript;
     }
 
     @Override
@@ -89,6 +79,8 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         SeckillActivity activity = getActivity(tradeType, activityId);
         validateActivityTime(activity);
 
+        // 如果这个用户同一时间点连点按钮、开多个浏览器窗口、或者请求被重复发送，只有第一个请求能拿到锁。
+        // SETNX + EXPIRE 也可以实现一人一单，但 Redisson 的 RLock 更安全，避免了锁过期后被其他线程误解锁的风险。
         RLock lock = redissonClient.getLock(RedisConstants.SECKILL_ORDER_LOCK_KEY + tradeType + ":" + activityId + ":" + userId);
         if (!tryUserLock(lock)) {
             throw new BusinessException(409, "不能重复抢购");
@@ -106,6 +98,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
 
         boolean preDeducted = false;
         try {
+            // Lua 在 Redis 内原子完成库存预扣和一人一单标记，成功后再投递 RocketMQ 异步落库。
             Long code = tryRedisPreDeduct(userId, tradeType, activityId);
             if (code == null) {
                 throw new BusinessException(503, "秒杀服务繁忙，请稍后再试");
@@ -230,6 +223,9 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         String metaKey = activityMetaKey(type, activityId);
         Map<Object, Object> cached = redisTemplate.opsForHash().entries(metaKey);
         if (!cached.isEmpty()) {
+            if (RedisConstants.CACHE_NULL_VALUE.equals(str(cached, "_null"))) {
+                throw new BusinessException(404, "秒杀活动不存在");
+            }
             return mapToActivity(cached);
         }
         // 2. 缓存未命中才查数据库（兜底）
@@ -237,6 +233,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
                 ? seckillMapper.selectVenueActivity(activityId)
                 : seckillMapper.selectEquipmentActivity(activityId);
         if (activity == null) {
+            cacheNullActivity(metaKey);
             throw new BusinessException(404, "秒杀活动不存在");
         }
         // 3. 回填缓存
@@ -256,6 +253,11 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         Duration ttl = seckillCacheTtl(activity);
         redisTemplate.opsForHash().putAll(metaKey, fields);
         redisTemplate.expire(metaKey, ttl);
+    }
+
+    private void cacheNullActivity(String metaKey) {
+        redisTemplate.opsForHash().put(metaKey, "_null", RedisConstants.CACHE_NULL_VALUE);
+        redisTemplate.expire(metaKey, RedisConstants.CACHE_NULL_TTL);
     }
 
     private SeckillActivity mapToActivity(Map<Object, Object> fields) {

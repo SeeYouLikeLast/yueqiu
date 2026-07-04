@@ -4,6 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.dto.LoginUser;
 import com.hm.badminton.dto.UserPublicProfile;
+import com.hm.badminton.dto.auth.CodeRequest;
+import com.hm.badminton.dto.auth.CodeResponse;
+import com.hm.badminton.dto.auth.LocationRequest;
+import com.hm.badminton.dto.auth.LoginRequest;
+import com.hm.badminton.dto.auth.LoginResponse;
+import com.hm.badminton.dto.auth.RegisterRequest;
 import com.hm.badminton.entity.PlayerProfileEntity;
 import com.hm.badminton.entity.UserAccount;
 import com.hm.badminton.mapper.social.PlayerProfileMapper;
@@ -13,15 +19,9 @@ import com.hm.badminton.service.auth.IBloomFilterService;
 import com.hm.badminton.service.community.IFollowService;
 import com.hm.badminton.service.auth.IPasswordService;
 import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.utils.CacheClient;
 import com.hm.badminton.utils.RedisTtl;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -45,6 +45,7 @@ public class AuthService implements IAuthService {
     private final IBloomFilterService bloomFilterService;
     private final IFollowService followService;
     private final IPasswordService passwordService;
+    private final CacheClient cacheClient;
     private final Duration codeTtl;
     private final Duration tokenTtl;
     private final long tokenTtlJitterMaxSeconds;
@@ -55,6 +56,7 @@ public class AuthService implements IAuthService {
                        IBloomFilterService bloomFilterService,
                        IFollowService followService,
                        IPasswordService passwordService,
+                       CacheClient cacheClient,
                        @Value("${hm.auth.code-expire-minutes:2}") long codeExpireMinutes,
                        @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes,
                        @Value("${hm.auth.token-expire-jitter-minutes:10}") long tokenExpireJitterMinutes) {
@@ -64,6 +66,7 @@ public class AuthService implements IAuthService {
         this.bloomFilterService = bloomFilterService;
         this.followService = followService;
         this.passwordService = passwordService;
+        this.cacheClient = cacheClient;
         this.codeTtl = Duration.ofMinutes(codeExpireMinutes);
         this.tokenTtl = Duration.ofMinutes(tokenExpireMinutes);
         this.tokenTtlJitterMaxSeconds = Duration.ofMinutes(tokenExpireJitterMinutes).toSeconds();
@@ -184,23 +187,19 @@ public class AuthService implements IAuthService {
 
     @Override
     public UserPublicProfile publicProfile(Long userId, LoginUser currentUser) {
-        UserAccount account = userMapper.selectById(userId);
-        if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
-            throw new BusinessException(404, "用户不存在");
-        }
+        UserPublicProfile profile = cacheClient.queryWithPassThrough(
+                RedisConstants.USER_PROFILE_KEY + userId,
+                UserPublicProfile.class,
+                () -> loadPublicProfile(userId),
+                RedisConstants.CACHE_DETAIL_TTL,
+                RedisConstants.CACHE_DETAIL_JITTER_SECONDS,
+                "用户不存在");
         Long currentUserId = currentUser == null ? null : currentUser.getId();
         boolean isMe = currentUserId != null && currentUserId.equals(userId);
         boolean followed = currentUserId != null && !isMe && followService.isFollowed(currentUserId, userId);
-        return new UserPublicProfile(
-                account.getId(),
-                account.getNickname(),
-                account.getAvatar(),
-                account.getCity(),
-                account.getLevel(),
-                account.getPreferTime(),
-                account.getCreatedAt(),
-                followed,
-                isMe);
+        profile.setMe(isMe);
+        profile.setFollowed(followed);
+        return profile;
     }
 
     @Override
@@ -240,6 +239,23 @@ public class AuthService implements IAuthService {
                 .eq("phone", phone)
                 .eq("status", 1));
         return toLoginUser(user);
+    }
+
+    private UserPublicProfile loadPublicProfile(Long userId) {
+        UserAccount account = userMapper.selectById(userId);
+        if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
+            return null;
+        }
+        return new UserPublicProfile(
+                account.getId(),
+                account.getNickname(),
+                account.getAvatar(),
+                account.getCity(),
+                account.getLevel(),
+                account.getPreferTime(),
+                account.getCreatedAt(),
+                false,
+                false);
     }
 
     private LoginUser createUserByPhone(String phone) {
@@ -350,70 +366,6 @@ public class AuthService implements IAuthService {
 
     private String normalizeUsername(String username) {
         return username == null || username.isBlank() ? null : username.trim().toLowerCase(Locale.ROOT);
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class RegisterRequest {
-        @NotBlank(message = "\u624b\u673a\u53f7\u4e0d\u80fd\u4e3a\u7a7a")
-        @Pattern(regexp = "^1[3-9]\\d{9}$", message = "\u624b\u673a\u53f7\u683c\u5f0f\u4e0d\u6b63\u786e")
-        private String phone;
-        @Email(message = "\u90ae\u7bb1\u683c\u5f0f\u4e0d\u6b63\u786e")
-        private String email;
-        @Size(min = 3, max = 24, message = "\u7528\u6237\u540d\u957f\u5ea6 3-24 \u4f4d")
-        private String username;
-        @NotBlank(message = "\u5bc6\u7801\u4e0d\u80fd\u4e3a\u7a7a")
-        @Size(min = 6, max = 32, message = "\u5bc6\u7801\u957f\u5ea6 6-32 \u4f4d")
-        private String password;
-        private String nickname;
-        private String city;
-        private String level;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CodeRequest {
-        @NotBlank(message = "\u624b\u673a\u53f7\u4e0d\u80fd\u4e3a\u7a7a")
-        private String phone;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CodeResponse {
-        private String phone;
-        private String code;
-        private long expireSeconds;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class LoginRequest {
-        private String account;
-        private String password;
-        private String phone;
-        private String code;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class LoginResponse {
-        private String token;
-        private LoginUser user;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class LocationRequest {
-        private String city;
-        private String preciseAddress;
-        private Double lng;
-        private Double lat;
     }
 
 }

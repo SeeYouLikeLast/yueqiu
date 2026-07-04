@@ -2,6 +2,9 @@ package com.hm.badminton.constants;
 
 import com.hm.badminton.common.BusinessException;
 
+/**
+ * 统一交易类型：1=场所商品，2=装备商品。
+ */
 public final class TradeType {
 
     private TradeType() {

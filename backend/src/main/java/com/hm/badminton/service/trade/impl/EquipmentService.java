@@ -2,6 +2,11 @@ package com.hm.badminton.service.trade.impl;
 
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.common.PageResult;
+import com.hm.badminton.constants.RedisConstants;
+import com.hm.badminton.dto.trade.EquipmentCartRequest;
+import com.hm.badminton.dto.trade.EquipmentCreateRequest;
+import com.hm.badminton.dto.trade.EquipmentOrderCreateRequest;
+import com.hm.badminton.dto.trade.EquipmentOrderItemRequest;
 import com.hm.badminton.entity.CartItem;
 import com.hm.badminton.entity.OrderSummary;
 import com.hm.badminton.entity.Equipment;
@@ -10,8 +15,7 @@ import com.hm.badminton.mapper.trade.EquipmentMapper;
 import com.hm.badminton.mapper.trade.EquipmentOrderMapper;
 import com.hm.badminton.service.trade.IEquipmentService;
 import com.hm.badminton.service.catalog.ISportCatalogService;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
+import com.hm.badminton.utils.CacheClient;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -28,13 +32,16 @@ public class EquipmentService implements IEquipmentService {
     private final EquipmentMapper equipmentMapper;
     private final ISportCatalogService sportCatalogService;
     private final EquipmentOrderMapper equipmentOrderMapper;
+    private final CacheClient cacheClient;
 
     public EquipmentService(EquipmentMapper equipmentMapper,
-                            ISportCatalogService sportCatalogService,
-                            EquipmentOrderMapper equipmentOrderMapper) {
+            ISportCatalogService sportCatalogService,
+            EquipmentOrderMapper equipmentOrderMapper,
+            CacheClient cacheClient) {
         this.equipmentMapper = equipmentMapper;
         this.sportCatalogService = sportCatalogService;
         this.equipmentOrderMapper = equipmentOrderMapper;
+        this.cacheClient = cacheClient;
     }
 
     public List<EquipmentCategory> categories(String sportCode) {
@@ -54,7 +61,9 @@ public class EquipmentService implements IEquipmentService {
         }
         String text = keyword == null || keyword.isBlank() ? null : keyword.trim();
         Long total = equipmentMapper.countEquipments(normalizedSport, categoryId, text);
-        return new PageResult<>(equipmentMapper.selectEquipments(normalizedSport, categoryId, text, safeSize, (safePage - 1) * safeSize),
+        return new PageResult<>(
+                equipmentMapper.selectEquipments(normalizedSport, categoryId, text, safeSize,
+                        (safePage - 1) * safeSize),
                 total == null ? 0 : total, safePage, safeSize);
     }
 
@@ -63,15 +72,17 @@ public class EquipmentService implements IEquipmentService {
     }
 
     public Equipment detail(Long id) {
-        Equipment product = equipmentMapper.selectEquipment(id);
-        if (product == null) {
-            throw new BusinessException(404, "装备不存在");
-        }
-        return product;
+        return cacheClient.queryWithPassThrough(
+                RedisConstants.EQUIPMENT_DETAIL_KEY + id,
+                Equipment.class,
+                () -> equipmentMapper.selectEquipment(id),
+                RedisConstants.CACHE_DETAIL_TTL,
+                RedisConstants.CACHE_DETAIL_JITTER_SECONDS,
+                "装备不存在");
     }
 
     @Transactional
-    public void addCart(Long userId, CartRequest request) {
+    public void addCart(Long userId, EquipmentCartRequest request) {
         detail(request.getProductId());
         Integer count = equipmentMapper.countCart(userId, request.getProductId());
         if (count != null && count > 0) {
@@ -94,8 +105,10 @@ public class EquipmentService implements IEquipmentService {
         equipmentMapper.deleteCartByUser(userId);
     }
 
+    // 从 payDirect() 进来：共用外层事务
+    // 从其他地方单独调用 createOrder()：自己有事务保护。
     @Transactional
-    public Long createOrder(Long userId, CreateOrderRequest request) {
+    public Long createOrder(Long userId, EquipmentOrderCreateRequest request) {
         boolean fromCart = request.getItems() == null || request.getItems().isEmpty();
         List<OrderEquipment> equipment = loadOrderEquipments(userId, request.getItems());
         if (equipment.isEmpty()) {
@@ -113,9 +126,11 @@ public class EquipmentService implements IEquipmentService {
         for (OrderEquipment item : equipment) {
             int updated = equipmentMapper.deductEquipmentStock(item.getProductId(), item.getQuantity());
             if (updated == 0) {
-                throw new BusinessException(item.getName() + " 搴撳瓨涓嶈冻");
+                throw new BusinessException(item.getName() + " 库存不足");
             }
-            equipmentMapper.insertOrderItem(orderId, item.getProductId(), item.getName(), item.getCoverUrl(), item.getPrice(), item.getQuantity());
+            cacheClient.delete(RedisConstants.EQUIPMENT_DETAIL_KEY + item.getProductId());
+            equipmentMapper.insertOrderItem(orderId, item.getProductId(), item.getName(), item.getCoverUrl(),
+                    item.getPrice(), item.getQuantity());
         }
         if (fromCart) {
             equipmentMapper.deleteCartByUser(userId);
@@ -133,66 +148,26 @@ public class EquipmentService implements IEquipmentService {
 
     public List<OrderSummary> orders(Long userId) {
         return equipmentOrderMapper.selectByUserId(userId).stream()
-                .map(order -> new OrderSummary(order.getId(), order.getUserId(), order.getTotalAmount(), order.getStatus(),
+                .map(order -> new OrderSummary(order.getId(), order.getUserId(), order.getTotalAmount(),
+                        order.getStatus(),
                         order.getAddress(), order.getCreatedAt(), equipmentOrderMapper.selectItems(order.getId())))
                 .toList();
     }
 
-    private List<OrderEquipment> loadOrderEquipments(Long userId, List<OrderItemRequest> items) {
+    private List<OrderEquipment> loadOrderEquipments(Long userId, List<EquipmentOrderItemRequest> items) {
         if (items != null && !items.isEmpty()) {
             List<OrderEquipment> result = new ArrayList<>();
-            for (OrderItemRequest item : items) {
+            for (EquipmentOrderItemRequest item : items) {
                 Equipment product = detail(item.getProductId());
-                result.add(new OrderEquipment(product.getId(), product.getName(), product.getCoverUrl(), product.getPrice(), item.getQuantity()));
+                result.add(new OrderEquipment(product.getId(), product.getName(), product.getCoverUrl(),
+                        product.getPrice(), item.getQuantity()));
             }
             return result;
         }
         return equipmentMapper.selectOrderEquipmentsFromCart(userId).stream()
-                .map(item -> new OrderEquipment(item.getProductId(), item.getName(), item.getCoverUrl(), item.getPrice(), item.getQuantity()))
+                .map(item -> new OrderEquipment(item.getProductId(), item.getName(), item.getCoverUrl(),
+                        item.getPrice(), item.getQuantity()))
                 .toList();
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CartRequest {
-        private Long productId;
-        @Min(1)
-        private Integer quantity;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class OrderItemRequest {
-        private Long productId;
-        @Min(1)
-        private Integer quantity;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CreateOrderRequest {
-        private List<OrderItemRequest> items;
-        @NotBlank
-        private String address;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class EquipmentCreateRequest {
-        private Long categoryId;
-        private String sportCode;
-        @NotBlank
-        private String name;
-        @NotBlank
-        private String brand;
-        private String description;
-        private String coverUrl;
-        private BigDecimal price;
-        private Integer stock;
     }
 
     @Data
@@ -221,6 +196,3 @@ public class EquipmentService implements IEquipmentService {
         return row.getId();
     }
 }
-
-
-

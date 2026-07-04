@@ -5,7 +5,6 @@ import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.constants.MqConstants;
 import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.dto.SeckillOrderMessage;
-import com.hm.badminton.service.trade.impl.SeckillOrderMessageService;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.MessageModel;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
