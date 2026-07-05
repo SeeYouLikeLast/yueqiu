@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
+  Camera,
   ChevronLeft,
   ClipboardList,
   CreditCard,
   ExternalLink,
   Heart,
+  ImagePlus,
   LocateFixed,
   LogIn,
   MapPin,
@@ -205,6 +207,14 @@ type UserProfile = {
   level: string
   prefer_time?: string
   created_at?: string
+}
+
+type FileMetadata = {
+  id: number
+  publicUrl: string
+  originalFilename: string
+  contentType: string
+  fileSize: number
 }
 
 type UserPublicProfile = {
@@ -494,6 +504,10 @@ const activityForm = reactive({
 })
 
 const profileForm = reactive({
+  username: '',
+  email: '',
+  nickname: '',
+  avatar: '',
   sportCode: 'badminton',
   city: '西安',
   area: '未央区',
@@ -510,7 +524,7 @@ const blogPublishForm = reactive({
   sportCode: 'badminton',
   title: '',
   content: '',
-  imageText: '',
+  imageUrls: [] as string[],
   relatedKey: ''
 })
 
@@ -1344,8 +1358,8 @@ function fillBlogPublishDraft(option?: BlogRelatedOption) {
   if (!blogPublishForm.content.trim()) {
     blogPublishForm.content = `今天体验了「${related.title}」，整体感受不错，适合周末约球或者下班后放松。`
   }
-  if (!blogPublishForm.imageText.trim() && related.coverUrl) {
-    blogPublishForm.imageText = related.coverUrl
+  if (!blogPublishForm.imageUrls.length && related.coverUrl) {
+    blogPublishForm.imageUrls = [related.coverUrl]
   }
 }
 
@@ -1402,10 +1416,7 @@ async function publishBlog() {
     message.value = '请填写动态正文'
     return
   }
-  const images = blogPublishForm.imageText
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean)
+  const images = blogPublishForm.imageUrls
   await wrap(async () => {
     await api<{ blogId: number }>('/api/blogs', {
       method: 'POST',
@@ -1424,7 +1435,7 @@ async function publishBlog() {
     blogComposerVisible.value = false
     blogPublishForm.title = ''
     blogPublishForm.content = ''
-    blogPublishForm.imageText = ''
+    blogPublishForm.imageUrls = []
     blogPublishForm.relatedKey = ''
     blogChannel.value = 'recommend'
     blogSport.value = ''
@@ -1521,6 +1532,10 @@ function closeProfileOrderPage() {
 }
 
 function fillProfileForm(profile?: Player | null) {
+  profileForm.username = userProfile.value?.username || ''
+  profileForm.email = userProfile.value?.email || ''
+  profileForm.nickname = userProfile.value?.nickname || ''
+  profileForm.avatar = userProfile.value?.avatar || ''
   profileForm.sportCode = profile?.sportCode || selectedSport.value || 'badminton'
   profileForm.city = profile?.city || userProfile.value?.city || placeQuery.city || '西安'
   profileForm.area = profile?.area || locationLabel.value.replace(profileForm.city, '').trim() || '未央区'
@@ -1544,6 +1559,37 @@ async function openProfileEditor() {
   })
 }
 
+async function uploadFile(file: File, bizType: string, bizId?: number) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('bizType', bizType)
+  if (bizId) {
+    formData.append('bizId', String(bizId))
+  }
+  return api<FileMetadata>('/api/files/upload', {
+    method: 'POST',
+    body: formData
+  })
+}
+
+async function uploadBlogImages(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (!files.length) return
+  await wrap(async () => {
+    const uploaded = await Promise.all(files.map((file) => uploadFile(file, 'blog')))
+    blogPublishForm.imageUrls = [
+      ...blogPublishForm.imageUrls.filter((url) => !url.includes('images.unsplash.com')),
+      ...uploaded.map((file) => file.publicUrl)
+    ].slice(0, 9)
+  }, '图片已上传')
+  input.value = ''
+}
+
+function removeBlogImage(url: string) {
+  blogPublishForm.imageUrls = blogPublishForm.imageUrls.filter((item) => item !== url)
+}
+
 function closeProfileEditor() {
   profileEditorVisible.value = false
 }
@@ -1554,6 +1600,18 @@ async function saveSocialProfile() {
     return
   }
   await wrap(async () => {
+    await api('/api/auth/me', {
+      method: 'PUT',
+      body: JSON.stringify({
+        username: profileForm.username.trim(),
+        email: profileForm.email.trim(),
+        nickname: profileForm.nickname.trim(),
+        avatar: profileForm.avatar.trim(),
+        city: profileForm.city.trim(),
+        level: profileForm.level.trim(),
+        preferTime: profileForm.availableTime.trim()
+      })
+    })
     await api('/api/social/profile/me', {
       method: 'POST',
       body: JSON.stringify({
@@ -1572,6 +1630,17 @@ async function saveSocialProfile() {
     await Promise.all([loadUserProfile(), loadSocialProfile()])
     profileEditorVisible.value = false
   }, '球友资料已更新')
+}
+
+async function uploadAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  await wrap(async () => {
+    const uploaded = await uploadFile(file, 'avatar')
+    profileForm.avatar = uploaded.publicUrl
+  }, '头像已上传')
+  input.value = ''
 }
 
 function searchPlaces() {
@@ -2163,10 +2232,21 @@ onBeforeUnmount(() => {
             <textarea v-model="blogPublishForm.content" maxlength="500" placeholder="写写体验、适合人群、场地或装备感受" />
           </label>
 
-          <label class="form-field">
-            <span>图片 URL</span>
-            <textarea v-model="blogPublishForm.imageText" class="image-url-input" placeholder="每行一个图片链接，默认使用关联内容封面" />
-          </label>
+          <div class="form-field">
+            <span>动态图片</span>
+            <label class="upload-tile">
+              <ImagePlus :size="18" />
+              <strong>选择图片</strong>
+              <small>支持 jpg / png / webp，最多 9 张</small>
+              <input type="file" accept="image/jpeg,image/png,image/webp" multiple @change="uploadBlogImages" />
+            </label>
+            <div v-if="blogPublishForm.imageUrls.length" class="image-preview-grid">
+              <button v-for="image in blogPublishForm.imageUrls" :key="image" type="button" @click="removeBlogImage(image)">
+                <img :src="image" alt="动态图片" />
+                <span><X :size="13" /></span>
+              </button>
+            </div>
+          </div>
 
           <article v-if="selectedBlogRelatedOption()" class="publish-related-preview">
             <img
@@ -2710,6 +2790,29 @@ onBeforeUnmount(() => {
             <button class="ghost icon-only" type="button" @click="closeProfileEditor" aria-label="关闭"><X :size="18" /></button>
           </div>
           <div class="profile-form-grid">
+            <div class="avatar-edit wide">
+              <img :src="profileForm.avatar || profileAvatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'" alt="头像预览" />
+              <div>
+                <strong>{{ profileForm.nickname || profileNickname || '球友' }}</strong>
+                <label class="avatar-upload">
+                  <Camera :size="15" />
+                  更换头像
+                  <input type="file" accept="image/jpeg,image/png,image/webp" @change="uploadAvatar" />
+                </label>
+              </div>
+            </div>
+            <label>
+              <span>昵称</span>
+              <input v-model="profileForm.nickname" placeholder="陈予" />
+            </label>
+            <label>
+              <span>用户名</span>
+              <input v-model="profileForm.username" placeholder="chenyu" />
+            </label>
+            <label class="wide">
+              <span>邮箱</span>
+              <input v-model="profileForm.email" type="email" placeholder="chen@example.com" />
+            </label>
             <label>
               <span>常打运动</span>
               <select v-model="profileForm.sportCode">

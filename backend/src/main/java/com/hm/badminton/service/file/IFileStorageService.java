@@ -21,7 +21,7 @@ public interface IFileStorageService {
 
     Map<String, String> presignedUrl(Long id);
 
-    void remove(Long id);
+    void remove(Long ownerUserId, Long id);
 }
 
 

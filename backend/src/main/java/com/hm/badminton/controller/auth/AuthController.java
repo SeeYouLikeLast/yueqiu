@@ -7,6 +7,7 @@ import com.hm.badminton.dto.auth.CodeResponse;
 import com.hm.badminton.dto.auth.LocationRequest;
 import com.hm.badminton.dto.auth.LoginRequest;
 import com.hm.badminton.dto.auth.LoginResponse;
+import com.hm.badminton.dto.auth.ProfileUpdateRequest;
 import com.hm.badminton.dto.auth.RegisterRequest;
 import com.hm.badminton.service.auth.IAuthService;
 import com.hm.badminton.utils.UserContext;
@@ -55,6 +56,11 @@ public class AuthController {
         return ApiResponse.ok(authService.me(userContext.require()));
     }
 
+    @PutMapping("/me")
+    public ApiResponse<Map<String, Object>> updateMe(@RequestBody ProfileUpdateRequest request) {
+        return ApiResponse.ok(authService.updateMe(userContext.requireUserId(), request));
+    }
+
     @GetMapping("/users/{id}")
     public ApiResponse<UserPublicProfile> publicProfile(@PathVariable Long id) {
         return ApiResponse.ok(authService.publicProfile(id, userContext.current().orElse(null)));
@@ -75,5 +81,4 @@ public class AuthController {
         return null;
     }
 }
-
 

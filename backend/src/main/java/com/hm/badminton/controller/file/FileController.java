@@ -34,7 +34,7 @@ public class FileController {
     public ApiResponse<FileMetadata> upload(@RequestParam("file") MultipartFile file,
                                             @RequestParam(defaultValue = "common") String bizType,
                                             @RequestParam(required = false) Long bizId) {
-        Long userId = userContext.current().map(user -> user.getId()).orElse(null);
+        Long userId = userContext.requireUserId();
         return ApiResponse.ok(fileStorageService.upload(userId, file, bizType, bizId));
     }
 
@@ -62,8 +62,8 @@ public class FileController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> remove(@PathVariable Long id) {
-        userContext.require();
-        fileStorageService.remove(id);
+        Long userId = userContext.requireUserId();
+        fileStorageService.remove(userId, id);
         return ApiResponse.ok();
     }
 }

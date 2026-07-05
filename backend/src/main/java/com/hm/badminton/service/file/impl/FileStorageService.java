@@ -32,12 +32,25 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class FileStorageService implements IFileStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
+    private static final long AVATAR_MAX_SIZE = 5 * 1024 * 1024L;
+    private static final long BLOG_IMAGE_MAX_SIZE = 10 * 1024 * 1024L;
+    private static final long ATTACHMENT_MAX_SIZE = 20 * 1024 * 1024L;
+    private static final Set<String> IMAGE_CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of(".jpg", ".jpeg", ".png", ".webp");
+    private static final Set<String> ATTACHMENT_CONTENT_TYPES = Set.of(
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    private static final Set<String> ATTACHMENT_EXTENSIONS = Set.of(".pdf", ".docx", ".xlsx");
 
     private final MinioClient minioClient;
     private final MinioProperties properties;
@@ -80,7 +93,10 @@ public class FileStorageService implements IFileStorageService {
         }
         String originalFilename = sanitizeFilename(file.getOriginalFilename());
         String contentType = file.getContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : file.getContentType();
+        String normalizedBizType = normalizeBizType(bizType);
+        validateUploadFile(normalizedBizType, originalFilename, contentType, file.getSize());
         String objectName = buildObjectName(bizType, originalFilename);
+        boolean objectUploaded = false;
         try {
             ensureBucketRequired();
             minioClient.putObject(PutObjectArgs.builder()
@@ -89,6 +105,7 @@ public class FileStorageService implements IFileStorageService {
                     .contentType(contentType)
                     .stream(file.getInputStream(), file.getSize(), -1)
                     .build());
+            objectUploaded = true;
             StatObjectResponse stat = minioClient.statObject(StatObjectArgs.builder()
                     .bucket(properties.getBucket())
                     .object(objectName)
@@ -96,7 +113,7 @@ public class FileStorageService implements IFileStorageService {
             String publicUrl = buildPublicUrl(objectName);
             FileMetadataMapper.InsertFileMetadataRow row = new FileMetadataMapper.InsertFileMetadataRow();
             row.setOwnerUserId(userId);
-            row.setBizType(normalizeBizType(bizType));
+            row.setBizType(normalizedBizType);
             row.setBizId(bizId);
             row.setBucketName(properties.getBucket());
             row.setObjectName(objectName);
@@ -108,6 +125,9 @@ public class FileStorageService implements IFileStorageService {
             fileMetadataMapper.insertMetadata(row);
             return detail(row.getId());
         } catch (Exception e) {
+            if (objectUploaded) {
+                removeObjectQuietly(properties.getBucket(), objectName);
+            }
             throw new BusinessException(500, "文件上传失败: " + e.getMessage());
         }
     }
@@ -162,8 +182,9 @@ public class FileStorageService implements IFileStorageService {
     }
 
     @Transactional
-    public void remove(Long id) {
+    public void remove(Long ownerUserId, Long id) {
         FileMetadata metadata = detail(id);
+        requireOwner(ownerUserId, metadata);
         try {
             minioClient.removeObject(RemoveObjectArgs.builder()
                     .bucket(metadata.getBucketName())
@@ -173,6 +194,49 @@ public class FileStorageService implements IFileStorageService {
             throw new BusinessException(500, "删除 MinIO 文件失败: " + e.getMessage());
         }
         fileMetadataMapper.markDeleted(id);
+    }
+
+    private void validateUploadFile(String bizType, String originalFilename, String contentType, long fileSize) {
+        String suffix = fileSuffix(originalFilename);
+        if (isImageBizType(bizType)) {
+            long maxSize = "avatar".equals(bizType) ? AVATAR_MAX_SIZE : BLOG_IMAGE_MAX_SIZE;
+            if (fileSize > maxSize) {
+                throw new BusinessException("图片大小不能超过 " + (maxSize / 1024 / 1024) + "MB");
+            }
+            if (!IMAGE_CONTENT_TYPES.contains(contentType) || !IMAGE_EXTENSIONS.contains(suffix)) {
+                throw new BusinessException("只允许上传 jpg、png、webp 图片");
+            }
+            return;
+        }
+        if (fileSize > ATTACHMENT_MAX_SIZE) {
+            throw new BusinessException("文件大小不能超过 20MB");
+        }
+        boolean image = IMAGE_CONTENT_TYPES.contains(contentType) && IMAGE_EXTENSIONS.contains(suffix);
+        boolean attachment = ATTACHMENT_CONTENT_TYPES.contains(contentType) && ATTACHMENT_EXTENSIONS.contains(suffix);
+        if (!image && !attachment) {
+            throw new BusinessException("只允许上传 jpg、png、webp、pdf、docx、xlsx 文件");
+        }
+    }
+
+    private boolean isImageBizType(String bizType) {
+        return "avatar".equals(bizType) || "blog".equals(bizType) || "blog_image".equals(bizType) || "image".equals(bizType);
+    }
+
+    private void requireOwner(Long ownerUserId, FileMetadata metadata) {
+        if (ownerUserId == null || metadata.getOwnerUserId() == null || !Objects.equals(ownerUserId, metadata.getOwnerUserId())) {
+            throw new BusinessException(403, "无权操作该文件");
+        }
+    }
+
+    private void removeObjectQuietly(String bucketName, String objectName) {
+        try {
+            minioClient.removeObject(RemoveObjectArgs.builder()
+                    .bucket(bucketName)
+                    .object(objectName)
+                    .build());
+        } catch (Exception cleanupError) {
+            log.warn("MinIO 孤儿文件补偿删除失败，bucket={}, object={}: {}", bucketName, objectName, cleanupError.getMessage());
+        }
     }
 
     private String buildObjectName(String bizType, String originalFilename) {
@@ -200,6 +264,14 @@ public class FileStorageService implements IFileStorageService {
 
     private String normalizeBizType(String bizType) {
         return bizType == null || bizType.isBlank() ? "common" : bizType.trim().toLowerCase();
+    }
+
+    private String fileSuffix(String filename) {
+        int index = filename.lastIndexOf('.');
+        if (index < 0 || index == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(index).toLowerCase();
     }
 
     private String buildPublicUrl(String objectName) {

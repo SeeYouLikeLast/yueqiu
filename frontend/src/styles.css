@@ -1519,6 +1519,70 @@ p {
   min-height: 78px;
 }
 
+.upload-tile {
+  min-height: 86px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed #b8d5c4;
+  border-radius: 8px;
+  color: #15845f;
+  background: #f8fcf6;
+  cursor: pointer;
+}
+
+.upload-tile input,
+.avatar-upload input {
+  display: none;
+}
+
+.upload-tile strong {
+  color: #15231b;
+  font-size: 14px;
+}
+
+.upload-tile small {
+  color: #77837b;
+  font-size: 12px;
+}
+
+.image-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.image-preview-grid button {
+  position: relative;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: #eef3ef;
+}
+
+.image-preview-grid img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.image-preview-grid span {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(18, 32, 24, 0.72);
+}
+
 .publish-related-preview {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
@@ -1979,6 +2043,46 @@ p {
 .profile-form-grid label > span {
   color: #657168;
   font-size: 12px;
+}
+
+.avatar-edit {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e1ebdf;
+  border-radius: 8px;
+  background: #f8fbf6;
+}
+
+.avatar-edit img {
+  width: 66px;
+  height: 66px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eef3ef;
+}
+
+.avatar-edit strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 17px;
+}
+
+.avatar-upload {
+  width: fit-content;
+  min-height: 32px;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #cfe2d3;
+  border-radius: 8px;
+  color: #15845f;
+  background: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .profile-form-grid .wide,

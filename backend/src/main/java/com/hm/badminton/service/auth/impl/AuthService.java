@@ -9,6 +9,7 @@ import com.hm.badminton.dto.auth.CodeResponse;
 import com.hm.badminton.dto.auth.LocationRequest;
 import com.hm.badminton.dto.auth.LoginRequest;
 import com.hm.badminton.dto.auth.LoginResponse;
+import com.hm.badminton.dto.auth.ProfileUpdateRequest;
 import com.hm.badminton.dto.auth.RegisterRequest;
 import com.hm.badminton.entity.PlayerProfileEntity;
 import com.hm.badminton.entity.UserAccount;
@@ -186,6 +187,48 @@ public class AuthService implements IAuthService {
     }
 
     @Override
+    @Transactional
+    public Map<String, Object> updateMe(Long userId, ProfileUpdateRequest request) {
+        if (request == null) {
+            throw new BusinessException("资料不能为空");
+        }
+        UserAccount current = userMapper.selectById(userId);
+        if (current == null || !Integer.valueOf(1).equals(current.getStatus())) {
+            throw new BusinessException(404, "用户不存在");
+        }
+
+        String email = normalizeEmail(request.getEmail());
+        String username = normalizeUsername(request.getUsername());
+        if (email != null && !email.equals(current.getEmail())) {
+            assertUnique(RedisConstants.BLOOM_USER_EMAIL_KEY, "email", email, "邮箱已注册");
+        }
+        if (username != null && !username.equals(current.getUsername())) {
+            assertUnique(RedisConstants.BLOOM_USER_USERNAME_KEY, "username", username, "用户名已存在");
+        }
+
+        UserAccount update = new UserAccount();
+        update.setId(userId);
+        update.setEmail(email);
+        update.setUsername(username);
+        putText(update::setNickname, request.getNickname());
+        putText(update::setAvatar, request.getAvatar());
+        putText(update::setCity, request.getCity());
+        putText(update::setLevel, request.getLevel());
+        putText(update::setPreferTime, request.getPreferTime());
+        userMapper.updateById(update);
+
+        if (email != null && !email.equals(current.getEmail())) {
+            bloomFilterService.put(RedisConstants.BLOOM_USER_EMAIL_KEY, email);
+        }
+        if (username != null && !username.equals(current.getUsername())) {
+            bloomFilterService.put(RedisConstants.BLOOM_USER_USERNAME_KEY, username);
+        }
+        cacheClient.delete(RedisConstants.USER_PROFILE_KEY + userId);
+        UserAccount updated = userMapper.selectById(userId);
+        return me(new LoginUser(updated.getId(), updated.getPhone(), updated.getNickname(), updated.getCity(), updated.getLevel()));
+    }
+
+    @Override
     public UserPublicProfile publicProfile(Long userId, LoginUser currentUser) {
         UserPublicProfile profile = cacheClient.queryWithPassThrough(
                 RedisConstants.USER_PROFILE_KEY + userId,
@@ -311,6 +354,12 @@ public class AuthService implements IAuthService {
     private void putIfText(Map<String, String> map, String key, String value) {
         if (value != null && !value.isBlank()) {
             map.put(key, value.trim());
+        }
+    }
+
+    private void putText(java.util.function.Consumer<String> setter, String value) {
+        if (value != null && !value.isBlank()) {
+            setter.accept(value.trim());
         }
     }
 
