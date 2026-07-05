@@ -2023,7 +2023,7 @@ onBeforeUnmount(() => {
 
       <div class="auth-hero">
         <div class="auth-mark">
-          <img src="/Icon.png" alt="约个球" />
+          <img src="/Icon.png?v=20260704" alt="约个球" />
         </div>
         <h1>约个球</h1>
         <p>上球搭子，约个球</p>
