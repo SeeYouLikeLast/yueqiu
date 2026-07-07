@@ -9,8 +9,10 @@ import {
   ExternalLink,
   Heart,
   ImagePlus,
+  KeyRound,
   LocateFixed,
   LogIn,
+  Mail,
   MapPin,
   MessageCircle,
   PenLine,
@@ -198,7 +200,7 @@ type VenueReview = {
 
 type UserProfile = {
   id: number
-  phone: string
+  phone?: string
   email?: string
   username?: string
   nickname: string
@@ -230,9 +232,9 @@ type UserPublicProfile = {
 }
 
 type LoginCodeResponse = {
-  phone: string
-  code?: string
+  email: string
   expireSeconds: number
+  cooldownSeconds: number
 }
 
 type RegeoLocation = {
@@ -302,6 +304,8 @@ const fallbackSports: SportType[] = [
 
 const ALL_SPORT: SportType = { code: '', name: '全部运动', keywords: [] }
 const DEFAULT_PLACE_RADIUS = 5000
+const PLACE_RADIUS_STEPS = [DEFAULT_PLACE_RADIUS, 10000, 20000, 30000]
+const MIN_PLACE_RESULTS = 6
 const PLACE_PAGE_SIZE = 20
 const PRODUCT_PAGE_SIZE = 12
 const SOCIAL_PAGE_SIZE = 12
@@ -414,6 +418,10 @@ const visibleEquipmentOrders = computed(() => profileView.value === 'paid'
   : equipmentOrders.value)
 const profileVenueOrderCards = computed<ProfileOrderCard[]>(() => visibleVenueOrders.value)
 const profileEquipmentOrderCards = computed<ProfileOrderCard[]>(() => visibleEquipmentOrders.value)
+function nextPlaceRadius() {
+  return PLACE_RADIUS_STEPS.find((radius) => radius > placeQuery.radius)
+}
+
 const selectedPlaceVenueItems = computed(() => {
   if (!selectedPlace.value) return []
   const records = saleVenueItems(selectedPlace.value)
@@ -466,9 +474,16 @@ const bottomTabs = [
 ]
 
 const loginForm = reactive({
-  phone: '13800000001',
+  email: '',
   code: ''
 })
+
+const passwordLoginForm = reactive({
+  account: '',
+  password: ''
+})
+
+const authMode = ref<'code' | 'password'>('code')
 
 const placeQuery = reactive({
   city: '西安',
@@ -504,8 +519,10 @@ const activityForm = reactive({
 })
 
 const profileForm = reactive({
+  phone: '',
   username: '',
   email: '',
+  password: '',
   nickname: '',
   avatar: '',
   sportCode: 'badminton',
@@ -595,6 +612,7 @@ function closeMessage() {
 }
 
 function resetListPaging() {
+  placeQuery.radius = DEFAULT_PLACE_RADIUS
   placesPage.value = 1
   placesTotal.value = 0
   venueSalesPage.value = 1
@@ -680,21 +698,27 @@ async function sendLoginCode() {
   await wrap(async () => {
     const result = await api<LoginCodeResponse>('/api/auth/code', {
       method: 'POST',
-      body: JSON.stringify({ phone: loginForm.phone })
+      body: JSON.stringify({ email: loginForm.email.trim() })
     })
-    if (result.code) {
-      loginForm.code = result.code
-    }
-    startCodeCountdown(result.expireSeconds)
-    message.value = result.code ? `验证码 ${result.code} 已发送，2 分钟内有效` : '验证码已发送'
+    startCodeCountdown(result.cooldownSeconds || 60)
+    message.value = `验证码已发送至 ${result.email}，5 分钟内有效`
   })
 }
 
 async function login() {
   await wrap(async () => {
+    const body = authMode.value === 'password'
+      ? {
+          account: passwordLoginForm.account.trim(),
+          password: passwordLoginForm.password
+        }
+      : {
+          email: loginForm.email.trim(),
+          code: loginForm.code.trim()
+        }
     const result = await api<{ token: string }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify(loginForm)
+      body: JSON.stringify(body)
     })
     setToken(result.token)
     authToken.value = result.token
@@ -763,7 +787,7 @@ function setPagingParams(params: URLSearchParams, page: number, pageSize: number
   if (pageSize !== defaultPageSize) params.set('size', String(pageSize))
 }
 
-async function loadPlaces(page = 1, append = false) {
+async function loadPlaces(page = 1, append = false, autoExpand = true) {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
   params.set('lng', String(placeQuery.lng))
@@ -778,6 +802,16 @@ async function loadPlaces(page = 1, append = false) {
   if (!append && selectedPlace.value && !result.records.some((place) => place.id === selectedPlace.value?.id)) {
     selectedPlace.value = null
     venueReviews.value = []
+  }
+  if (autoExpand && page === 1 && !placeQuery.keyword.trim() && places.value.length < MIN_PLACE_RESULTS) {
+    const radius = nextPlaceRadius()
+    if (radius) {
+      placeQuery.radius = radius
+      await loadPlaces(1, true, true)
+      if (!append && places.value.length > result.records.length) {
+        message.value = `附近结果较少，已扩大到 ${Math.round(placeQuery.radius / 1000)}km`
+      }
+    }
   }
 }
 
@@ -1073,7 +1107,7 @@ function nearPageBottom() {
 async function loadMoreCurrentTab() {
   if (loading.value || loadingMore.value) return
   if (activeTab.value === 'home' && venueSaleView.value && !hasMoreVenueSales.value) return
-  if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value) return
+  if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value && !nextPlaceRadius()) return
   if (activeTab.value === 'equipment' && !hasMoreEquipmentItems.value) return
   if (activeTab.value === 'social' && !hasMoreSocial.value) return
   if (activeTab.value === 'seckill' && !hasMoreBlogs.value) return
@@ -1086,7 +1120,16 @@ async function loadMoreCurrentTab() {
       if (venueSaleView.value) {
         await loadVenueSaleItems(venueSalesPage.value + 1, true)
       } else {
-        await loadPlaces(placesPage.value + 1, true)
+        if (!hasMorePlaces.value) {
+          const radius = nextPlaceRadius()
+          if (radius) {
+            placeQuery.radius = radius
+            await loadPlaces(1, true)
+            message.value = `已扩大到 ${Math.round(radius / 1000)}km 继续查找`
+          }
+        } else {
+          await loadPlaces(placesPage.value + 1, true)
+        }
       }
     } else if (activeTab.value === 'equipment') {
       await loadEquipmentItems(productsPage.value + 1, true)
@@ -1532,8 +1575,10 @@ function closeProfileOrderPage() {
 }
 
 function fillProfileForm(profile?: Player | null) {
+  profileForm.phone = userProfile.value?.phone || ''
   profileForm.username = userProfile.value?.username || ''
   profileForm.email = userProfile.value?.email || ''
+  profileForm.password = ''
   profileForm.nickname = userProfile.value?.nickname || ''
   profileForm.avatar = userProfile.value?.avatar || ''
   profileForm.sportCode = profile?.sportCode || selectedSport.value || 'badminton'
@@ -1604,7 +1649,9 @@ async function saveSocialProfile() {
       method: 'PUT',
       body: JSON.stringify({
         username: profileForm.username.trim(),
+        phone: profileForm.phone.trim(),
         email: profileForm.email.trim(),
+        password: profileForm.password.trim(),
         nickname: profileForm.nickname.trim(),
         avatar: profileForm.avatar.trim(),
         city: profileForm.city.trim(),
@@ -1656,6 +1703,7 @@ function searchPlaces() {
       venueReviews.value = []
       venueItems.value = {}
       inventoriesByVenueItem.value = {}
+      placeQuery.radius = DEFAULT_PLACE_RADIUS
       placesPage.value = 1
       placesTotal.value = 0
       await loadPlaces()
@@ -1695,6 +1743,7 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
     locationAccuracy.value = accuracy
     placeQuery.lng = located.lng
     placeQuery.lat = located.lat
+    placeQuery.radius = DEFAULT_PLACE_RADIUS
     try {
       const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
         lng: String(placeQuery.lng),
@@ -1926,6 +1975,27 @@ async function removeCartItem(item: CartItem) {
   }, '已移出购物车')
 }
 
+async function updateCartQuantity(item: CartItem, quantity: number) {
+  const nextQuantity = Math.min(Math.max(quantity, 1), 99)
+  if (nextQuantity === item.quantity) return
+  await wrap(async () => {
+    await api(`/api/cart/${item.type}/${item.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ quantity: nextQuantity })
+    })
+    cartItems.value = cartItems.value.map((record) => {
+      if (record.type !== item.type || record.id !== item.id) return record
+      return {
+        ...record,
+        quantity: nextQuantity,
+        amount: Number(record.price) * nextQuantity
+      }
+    })
+    cartCount.value = cartItems.value.reduce((sum, record) => sum + record.quantity, 0)
+    cartLoaded.value = true
+  }, '数量已更新')
+}
+
 async function submitSeckill(activityId: number) {
   if (!requireLogin('请先登录后参与秒杀')) return
   await wrap(async () => {
@@ -2054,6 +2124,10 @@ function inventoryText(product: VenueItem) {
   return `${inventory.serviceDate.slice(5)} ${inventory.startTime.slice(0, 5)}-${inventory.endTime.slice(0, 5)}`
 }
 
+function hasDiscountPrice(item: { price: number; originalPrice?: number }) {
+  return item.originalPrice != null && Number(item.originalPrice) > Number(item.price)
+}
+
 function typeClass(productType: string) {
   return {
     'type-time': productType === 'TIME_PACKAGE',
@@ -2099,30 +2173,55 @@ onBeforeUnmount(() => {
       </div>
 
       <section class="auth-panel">
-        <label class="auth-field">
-          <span>手机号</span>
-          <div class="auth-input">
-            <Phone :size="18" />
-            <input v-model="loginForm.phone" inputmode="tel" maxlength="11" placeholder="请输入手机号" />
-          </div>
-        </label>
+        <div class="auth-mode-tabs">
+          <button :class="{ active: authMode === 'code' }" type="button" @click="authMode = 'code'">验证码登录</button>
+          <button :class="{ active: authMode === 'password' }" type="button" @click="authMode = 'password'">密码登录</button>
+        </div>
 
-        <label class="auth-field">
-          <span>验证码</span>
-          <div class="auth-code-row">
+        <template v-if="authMode === 'code'">
+          <label class="auth-field">
+            <span>邮箱</span>
             <div class="auth-input">
-              <MessageCircle :size="18" />
-              <input v-model="loginForm.code" inputmode="numeric" maxlength="6" placeholder="请输入验证码" />
+              <Mail :size="18" />
+              <input v-model="loginForm.email" type="email" inputmode="email" placeholder="请输入邮箱" />
             </div>
-            <button class="code-button" @click="sendLoginCode" :disabled="loading || codeCountdown > 0">
-              {{ codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}
-            </button>
-          </div>
-        </label>
+          </label>
+
+          <label class="auth-field">
+            <span>验证码</span>
+            <div class="auth-code-row">
+              <div class="auth-input">
+                <MessageCircle :size="18" />
+                <input v-model="loginForm.code" inputmode="numeric" maxlength="6" placeholder="请输入验证码" />
+              </div>
+              <button class="code-button" @click="sendLoginCode" :disabled="loading || codeCountdown > 0 || !loginForm.email.trim()">
+                {{ codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}
+              </button>
+            </div>
+          </label>
+        </template>
+
+        <template v-else>
+          <label class="auth-field">
+            <span>账号</span>
+            <div class="auth-input">
+              <Mail :size="18" />
+              <input v-model="passwordLoginForm.account" placeholder="邮箱 / 用户名 / 手机号" />
+            </div>
+          </label>
+
+          <label class="auth-field">
+            <span>密码</span>
+            <div class="auth-input">
+              <KeyRound :size="18" />
+              <input v-model="passwordLoginForm.password" type="password" placeholder="请输入密码" />
+            </div>
+          </label>
+        </template>
 
         <button class="auth-submit" @click="login" :disabled="loading">
           <LogIn :size="18" />
-          登录/注册
+          {{ authMode === 'code' ? '登录/注册' : '登录' }}
         </button>
       </section>
 
@@ -2375,7 +2474,7 @@ onBeforeUnmount(() => {
                 <small>{{ item.useRule }}</small>
                 <div class="detail-price-line">
                   <strong>{{ yuan(item.price) }}</strong>
-                  <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
+                  <span v-if="hasDiscountPrice(item)">{{ yuan(item.originalPrice || 0) }}</span>
                 </div>
               </div>
               <div class="dual-action">
@@ -2474,7 +2573,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="buy-side">
                 <strong>{{ yuan(item.price) }}</strong>
-                <span v-if="item.originalPrice">{{ yuan(item.originalPrice || 0) }}</span>
+                <span v-if="hasDiscountPrice(item)">{{ yuan(item.originalPrice || 0) }}</span>
                 <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id">
                   {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
                 </button>
@@ -2483,7 +2582,9 @@ onBeforeUnmount(() => {
           </section>
           </template>
           <div v-if="loadingMore" class="load-more-state">正在加载更多场所</div>
-          <div v-else-if="places.length && !hasMorePlaces" class="load-more-state muted-state">已经到底了</div>
+          <div v-else-if="places.length && !hasMorePlaces" class="load-more-state muted-state">
+            {{ nextPlaceRadius() ? '继续上滑，将扩大附近范围' : '已经到底了' }}
+          </div>
         </section>
         </template>
 
@@ -2513,7 +2614,7 @@ onBeforeUnmount(() => {
               <div class="sale-row-bottom">
                 <div>
                   <strong>{{ yuan(item.price) }}</strong>
-                  <span v-if="item.originalPrice">{{ yuan(item.originalPrice) }}</span>
+                  <span v-if="hasDiscountPrice(item)">{{ yuan(item.originalPrice || 0) }}</span>
                 </div>
                 <div class="dual-action compact-actions">
                   <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
@@ -2684,7 +2785,7 @@ onBeforeUnmount(() => {
             <div>
               <span>{{ activity.categoryName }}</span>
               <h3>{{ activity.productName }}</h3>
-              <p>一人一单 · Redis Lua 扣减</p>
+              <p>限时特价 · 每人限购 1 件</p>
               <strong>{{ yuan(activity.seckillPrice) }}</strong>
               <em>{{ yuan(activity.originalPrice) }}</em>
             </div>
@@ -2809,9 +2910,17 @@ onBeforeUnmount(() => {
               <span>用户名</span>
               <input v-model="profileForm.username" placeholder="chenyu" />
             </label>
+            <label>
+              <span>手机号</span>
+              <input v-model="profileForm.phone" inputmode="tel" maxlength="11" placeholder="可选，用于账号登录" />
+            </label>
             <label class="wide">
               <span>邮箱</span>
               <input v-model="profileForm.email" type="email" placeholder="chen@example.com" />
+            </label>
+            <label class="wide">
+              <span>新密码</span>
+              <input v-model="profileForm.password" type="password" placeholder="留空则不修改，至少 6 位" />
             </label>
             <label>
               <span>常打运动</span>
@@ -2943,7 +3052,12 @@ onBeforeUnmount(() => {
             <div>
               <h3>{{ item.productName }}</h3>
               <p>{{ item.brand }}</p>
-              <small>{{ item.meta }} · {{ yuan(item.price) }} × {{ item.quantity }}</small>
+              <small>{{ item.meta }} · {{ yuan(item.price) }}</small>
+              <div class="cart-qty" aria-label="调整数量">
+                <button type="button" @click="updateCartQuantity(item, item.quantity - 1)" :disabled="item.quantity <= 1">-</button>
+                <span>{{ item.quantity }}</span>
+                <button type="button" @click="updateCartQuantity(item, item.quantity + 1)">+</button>
+              </div>
             </div>
             <div class="order-side">
               <strong>{{ yuan(item.amount) }}</strong>

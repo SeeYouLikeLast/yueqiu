@@ -24,6 +24,8 @@ public interface IEquipmentService {
 
     void removeCart(Long userId, Long itemId);
 
+    void updateCartQuantity(Long userId, Long itemId, Integer quantity);
+
     void clearCart(Long userId);
 
     Long createOrder(Long userId, EquipmentOrderCreateRequest request);

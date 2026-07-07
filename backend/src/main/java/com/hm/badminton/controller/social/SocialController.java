@@ -50,7 +50,8 @@ public class SocialController {
                 lng == null && user != null ? user.getLongitude() : lng,
                 lat == null && user != null ? user.getLatitude() : lat,
                 page,
-                size));
+                size,
+                user == null ? null : user.getId()));
     }
 
     @GetMapping("/profile/me")

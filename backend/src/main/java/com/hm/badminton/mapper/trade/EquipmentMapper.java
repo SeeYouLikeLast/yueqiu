@@ -173,6 +173,15 @@ public interface EquipmentMapper {
     @Delete("delete from cart_equipment where id = #{itemId} and user_id = #{userId}")
     int deleteCart(@Param("userId") Long userId, @Param("itemId") Long itemId);
 
+    @Update("""
+            update cart_equipment
+            set quantity = #{quantity}, updated_at = now()
+            where id = #{itemId} and user_id = #{userId}
+            """)
+    int updateCartQuantity(@Param("userId") Long userId,
+                           @Param("itemId") Long itemId,
+                           @Param("quantity") Integer quantity);
+
     @Insert("""
             insert into order_equipment(user_id, total_amount, status, address)
             values (#{row.userId}, #{row.totalAmount}, '待支付', #{row.address})

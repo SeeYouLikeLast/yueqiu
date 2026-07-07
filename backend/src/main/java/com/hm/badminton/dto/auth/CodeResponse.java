@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CodeResponse {
-    private String phone;
-    private String code;
+    private String email;
     private long expireSeconds;
+    private long cooldownSeconds;
 }

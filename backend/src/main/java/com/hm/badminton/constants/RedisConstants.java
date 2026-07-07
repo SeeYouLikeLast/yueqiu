@@ -9,6 +9,9 @@ public final class RedisConstants {
 
     public static final String LOGIN_USER_KEY = "login:token:";
     public static final String LOGIN_CODE_KEY = "login:code:";
+    public static final String LOGIN_EMAIL_CODE_KEY = "login:code:email:";
+    public static final String LOGIN_EMAIL_CODE_COOLDOWN_KEY = "login:code:email:cooldown:";
+    public static final String LOGIN_EMAIL_CODE_LIMIT_KEY = "login:code:email:limit:";
     public static final String BLOOM_USER_PHONE_KEY = "bf:user:phone";
     public static final String BLOOM_USER_EMAIL_KEY = "bf:user:email";
     public static final String BLOOM_USER_USERNAME_KEY = "bf:user:username";

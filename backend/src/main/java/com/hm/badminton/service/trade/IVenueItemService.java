@@ -25,6 +25,8 @@ public interface IVenueItemService {
 
     void removeCart(Long userId, Long itemId);
 
+    void updateCartQuantity(Long userId, Long itemId, Integer quantity);
+
     void clearCart(Long userId);
 
     VenueOrder createOrder(Long userId, VenueOrderCreateRequest request);

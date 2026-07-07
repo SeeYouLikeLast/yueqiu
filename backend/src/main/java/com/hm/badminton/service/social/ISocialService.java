@@ -14,7 +14,8 @@ public interface ISocialService {
                                       Double lng,
                                       Double lat,
                                       int page,
-                                      int size);
+                                      int size,
+                                      Long excludeUserId);
 
     PlayerProfile me(Long userId);
 

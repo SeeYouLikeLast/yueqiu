@@ -38,6 +38,18 @@ spring:
   jackson:
     time-zone: Asia/Shanghai
     default-property-inclusion: non_null
+  mail:
+    host: smtp.qq.com
+    port: 465
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    protocol: smtps
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
 
 mybatis-plus:
   configuration:
@@ -45,7 +57,10 @@ mybatis-plus:
 
 hm:
   auth:
-    code-expire-minutes: 2
+    code-expire-minutes: 5
+    code-cooldown-seconds: 60
+    code-window-minutes: 10
+    code-window-limit: 5
     token-expire-minutes: 120
     token-expire-jitter-minutes: 10
   jwt:

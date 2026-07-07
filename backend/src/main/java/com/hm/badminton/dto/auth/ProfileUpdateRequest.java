@@ -8,8 +8,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ProfileUpdateRequest {
+    private String phone;
     private String email;
     private String username;
+    private String password;
     private String nickname;
     private String avatar;
     private String city;

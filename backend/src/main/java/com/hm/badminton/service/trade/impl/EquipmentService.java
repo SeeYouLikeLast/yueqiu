@@ -101,6 +101,15 @@ public class EquipmentService implements IEquipmentService {
     }
 
     @Override
+    public void updateCartQuantity(Long userId, Long itemId, Integer quantity) {
+        int safeQuantity = quantity == null || quantity < 1 ? 1 : Math.min(quantity, 99);
+        int updated = equipmentMapper.updateCartQuantity(userId, itemId, safeQuantity);
+        if (updated == 0) {
+            throw new BusinessException(404, "购物车商品不存在");
+        }
+    }
+
+    @Override
     public void clearCart(Long userId) {
         equipmentMapper.deleteCartByUser(userId);
     }

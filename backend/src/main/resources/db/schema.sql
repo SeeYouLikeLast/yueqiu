@@ -43,7 +43,7 @@ drop table if exists users;
 
 create table users (
   id bigint primary key auto_increment,
-  phone varchar(20) not null,
+  phone varchar(20) null,
   email varchar(128) null,
   username varchar(64) null,
   password_hash varchar(128) not null,

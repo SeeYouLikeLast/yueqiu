@@ -83,12 +83,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "数据存储分工-MySQL-Redis-MinIO.md",
+                "file": "1问题.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "数据存储分工-MySQL-Redis-MinIO"
+              "title": "1问题"
             }
           }
         ],
@@ -227,13 +227,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "数据存储分工-MySQL-Redis-MinIO.md",
+                "file": "1问题.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "数据存储分工-MySQL-Redis-MinIO 的大纲"
+              "title": "1问题 的大纲"
             }
           }
         ],
@@ -256,10 +256,10 @@
   },
   "active": "cdba0a6425c18b82",
   "lastOpenFiles": [
+    "数据存储分工-MySQL-Redis-MinIO.md",
     "1问题.md",
     "关键业务/redis防穿透、雪崩、击穿（Get）.md",
     "关键业务/秒杀业务逻辑与并发控制(Post).md",
-    "数据存储分工-MySQL-Redis-MinIO.md",
     "WSL-Docker-MySQL-Redis-环境配置.md",
     "项目启动与关闭.md",
     "3注释.md",

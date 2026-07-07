@@ -3,6 +3,7 @@ package com.hm.badminton.controller.trade;
 import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.constants.TradeType;
 import com.hm.badminton.dto.trade.CartAddRequest;
+import com.hm.badminton.dto.trade.CartQuantityRequest;
 import com.hm.badminton.dto.trade.EquipmentCartRequest;
 import com.hm.badminton.dto.trade.VenueOrderCreateRequest;
 import com.hm.badminton.service.trade.IEquipmentService;
@@ -13,6 +14,7 @@ import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -67,6 +69,20 @@ public class CartController {
             venueItemService.removeCart(userId, itemId);
         } else {
             equipmentService.removeCart(userId, itemId);
+        }
+        return ApiResponse.ok();
+    }
+
+    @PatchMapping("/{type:[12]}/{itemId}")
+    public ApiResponse<Void> updateQuantity(@PathVariable Integer type,
+                                            @PathVariable Long itemId,
+                                            @Valid @RequestBody CartQuantityRequest request) {
+        Long userId = userContext.requireUserId();
+        int tradeType = TradeType.require(type);
+        if (tradeType == TradeType.VENUE) {
+            venueItemService.updateCartQuantity(userId, itemId, request.getQuantity());
+        } else {
+            equipmentService.updateCartQuantity(userId, itemId, request.getQuantity());
         }
         return ApiResponse.ok();
     }

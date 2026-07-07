@@ -26,9 +26,14 @@ import com.hm.badminton.utils.RedisTtl;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.mail.MailException;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -47,7 +52,12 @@ public class AuthService implements IAuthService {
     private final IFollowService followService;
     private final IPasswordService passwordService;
     private final CacheClient cacheClient;
+    private final JavaMailSender mailSender;
+    private final String mailFrom;
     private final Duration codeTtl;
+    private final Duration codeCooldown;
+    private final Duration codeWindow;
+    private final long codeWindowLimit;
     private final Duration tokenTtl;
     private final long tokenTtlJitterMaxSeconds;
 
@@ -58,7 +68,12 @@ public class AuthService implements IAuthService {
                        IFollowService followService,
                        IPasswordService passwordService,
                        CacheClient cacheClient,
-                       @Value("${hm.auth.code-expire-minutes:2}") long codeExpireMinutes,
+                       JavaMailSender mailSender,
+                       @Value("${spring.mail.username:}") String mailFrom,
+                       @Value("${hm.auth.code-expire-minutes:5}") long codeExpireMinutes,
+                       @Value("${hm.auth.code-cooldown-seconds:60}") long codeCooldownSeconds,
+                       @Value("${hm.auth.code-window-minutes:10}") long codeWindowMinutes,
+                       @Value("${hm.auth.code-window-limit:5}") long codeWindowLimit,
                        @Value("${hm.auth.token-expire-minutes:120}") long tokenExpireMinutes,
                        @Value("${hm.auth.token-expire-jitter-minutes:10}") long tokenExpireJitterMinutes) {
         this.userMapper = userMapper;
@@ -68,17 +83,24 @@ public class AuthService implements IAuthService {
         this.followService = followService;
         this.passwordService = passwordService;
         this.cacheClient = cacheClient;
+        this.mailSender = mailSender;
+        this.mailFrom = mailFrom;
         this.codeTtl = Duration.ofMinutes(codeExpireMinutes);
+        this.codeCooldown = Duration.ofSeconds(codeCooldownSeconds);
+        this.codeWindow = Duration.ofMinutes(codeWindowMinutes);
+        this.codeWindowLimit = codeWindowLimit;
         this.tokenTtl = Duration.ofMinutes(tokenExpireMinutes);
         this.tokenTtlJitterMaxSeconds = Duration.ofMinutes(tokenExpireJitterMinutes).toSeconds();
     }
 
     public CodeResponse sendCode(CodeRequest request) {
-        String phone = normalizePhone(request.getPhone());
-        assertPhone(phone);
+        String email = normalizeEmail(request.getEmail());
+        assertEmail(email);
+        assertCodeRateLimit(email);
         String code = String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
-        redisTemplate.opsForValue().set(RedisConstants.LOGIN_CODE_KEY + phone, code, codeTtl);
-        return new CodeResponse(phone, code, codeTtl.toSeconds());
+        redisTemplate.opsForValue().set(RedisConstants.LOGIN_EMAIL_CODE_KEY + email, code, codeTtl);
+        sendLoginCodeMail(email, code);
+        return new CodeResponse(email, codeTtl.toSeconds(), codeCooldown.toSeconds());
     }
 
     @Transactional
@@ -86,12 +108,19 @@ public class AuthService implements IAuthService {
         String phone = normalizePhone(request.getPhone());
         String email = normalizeEmail(request.getEmail());
         String username = normalizeUsername(request.getUsername());
-        assertUnique(RedisConstants.BLOOM_USER_PHONE_KEY, "phone", phone, "手机号已注册");
+        assertEmail(email);
+        if (username == null) {
+            username = uniqueEmailUsername(email.substring(0, email.indexOf('@')));
+        }
+        if (phone != null && !phone.isBlank()) {
+            assertPhone(phone);
+            assertUnique(RedisConstants.BLOOM_USER_PHONE_KEY, "phone", phone, "手机号已注册");
+        }
         assertUnique(RedisConstants.BLOOM_USER_EMAIL_KEY, "email", email, "邮箱已注册");
         assertUnique(RedisConstants.BLOOM_USER_USERNAME_KEY, "username", username, "用户名已存在");
 
         String nickname = request.getNickname() == null || request.getNickname().isBlank()
-                ? "球友" + phone.substring(phone.length() - 4)
+                ? "球友" + shortEmailName(email.substring(0, email.indexOf('@')))
                 : request.getNickname().trim();
         String city = request.getCity() == null || request.getCity().isBlank() ? "西安" : request.getCity().trim();
         String level = request.getLevel() == null || request.getLevel().isBlank() ? "初级" : request.getLevel().trim();
@@ -119,7 +148,9 @@ public class AuthService implements IAuthService {
         }
         playerProfileMapper.insert(defaultPlayerProfile(userId, city, "雁塔区", 108.946465, 34.347269, level));
 
-        bloomFilterService.put(RedisConstants.BLOOM_USER_PHONE_KEY, phone);
+        if (phone != null && !phone.isBlank()) {
+            bloomFilterService.put(RedisConstants.BLOOM_USER_PHONE_KEY, phone);
+        }
         bloomFilterService.put(RedisConstants.BLOOM_USER_EMAIL_KEY, email);
         bloomFilterService.put(RedisConstants.BLOOM_USER_USERNAME_KEY, username);
 
@@ -129,26 +160,28 @@ public class AuthService implements IAuthService {
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
-        if ((request.getPhone() != null && !request.getPhone().isBlank()) || (request.getCode() != null && !request.getCode().isBlank())) {
+        if ((request.getEmail() != null && !request.getEmail().isBlank())
+                || (request.getPhone() != null && !request.getPhone().isBlank())
+                || (request.getCode() != null && !request.getCode().isBlank())) {
             return loginByCode(request);
         }
         return loginByPassword(request);
     }
 
     private LoginResponse loginByCode(LoginRequest request) {
-        String phone = normalizePhone(request.getPhone());
-        assertPhone(phone);
+        String email = normalizeEmail(request.getEmail());
+        assertEmail(email);
         String code = request.getCode() == null ? "" : request.getCode().trim();
-        String cachedCode = redisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + phone);
+        String cachedCode = redisTemplate.opsForValue().get(RedisConstants.LOGIN_EMAIL_CODE_KEY + email);
         if (cachedCode == null || !cachedCode.equals(code)) {
             throw new BusinessException(401, "验证码错误或已过期");
         }
 
-        LoginUser user = findByPhone(phone);
+        LoginUser user = findByEmail(email);
         if (user == null) {
-            user = createUserByPhone(phone);
+            user = createUserByEmail(email);
         }
-        redisTemplate.delete(RedisConstants.LOGIN_CODE_KEY + phone);
+        redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_KEY + email);
         return new LoginResponse(createLoginToken(user), user);
     }
 
@@ -198,18 +231,32 @@ public class AuthService implements IAuthService {
         }
 
         String email = normalizeEmail(request.getEmail());
+        String phone = normalizePhone(request.getPhone());
         String username = normalizeUsername(request.getUsername());
+        String password = request.getPassword() == null ? null : request.getPassword().trim();
         if (email != null && !email.equals(current.getEmail())) {
+            assertEmail(email);
             assertUnique(RedisConstants.BLOOM_USER_EMAIL_KEY, "email", email, "邮箱已注册");
+        }
+        if (phone != null && !phone.equals(current.getPhone())) {
+            assertPhone(phone);
+            assertUnique(RedisConstants.BLOOM_USER_PHONE_KEY, "phone", phone, "手机号已注册");
         }
         if (username != null && !username.equals(current.getUsername())) {
             assertUnique(RedisConstants.BLOOM_USER_USERNAME_KEY, "username", username, "用户名已存在");
         }
+        if (password != null && !password.isBlank() && password.length() < 6) {
+            throw new BusinessException(400, "密码至少 6 位");
+        }
 
         UserAccount update = new UserAccount();
         update.setId(userId);
+        update.setPhone(phone);
         update.setEmail(email);
         update.setUsername(username);
+        if (password != null && !password.isBlank()) {
+            update.setPasswordHash(passwordService.encode(password));
+        }
         putText(update::setNickname, request.getNickname());
         putText(update::setAvatar, request.getAvatar());
         putText(update::setCity, request.getCity());
@@ -219,6 +266,9 @@ public class AuthService implements IAuthService {
 
         if (email != null && !email.equals(current.getEmail())) {
             bloomFilterService.put(RedisConstants.BLOOM_USER_EMAIL_KEY, email);
+        }
+        if (phone != null && !phone.equals(current.getPhone())) {
+            bloomFilterService.put(RedisConstants.BLOOM_USER_PHONE_KEY, phone);
         }
         if (username != null && !username.equals(current.getUsername())) {
             bloomFilterService.put(RedisConstants.BLOOM_USER_USERNAME_KEY, username);
@@ -284,6 +334,13 @@ public class AuthService implements IAuthService {
         return toLoginUser(user);
     }
 
+    private LoginUser findByEmail(String email) {
+        UserAccount user = userMapper.selectOne(new QueryWrapper<UserAccount>()
+                .eq("email", email)
+                .eq("status", 1));
+        return toLoginUser(user);
+    }
+
     private UserPublicProfile loadPublicProfile(Long userId) {
         UserAccount account = userMapper.selectById(userId);
         if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
@@ -331,6 +388,39 @@ public class AuthService implements IAuthService {
         return new LoginUser(userId, phone, nickname, city, level);
     }
 
+    private LoginUser createUserByEmail(String email) {
+        String localPart = email.substring(0, email.indexOf('@'));
+        String nickname = "球友" + shortEmailName(localPart);
+        String city = "西安";
+        String level = "新手";
+        UserAccount account = new UserAccount();
+        account.setEmail(email);
+        account.setUsername(uniqueEmailUsername(localPart));
+        account.setPasswordHash(passwordService.encode(UUID.randomUUID().toString()));
+        account.setNickname(nickname);
+        account.setAvatar("https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80");
+        account.setCity(city);
+        account.setLevel(level);
+        account.setPreferTime("工作日晚上 / 周末下午");
+        try {
+            userMapper.insert(account);
+        } catch (DuplicateKeyException e) {
+            LoginUser existing = findByEmail(email);
+            if (existing != null) {
+                return existing;
+            }
+            throw new BusinessException(409, "邮箱已注册");
+        }
+        Long userId = account.getId();
+        if (userId == null) {
+            throw new BusinessException("登录失败，请重试");
+        }
+        playerProfileMapper.insert(defaultPlayerProfile(userId, city, "雁塔区", 108.946465, 34.347269, level));
+        bloomFilterService.put(RedisConstants.BLOOM_USER_EMAIL_KEY, email);
+        bloomFilterService.put(RedisConstants.BLOOM_USER_USERNAME_KEY, account.getUsername());
+        return new LoginUser(userId, account.getPhone(), nickname, city, level);
+    }
+
     private String createLoginToken(LoginUser user) {
         String token = UUID.randomUUID().toString().replace("-", "");
         Map<String, String> userMap = new HashMap<>();
@@ -345,6 +435,97 @@ public class AuthService implements IAuthService {
         if (phone == null || !phone.matches("^1[3-9]\\d{9}$")) {
             throw new BusinessException(400, "手机号格式不正确");
         }
+    }
+
+    private void assertEmail(String email) {
+        if (email == null || !email.matches("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
+            throw new BusinessException(400, "邮箱格式不正确");
+        }
+    }
+
+    private void assertCodeRateLimit(String email) {
+        Boolean allowed = redisTemplate.opsForValue().setIfAbsent(
+                RedisConstants.LOGIN_EMAIL_CODE_COOLDOWN_KEY + email,
+                "1",
+                codeCooldown);
+        if (Boolean.FALSE.equals(allowed)) {
+            throw new BusinessException(429, "验证码发送太频繁，请 60 秒后再试");
+        }
+
+        String limitKey = RedisConstants.LOGIN_EMAIL_CODE_LIMIT_KEY + email;
+        Long count = redisTemplate.opsForValue().increment(limitKey);
+        if (count != null && count == 1) {
+            redisTemplate.expire(limitKey, codeWindow);
+        }
+        if (count != null && count > codeWindowLimit) {
+            throw new BusinessException(429, "验证码请求次数过多，请稍后再试");
+        }
+    }
+
+    private void sendLoginCodeMail(String email, String code) {
+        if (mailFrom == null || mailFrom.isBlank()) {
+            redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_KEY + email);
+            redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_COOLDOWN_KEY + email);
+            throw new BusinessException(500, "邮件服务未配置 MAIL_USERNAME");
+        }
+        try {
+            mailSender.send(message -> {
+                MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+                helper.setFrom(mailFrom, "约个球");
+                helper.setTo(email);
+                helper.setSubject("约个球登录验证码");
+                boolean hasLogo = logoFile().isFile();
+                helper.setText(loginMailHtml(code, hasLogo), true);
+                if (hasLogo) {
+                    helper.addInline("appLogo", new FileSystemResource(logoFile()));
+                }
+            });
+        } catch (MailException e) {
+            redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_KEY + email);
+            redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_COOLDOWN_KEY + email);
+            throw new BusinessException(502, "验证码邮件发送失败，请稍后再试");
+        }
+    }
+
+    private String loginMailHtml(String code, boolean hasLogo) {
+        String logo = hasLogo
+                ? "<img src=\"cid:appLogo\" alt=\"约个球\" style=\"width:64px;height:64px;border-radius:14px;display:block;margin:0 auto 12px;\">"
+                : "<div style=\"width:64px;height:64px;border-radius:14px;background:#15845f;color:#fff;margin:0 auto 12px;line-height:64px;text-align:center;font-size:24px;font-weight:800;\">约</div>";
+        return """
+                <div style="margin:0;padding:24px;background:#fff7d8;font-family:Arial,'Microsoft YaHei',sans-serif;color:#14231a;">
+                  <div style="max-width:420px;margin:0 auto;padding:28px 22px;background:#ffffff;border-radius:14px;border:1px solid #f0deb6;text-align:center;">
+                    %s
+                    <h2 style="margin:0 0 8px;font-size:24px;line-height:1.2;">约个球</h2>
+                    <p style="margin:0 0 20px;color:#667168;font-size:14px;">上球搭子，约个球</p>
+                    <p style="margin:0 0 8px;color:#667168;font-size:14px;">你的登录验证码是</p>
+                    <div style="margin:0 auto 18px;padding:12px 16px;border-radius:10px;background:#f3faf5;color:#12845f;font-size:30px;font-weight:800;letter-spacing:6px;">%s</div>
+                    <p style="margin:0;color:#667168;font-size:13px;">验证码 5 分钟内有效，请勿转发给他人。</p>
+                  </div>
+                </div>
+                """.formatted(logo, code);
+    }
+
+    private File logoFile() {
+        return new File(System.getProperty("user.dir"), "../frontend/public/Icon.png");
+    }
+
+    private String shortEmailName(String localPart) {
+        String cleaned = localPart == null ? "" : localPart.replaceAll("[^A-Za-z0-9\\u4e00-\\u9fa5]", "");
+        if (cleaned.isBlank()) {
+            return String.valueOf(ThreadLocalRandom.current().nextInt(1000, 9999));
+        }
+        return cleaned.length() <= 8 ? cleaned : cleaned.substring(0, 8);
+    }
+
+    private String uniqueEmailUsername(String localPart) {
+        String base = shortEmailName(localPart).toLowerCase(Locale.ROOT);
+        String username = base;
+        int suffix = 0;
+        while (userMapper.selectCount(new QueryWrapper<UserAccount>().eq("username", username)) > 0) {
+            suffix++;
+            username = base + suffix;
+        }
+        return username;
     }
 
     private String nullToEmpty(String value) {
@@ -406,7 +587,8 @@ public class AuthService implements IAuthService {
     }
 
     private String normalizePhone(String phone) {
-        return phone == null ? null : phone.replaceAll("\\s+", "");
+        String value = phone == null ? null : phone.replaceAll("\\s+", "");
+        return value == null || value.isBlank() ? null : value;
     }
 
     private String normalizeEmail(String email) {

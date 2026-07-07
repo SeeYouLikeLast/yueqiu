@@ -237,7 +237,7 @@ public interface VenueItemMapper {
 
     @Update("""
             update cart_venue
-            set updated_at = now()
+            set quantity = least(quantity + 1, 99), updated_at = now()
             where user_id = #{userId} and product_id = #{productId} and inventory_id = #{inventoryId}
             """)
     int touchVenueCart(@Param("userId") Long userId,
@@ -277,6 +277,15 @@ public interface VenueItemMapper {
 
     @Delete("delete from cart_venue where id = #{itemId} and user_id = #{userId}")
     int deleteVenueCart(@Param("userId") Long userId, @Param("itemId") Long itemId);
+
+    @Update("""
+            update cart_venue
+            set quantity = #{quantity}, updated_at = now()
+            where id = #{itemId} and user_id = #{userId}
+            """)
+    int updateVenueCartQuantity(@Param("userId") Long userId,
+                                @Param("itemId") Long itemId,
+                                @Param("quantity") Integer quantity);
 
     @Delete("delete from cart_venue where user_id = #{userId}")
     int deleteVenueCartByUser(@Param("userId") Long userId);

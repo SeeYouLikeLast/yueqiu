@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Collections;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
@@ -109,6 +110,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         merged.addAll(readFeedEntries(RedisConstants.FEED_KEY + currentUser.getId(), max));
         // 3. 拉模式：遍历关注的大 V，读取其 outbox（outbox 空时降级 DB）
         merged.addAll(readBigVOutboxEntries(currentUser.getId(), max));
+        merged.addAll(readFollowedBlogsFromDatabase(currentUser.getId(), max));
         // 4. 合并去重 + 排序：同一 blogId 保留 score 最大的（防止推拉重复），
         //    然后按 score 倒序、blogId 倒序排列
         List<FeedEntry> sorted = merged.stream()
@@ -271,10 +273,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     }
 
     private List<Long> followedBigVIds(Long userId) {
-        List<Long> followUserIds = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, userId))
-                .stream()
-                .map(Follow::getFollowUserId)
-                .toList();
+        List<Long> followUserIds = followedUserIds(userId);
         if (followUserIds.isEmpty()) {
             return Collections.emptyList();
         }
@@ -283,6 +282,13 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                 .filter(user -> Integer.valueOf(1).equals(user.getStatus()))
                 .filter(user -> Integer.valueOf(1).equals(user.getIsBigV()))
                 .map(UserAccount::getId)
+                .toList();
+    }
+
+    private List<Long> followedUserIds(Long userId) {
+        return followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getUserId, userId))
+                .stream()
+                .map(Follow::getFollowUserId)
                 .toList();
     }
 
@@ -300,6 +306,28 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                 .eq(Blog::getUserId, bigVId)
                 .orderByDesc(Blog::getCreatedAt)
                 .last("limit " + DEFAULT_SIZE))
+                .stream()
+                .map(blog -> new FeedEntry(blog.getId(), blog.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()))
+                .filter(entry -> entry.score() <= maxScore)
+                .toList();
+    }
+
+    private List<FeedEntry> readFollowedBlogsFromDatabase(Long userId, long maxScore) {
+        List<Long> followUserIds = followedUserIds(userId);
+        if (followUserIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<Blog> wrapper = new LambdaQueryWrapper<Blog>()
+                .eq(Blog::getStatus, 1)
+                .in(Blog::getUserId, followUserIds)
+                .orderByDesc(Blog::getCreatedAt)
+                .orderByDesc(Blog::getId)
+                .last("limit " + DEFAULT_SIZE * 3);
+        if (maxScore < Long.MAX_VALUE) {
+            LocalDateTime maxCreatedAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(maxScore), ZoneId.systemDefault());
+            wrapper.le(Blog::getCreatedAt, maxCreatedAt);
+        }
+        return list(wrapper)
                 .stream()
                 .map(blog -> new FeedEntry(blog.getId(), blog.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()))
                 .filter(entry -> entry.score() <= maxScore)

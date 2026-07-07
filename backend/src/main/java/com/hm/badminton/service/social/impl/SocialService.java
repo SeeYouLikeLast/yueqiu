@@ -38,18 +38,20 @@ public class SocialService implements ISocialService {
 
     @Override
     public PageResult<PlayerProfile> players(String sportCode, String city, String area, String level,
-                                             Double lng, Double lat, int page, int size) {
+                                             Double lng, Double lat, int page, int size, Long excludeUserId) {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 50);
         String normalizedSport = normalizeSport(sportCode);
         String cityText = blankToNull(city);
         String areaText = blankToNull(area);
         String levelText = blankToNull(level);
-        String key = RedisConstants.SOCIAL_PLAYERS_KEY + listCacheKey(normalizedSport, cityText, areaText, levelText, safePage, safeSize, lng, lat);
+        String key = RedisConstants.SOCIAL_PLAYERS_KEY
+                + listCacheKey(normalizedSport, cityText, areaText, levelText, safePage, safeSize, lng, lat)
+                + ":exclude:" + (excludeUserId == null ? "none" : excludeUserId);
         return cacheClient.querySimple(key, new TypeReference<PageResult<PlayerProfile>>() {
         }, () -> {
-            Long total = socialMapper.countPlayers(normalizedSport, cityText, areaText, levelText);
-            return new PageResult<>(socialMapper.selectPlayers(normalizedSport, cityText, areaText, levelText, lng, lat, safeSize, (safePage - 1) * safeSize),
+            Long total = socialMapper.countPlayers(normalizedSport, cityText, areaText, levelText, excludeUserId);
+            return new PageResult<>(socialMapper.selectPlayers(normalizedSport, cityText, areaText, levelText, lng, lat, safeSize, (safePage - 1) * safeSize, excludeUserId),
                     total == null ? 0 : total, safePage, safeSize);
         }, RedisConstants.SOCIAL_LIST_TTL);
     }

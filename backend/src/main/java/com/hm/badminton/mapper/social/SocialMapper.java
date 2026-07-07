@@ -28,12 +28,14 @@ public interface SocialMapper {
             <if test="city != null and city != ''">and pp.city = #{city}</if>
             <if test="area != null and area != ''">and pp.area = #{area}</if>
             <if test="level != null and level != ''">and pp.level = #{level}</if>
+            <if test="excludeUserId != null">and pp.user_id != #{excludeUserId}</if>
             </script>
             """)
     Long countPlayers(@Param("sportCode") String sportCode,
                       @Param("city") String city,
                       @Param("area") String area,
-                      @Param("level") String level);
+                      @Param("level") String level,
+                      @Param("excludeUserId") Long excludeUserId);
 
     @Select("""
             <script>
@@ -55,6 +57,7 @@ public interface SocialMapper {
             <if test="city != null and city != ''">and pp.city = #{city}</if>
             <if test="area != null and area != ''">and pp.area = #{area}</if>
             <if test="level != null and level != ''">and pp.level = #{level}</if>
+            <if test="excludeUserId != null">and pp.user_id != #{excludeUserId}</if>
             <choose>
               <when test="lng != null and lat != null">order by distance_m asc</when>
               <otherwise>order by pp.updated_at desc</otherwise>
@@ -85,7 +88,8 @@ public interface SocialMapper {
                                       @Param("lng") Double lng,
                                       @Param("lat") Double lat,
                                       @Param("size") int size,
-                                      @Param("offset") int offset);
+                                      @Param("offset") int offset,
+                                      @Param("excludeUserId") Long excludeUserId);
 
     @Select("""
             select pp.user_id, u.nickname, u.avatar, pp.sport_code, pp.city, pp.area, pp.longitude, pp.latitude,
