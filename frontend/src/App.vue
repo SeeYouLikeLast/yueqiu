@@ -311,6 +311,8 @@ const PRODUCT_PAGE_SIZE = 12
 const SOCIAL_PAGE_SIZE = 12
 const BLOG_PAGE_SIZE = 10
 const VENUE_TEMPLATE_COUNT = 8
+const FALLBACK_IMAGE = '/api/files/31/download'
+const FALLBACK_AVATAR = '/api/files/1/download'
 const SALE_RANKS_BY_SPORT: Record<string, number[]> = {
   badminton: [1, 2, 3, 4, 7],
   football: [5],
@@ -337,6 +339,7 @@ const venueItems = ref<Record<string, VenueItem[]>>({})
 const venueSaleItems = ref<VenueItem[]>([])
 const venueReviews = ref<VenueReview[]>([])
 const inventoriesByVenueItem = ref<Record<number, VenueInventory[]>>({})
+const highlightedItemKey = ref('')
 const categories = ref<Category[]>([])
 const seckillCategories = ref<Category[]>([])
 const productCategorySport = ref('')
@@ -504,6 +507,34 @@ const seckillQuery = reactive({
   keyword: ''
 })
 
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function toDatetimeLocal(value: Date) {
+  return [
+    value.getFullYear(),
+    padDatePart(value.getMonth() + 1),
+    padDatePart(value.getDate())
+  ].join('-') + `T${padDatePart(value.getHours())}:${padDatePart(value.getMinutes())}`
+}
+
+function nextActivityWindow() {
+  const start = new Date()
+  start.setHours(19, 0, 0, 0)
+  if (start <= new Date()) {
+    start.setDate(start.getDate() + 1)
+  }
+  const end = new Date(start)
+  end.setHours(21, 0, 0, 0)
+  return {
+    startTime: toDatetimeLocal(start),
+    endTime: toDatetimeLocal(end)
+  }
+}
+
+const defaultActivityWindow = nextActivityWindow()
+
 const activityForm = reactive({
   sportCode: 'badminton',
   placeSource: 'amap',
@@ -511,8 +542,8 @@ const activityForm = reactive({
   venueName: '先从场所列表选择',
   title: '今晚约一场',
   city: '西安',
-  startTime: '2026-07-04T19:00',
-  endTime: '2026-07-04T21:00',
+  startTime: defaultActivityWindow.startTime,
+  endTime: defaultActivityWindow.endTime,
   maxPlayers: 4,
   levelRequired: '中级',
   feeType: 'AA'
@@ -609,6 +640,12 @@ function closeMessage() {
     messageTimer = undefined
   }
   message.value = ''
+}
+
+function imageFallback(event: Event, fallback = FALLBACK_IMAGE) {
+  const image = event.target as HTMLImageElement
+  if (!image || image.src.endsWith(fallback)) return
+  image.src = fallback
 }
 
 function resetListPaging() {
@@ -743,13 +780,21 @@ function appendById<T extends { id: string | number }>(current: T[], next: T[]) 
   return appendByKey(current, next, (item) => item.id)
 }
 
+function placesForSport(sportCode?: string) {
+  if (!sportCode) return places.value
+  const records = places.value.filter((item) => item.sportCode === sportCode)
+  return records.length ? records : places.value
+}
+
 function placeIndex(place: Place) {
-  return places.value.findIndex((item) => item.id === place.id)
+  const records = placesForSport(place.sportCode)
+  const index = records.findIndex((item) => item.id === place.id)
+  return index >= 0 ? index : places.value.findIndex((item) => item.id === place.id)
 }
 
 function placeRankFor(place: Place) {
   const index = Math.max(0, placeIndex(place))
-  const sportCode = selectedSport.value || place.sportCode
+  const sportCode = place.sportCode || selectedSport.value
   const sportRanks = SALE_RANKS_BY_SPORT[sportCode]
   if (sportRanks?.length) {
     return sportRanks[index % sportRanks.length]
@@ -765,7 +810,10 @@ function reviewRankFor(place: Place) {
 function placeForEquipmentItem(product: VenueItem) {
   if (!places.value.length) return null
   const rank = product.placeRank || Number(product.venueName) || 1
-  return places.value[(Math.max(1, rank) - 1) % places.value.length] || null
+  const candidates = placesForSport(product.sportCode)
+  return candidates.find((place) => placeRankFor(place) === rank)
+    || candidates[(Math.max(1, rank) - 1) % candidates.length]
+    || null
 }
 
 function productWithPlaceContext(product: VenueItem, place?: Place | null) {
@@ -775,6 +823,27 @@ function productWithPlaceContext(product: VenueItem, place?: Place | null) {
     amapPlaceId: place.id,
     venueName: place.name
   }
+}
+
+function itemDomId(type: BlogPost['relatedType'], id: number) {
+  return `related-${type.toLowerCase()}-${id}`
+}
+
+function highlightItem(type: BlogPost['relatedType'], id: number) {
+  highlightedItemKey.value = `${type}:${id}`
+  window.setTimeout(() => {
+    highlightedItemKey.value = ''
+  }, 2400)
+}
+
+function isHighlighted(type: BlogPost['relatedType'], id: number) {
+  return highlightedItemKey.value === `${type}:${id}`
+}
+
+async function scrollToRelatedItem(type: BlogPost['relatedType'], id: number) {
+  await nextTick()
+  document.getElementById(itemDomId(type, id))?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  highlightItem(type, id)
 }
 
 function setTrimmedParam(params: URLSearchParams, key: string, value?: string) {
@@ -1106,6 +1175,7 @@ function nearPageBottom() {
 
 async function loadMoreCurrentTab() {
   if (loading.value || loadingMore.value) return
+  if (activeTab.value === 'home' && selectedPlace.value) return
   if (activeTab.value === 'home' && venueSaleView.value && !hasMoreVenueSales.value) return
   if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value && !nextPlaceRadius()) return
   if (activeTab.value === 'equipment' && !hasMoreEquipmentItems.value) return
@@ -1157,11 +1227,22 @@ function handleWindowScroll() {
   }
 }
 
+function refreshActivityWindowIfExpired(force = false) {
+  const currentStart = activityForm.startTime ? new Date(activityForm.startTime) : null
+  if (!force && currentStart && currentStart > new Date()) return
+  const window = nextActivityWindow()
+  activityForm.startTime = window.startTime
+  activityForm.endTime = window.endTime
+}
+
 async function switchTab(tab: Tab) {
   activeTab.value = tab
   selectedBlog.value = null
   blogComposerVisible.value = false
   profileEditorVisible.value = false
+  if (tab === 'social') {
+    refreshActivityWindowIfExpired()
+  }
   if (tab === 'profile') {
     profileMode.value = 'me'
     viewedUserProfile.value = null
@@ -1552,15 +1633,39 @@ async function openBlogRelated(blog: BlogPost) {
   selectedBlog.value = null
   if (blog.relatedType === 'EQUIPMENT') {
     activeTab.value = 'equipment'
-    productQuery.keyword = blog.relatedTitle
+    productQuery.keyword = ''
+    productQuery.categoryId = ''
     productsPage.value = 1
     productsTotal.value = 0
     await wrap(async () => {
-      await Promise.all([loadEquipmentItems(), loadSeckill()])
+      const [detail] = await Promise.all([
+        api<EquipmentItem>(`/api/items/2/${blog.relatedId}`),
+        loadEquipmentItems(),
+        loadSeckill()
+      ])
+      products.value = [detail, ...products.value.filter((item) => item.id !== detail.id)]
+      await scrollToRelatedItem('EQUIPMENT', detail.id)
     })
     return
   }
-  await openVenueSalePage('', '场馆团购', '来自社区动态的关联项目')
+  activeTab.value = 'home'
+  selectedPlace.value = null
+  venueReviews.value = []
+  venueSaleView.value = { productType: '', title: '场馆团购', subtitle: '来自社区动态的关联项目' }
+  venueSalesPage.value = 1
+  venueSalesTotal.value = 0
+  await wrap(async () => {
+    if (!places.value.length) {
+      await loadPlaces()
+    }
+    const [detail] = await Promise.all([
+      api<VenueItem>(`/api/items/1/${blog.relatedId}`),
+      loadVenueSaleItems()
+    ])
+    const mapped = productWithPlaceContext(detail, placeForEquipmentItem(detail))
+    venueSaleItems.value = [mapped, ...venueSaleItems.value.filter((item) => item.id !== mapped.id)]
+    await scrollToRelatedItem('VENUE_PRODUCT', mapped.id)
+  })
 }
 
 async function openProfileView(view: ProfileView) {
@@ -1624,7 +1729,7 @@ async function uploadBlogImages(event: Event) {
   await wrap(async () => {
     const uploaded = await Promise.all(files.map((file) => uploadFile(file, 'blog')))
     blogPublishForm.imageUrls = [
-      ...blogPublishForm.imageUrls.filter((url) => !url.includes('images.unsplash.com')),
+      ...blogPublishForm.imageUrls,
       ...uploaded.map((file) => file.publicUrl)
     ].slice(0, 9)
   }, '图片已上传')
@@ -1835,7 +1940,22 @@ async function closeVenueSalePage() {
   }
 }
 
+async function openVenueSaleItemPlace(item: VenueItem) {
+  if (!places.value.length) {
+    await wrap(loadPlaces)
+  }
+  const place = (item.amapPlaceId
+    ? places.value.find((record) => record.id === item.amapPlaceId)
+    : null) || placeForEquipmentItem(item)
+  if (!place) {
+    message.value = '暂未找到该项目对应的场所'
+    return
+  }
+  await selectPlace(place)
+}
+
 async function showSocial() {
+  refreshActivityWindowIfExpired()
   await switchTab('social')
   await wrap(ensureActivityPlaceOptions)
   await nextTick()
@@ -2138,6 +2258,7 @@ function typeClass(productType: string) {
 
 onMounted(async () => {
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
+  refreshActivityWindowIfExpired(true)
   try {
     await loadSports()
   } catch {
@@ -2341,7 +2462,7 @@ onBeforeUnmount(() => {
             </label>
             <div v-if="blogPublishForm.imageUrls.length" class="image-preview-grid">
               <button v-for="image in blogPublishForm.imageUrls" :key="image" type="button" @click="removeBlogImage(image)">
-                <img :src="image" alt="动态图片" />
+                <img :src="image" alt="动态图片" @error="imageFallback" />
                 <span><X :size="13" /></span>
               </button>
             </div>
@@ -2349,8 +2470,9 @@ onBeforeUnmount(() => {
 
           <article v-if="selectedBlogRelatedOption()" class="publish-related-preview">
             <img
-              :src="selectedBlogRelatedOption()?.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+              :src="selectedBlogRelatedOption()?.coverUrl || FALLBACK_IMAGE"
               :alt="selectedBlogRelatedOption()?.title"
+              @error="imageFallback"
             />
             <div>
               <span>{{ selectedBlogRelatedOption()?.subtitle }}</span>
@@ -2373,7 +2495,7 @@ onBeforeUnmount(() => {
         <article class="blog-detail-card">
           <div class="blog-detail-author">
             <button class="profile-link" type="button" @click="openUserProfile(selectedBlog.userId)">
-              <img :src="selectedBlog.avatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'" :alt="selectedBlog.nickname" />
+              <img :src="selectedBlog.avatar || FALLBACK_AVATAR" :alt="selectedBlog.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
               <span>{{ selectedBlog.nickname }}</span>
             </button>
             <button
@@ -2388,7 +2510,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="blog-detail-images" v-if="selectedBlog.images.length">
-            <img v-for="image in selectedBlog.images" :key="image" :src="image" :alt="selectedBlog.title" />
+            <img v-for="image in selectedBlog.images" :key="image" :src="image" :alt="selectedBlog.title" @error="imageFallback" />
           </div>
           <h2>{{ selectedBlog.title }}</h2>
           <p>{{ selectedBlog.content }}</p>
@@ -2420,8 +2542,9 @@ onBeforeUnmount(() => {
               <ChevronLeft :size="20" />
             </button>
             <img
-              :src="selectedPlace.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+              :src="selectedPlace.coverUrl || FALLBACK_IMAGE"
               :alt="selectedPlace.name"
+              @error="imageFallback"
             />
           </div>
 
@@ -2464,8 +2587,9 @@ onBeforeUnmount(() => {
             <div v-else-if="!selectedPlaceVenueItems.length" class="empty-box">该场馆暂未配置线上售卖项目</div>
             <article v-for="item in selectedPlaceVenueItems" :key="item.id" class="detail-deal-row">
               <img
-                :src="item.coverUrl || selectedPlace.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+                :src="item.coverUrl || selectedPlace.coverUrl || FALLBACK_IMAGE"
                 :alt="item.title"
+                @error="imageFallback"
               />
               <div class="detail-deal-main">
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
@@ -2496,7 +2620,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="!venueReviews.length" class="empty-box">暂无评价</div>
             <article v-for="review in venueReviews" :key="review.id" class="review-row">
-              <img class="review-avatar" :src="review.avatar" :alt="review.nickname" />
+              <img class="review-avatar" :src="review.avatar" :alt="review.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
               <div>
                 <div class="review-head">
                   <h3>{{ review.nickname }}</h3>
@@ -2505,7 +2629,7 @@ onBeforeUnmount(() => {
                 <p class="review-stars">{{ '★★★★★'.slice(0, Math.round(review.rating || 5)) }} 超赞</p>
                 <p>{{ review.content }}</p>
                 <div v-if="reviewImages(review).length" class="review-images">
-                  <img v-for="image in reviewImages(review).slice(0, 3)" :key="image" :src="image" :alt="review.nickname" />
+                  <img v-for="image in reviewImages(review).slice(0, 3)" :key="image" :src="image" :alt="review.nickname" @error="imageFallback" />
                 </div>
               </div>
             </article>
@@ -2531,7 +2655,7 @@ onBeforeUnmount(() => {
 
           <template v-for="place in places" :key="place.id">
           <article :id="placeDomId(place)" class="place-card" @click="selectPlace(place)">
-            <img :src="place.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'" :alt="place.name" />
+            <img :src="place.coverUrl || FALLBACK_IMAGE" :alt="place.name" @error="imageFallback" />
             <div class="place-info">
               <div class="place-title">
                 <h3>{{ place.name }}</h3>
@@ -2598,15 +2722,23 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="!venueSaleItems.length" class="empty-box">暂无可购买项目</div>
-          <article v-for="item in venueSaleItems" :key="item.id" class="venue-sale-row">
-            <img :src="item.coverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'" :alt="item.title" />
+          <article
+            v-for="item in venueSaleItems"
+            :id="itemDomId('VENUE_PRODUCT', item.id)"
+            :key="item.id"
+            class="venue-sale-row"
+            :class="{ highlighted: isHighlighted('VENUE_PRODUCT', item.id) }"
+          >
+            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" @error="imageFallback" />
             <div>
               <div class="sale-row-head">
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
                 <small>{{ item.purchasable ? '可购买' : '已售罄' }}</small>
               </div>
               <h3>{{ item.title }}</h3>
-              <p>{{ item.venueName }}</p>
+              <button class="venue-link" type="button" @click="openVenueSaleItemPlace(item)">
+                {{ item.venueName }}
+              </button>
               <small>{{ item.description }}</small>
               <div class="tag-row">
                 <span v-for="tag in item.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
@@ -2661,8 +2793,9 @@ onBeforeUnmount(() => {
           <article v-for="blog in blogs" :key="blog.id" class="blog-card clickable-card" @click="openBlogDetail(blog)">
             <button class="blog-cover-button" type="button" @click.stop="openBlogDetail(blog)">
               <img
-                :src="blog.images[0] || blog.relatedCoverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+                :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
                 :alt="blog.title"
+                @error="imageFallback"
               />
             </button>
             <div class="blog-body">
@@ -2675,7 +2808,7 @@ onBeforeUnmount(() => {
               </button>
               <div class="blog-author-row">
                 <button class="blog-author-link" type="button" @click.stop="openUserProfile(blog.userId)">
-                  <img :src="blog.avatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'" :alt="blog.nickname" />
+                  <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
                   <span>{{ blog.nickname }}</span>
                 </button>
                 <button
@@ -2751,7 +2884,7 @@ onBeforeUnmount(() => {
           <button @click="joinActivity(item.id)">加入</button>
         </article>
         <article v-for="player in players" :key="player.userId" class="player-row clickable-card" @click="openUserProfile(player.userId)">
-          <img :src="player.avatar" :alt="player.nickname" />
+          <img :src="player.avatar || FALLBACK_AVATAR" :alt="player.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
           <div>
             <h3>{{ player.nickname }} <span>{{ player.level }}</span></h3>
             <p>{{ player.area }} · {{ player.playStyle }} · {{ player.availableTime }}</p>
@@ -2781,7 +2914,7 @@ onBeforeUnmount(() => {
             <button class="ghost" @click="() => loadSeckill()"><Zap :size="15" /> 刷新</button>
           </div>
           <article v-for="activity in filteredSeckillActivities" :key="activity.id" class="deal-row flash-row">
-            <img :src="activity.coverUrl" :alt="activity.productName" />
+            <img :src="activity.coverUrl || FALLBACK_IMAGE" :alt="activity.productName" @error="imageFallback" />
             <div>
               <span>{{ activity.categoryName }}</span>
               <h3>{{ activity.productName }}</h3>
@@ -2792,8 +2925,14 @@ onBeforeUnmount(() => {
             <button class="primary" @click="submitSeckill(activity.id)" :disabled="!activity.purchasable">抢购</button>
           </article>
         </section>
-        <article v-for="product in products" :key="product.id" class="product-row">
-          <img :src="product.coverUrl" :alt="product.name" />
+        <article
+          v-for="product in products"
+          :id="itemDomId('EQUIPMENT', product.id)"
+          :key="product.id"
+          class="product-row"
+          :class="{ highlighted: isHighlighted('EQUIPMENT', product.id) }"
+        >
+          <img :src="product.coverUrl || FALLBACK_IMAGE" :alt="product.name" @error="imageFallback" />
           <div>
             <span>{{ product.brand }} · {{ product.categoryName }}</span>
             <h3>{{ product.name }}</h3>
@@ -2832,8 +2971,9 @@ onBeforeUnmount(() => {
         <section v-else-if="!profileOrderPageVisible" class="profile-card">
           <div class="profile-main">
             <img
-              :src="profileAvatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'"
+              :src="profileAvatar || FALLBACK_AVATAR"
               :alt="profileNickname || '用户头像'"
+              @error="imageFallback($event, FALLBACK_AVATAR)"
             />
             <div>
               <h3>{{ profileNickname || '球友' }}</h3>
@@ -2892,7 +3032,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="profile-form-grid">
             <div class="avatar-edit wide">
-              <img :src="profileForm.avatar || profileAvatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'" alt="头像预览" />
+              <img :src="profileForm.avatar || profileAvatar || FALLBACK_AVATAR" alt="头像预览" @error="imageFallback($event, FALLBACK_AVATAR)" />
               <div>
                 <strong>{{ profileForm.nickname || profileNickname || '球友' }}</strong>
                 <label class="avatar-upload">
@@ -2984,8 +3124,9 @@ onBeforeUnmount(() => {
             <article v-for="blog in profileBlogs" :key="blog.id" class="blog-card clickable-card" @click="openBlogDetail(blog)">
               <button class="blog-cover-button" type="button" @click.stop="openBlogDetail(blog)">
                 <img
-                  :src="blog.images[0] || blog.relatedCoverUrl || 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?auto=format&fit=crop&w=900&q=80'"
+                  :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
                   :alt="blog.title"
+                  @error="imageFallback"
                 />
               </button>
               <div class="blog-body">
@@ -2998,7 +3139,7 @@ onBeforeUnmount(() => {
                 </button>
                 <div class="blog-author-row">
                   <button class="blog-author-link" type="button" @click.stop="openUserProfile(blog.userId)">
-                    <img :src="blog.avatar || 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=240&q=80'" :alt="blog.nickname" />
+                    <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
                     <span>{{ blog.nickname }}</span>
                   </button>
                   <button
@@ -3048,7 +3189,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!cartItems.length" class="empty-box">购物车暂无商品</div>
           <article v-for="item in cartItems" :key="item.id" class="cart-item-row">
-            <img :src="item.coverUrl" :alt="item.productName" />
+            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.productName" @error="imageFallback" />
             <div>
               <h3>{{ item.productName }}</h3>
               <p>{{ item.brand }}</p>
@@ -3132,3 +3273,4 @@ onBeforeUnmount(() => {
     </template>
   </div>
 </template>
+

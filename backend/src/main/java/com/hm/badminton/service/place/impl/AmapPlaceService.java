@@ -92,8 +92,9 @@ public class AmapPlaceService implements IAmapPlaceService {
         List<AmapPlace> places = new ArrayList<>();
         JsonNode pois = root.path("pois");
         if (pois.isArray()) {
+            int rank = (safePage - 1) * safeSize + 1;
             for (JsonNode poi : pois) {
-                places.add(toPlace(poi, sport));
+                places.add(toPlace(poi, sport, rank++));
             }
         }
         long total = parseLong(root.path("count").asText(), places.size());
@@ -160,7 +161,7 @@ public class AmapPlaceService implements IAmapPlaceService {
         }
     }
 
-    private AmapPlace toPlace(JsonNode poi, SportType sport) {
+    private AmapPlace toPlace(JsonNode poi, SportType sport, int rank) {
         SportType actualSport = detectSport(poi, sport);
         String location = text(poi, "location");
         Double[] coordinates = parseLocation(location);
@@ -168,7 +169,7 @@ public class AmapPlaceService implements IAmapPlaceService {
         String type = text(poi, "type");
         String businessArea = firstNonBlank(text(business, "business_area"), text(poi, "business_area"));
         String openHours = firstNonBlank(text(business, "opentime_week"), text(business, "opentime_today"));
-        String coverUrl = firstPhotoUrl(poi.path("photos"));
+        String coverUrl = firstNonBlank(amapPhotoUrl(poi), localPlaceCoverUrl(rank));
         String id = firstNonBlank(text(poi, "id"), text(poi, "name") + ":" + location);
 
         return new AmapPlace(
@@ -231,11 +232,23 @@ public class AmapPlaceService implements IAmapPlaceService {
         return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
     }
 
-    private String firstPhotoUrl(JsonNode photos) {
+    private String localPlaceCoverUrl(int rank) {
+        int fileId = 31 + Math.floorMod(rank - 1, 25);
+        return "/api/files/" + fileId + "/download";
+    }
+
+    private String amapPhotoUrl(JsonNode poi) {
+        JsonNode photos = poi.path("photos");
         if (!photos.isArray() || photos.isEmpty()) {
             return "";
         }
-        return text(photos.get(0), "url");
+        for (JsonNode photo : photos) {
+            String url = firstNonBlank(text(photo, "url"), text(photo, "src"));
+            if (!url.isBlank()) {
+                return url;
+            }
+        }
+        return "";
     }
 
     private List<String> tags(String... values) {

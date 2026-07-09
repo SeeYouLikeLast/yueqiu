@@ -1469,6 +1469,13 @@ p {
   grid-template-columns: 104px minmax(0, 1fr);
 }
 
+.product-row.highlighted,
+.venue-sale-row.highlighted {
+  border-color: #15936d;
+  background: #f0fbf5;
+  box-shadow: 0 0 0 2px rgba(21, 147, 109, 0.14);
+}
+
 .product-row img {
   height: 88px;
 }
@@ -1492,6 +1499,26 @@ p {
   color: #3c4b42;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.venue-link {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #18795f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.venue-link::after {
+  content: "›";
+  margin-left: 3px;
 }
 
 .venue-sale-row small {

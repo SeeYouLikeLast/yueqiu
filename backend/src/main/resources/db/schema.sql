@@ -38,6 +38,7 @@ drop table if exists venue_favorites;
 drop table if exists venue_reviews;
 drop table if exists venue_time_slots;
 drop table if exists venue_courts;
+drop table if exists venue_operators;
 drop table if exists place;
 drop table if exists users;
 
@@ -162,6 +163,23 @@ create table coaches (
   updated_at datetime not null default current_timestamp on update current_timestamp,
   key idx_coaches_place (amap_place_id, sport_code),
   key idx_coaches_venue (venue_id, sport_code)
+) engine=InnoDB default charset=utf8mb4;
+
+create table venue_operators (
+  id bigint primary key auto_increment,
+  user_id bigint not null,
+  city varchar(64) not null,
+  sport_code varchar(32) not null,
+  place_rank int not null,
+  operator_name varchar(128) not null,
+  avatar varchar(512) null,
+  intro varchar(512) null,
+  status tinyint not null default 1,
+  created_at datetime not null default current_timestamp,
+  updated_at datetime not null default current_timestamp on update current_timestamp,
+  unique key uk_operator_slot (city, sport_code, place_rank),
+  key idx_operator_user (user_id),
+  key idx_operator_slot (city, sport_code, place_rank, status)
 ) engine=InnoDB default charset=utf8mb4;
 
 create table venue (
