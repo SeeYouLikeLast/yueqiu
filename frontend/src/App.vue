@@ -2,10 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
+  Bot,
   Camera,
   ChevronLeft,
   ClipboardList,
   CreditCard,
+  Eye,
+  EyeOff,
   ExternalLink,
   Heart,
   ImagePlus,
@@ -31,7 +34,7 @@ import {
 import { api, clearToken, getToken, PageResult, setToken } from './api/client'
 import { locateWithAmapFirst } from './api/amapGeolocation'
 
-type Tab = 'home' | 'seckill' | 'social' | 'equipment' | 'profile'
+type Tab = 'home' | 'seckill' | 'social' | 'equipment' | 'profile' | 'assistant'
 type VenueSaleType = '' | 'TIME_PACKAGE' | 'COURT_SLOT' | 'COACH_LESSON'
 
 type SportType = {
@@ -287,6 +290,44 @@ type BlogRelatedOption = {
   subtitle: string
 }
 
+type AgentAction = {
+  type: string
+  id?: string
+  requireConfirm?: boolean
+  payload?: Record<string, unknown>
+}
+
+type AgentCard = {
+  type: 'place' | 'venue_product' | 'activity' | 'equipment' | 'seckill'
+  title: string
+  subtitle?: string
+  coverUrl?: string
+  price?: string
+  tags?: string[]
+  action?: AgentAction
+  meta?: Record<string, unknown>
+}
+
+type AgentMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  cards?: AgentCard[]
+}
+
+type AgentChatResponse = {
+  conversationId: number
+  answer: string
+  cards: AgentCard[]
+  quickReplies: string[]
+  aiEnabled: boolean
+}
+
+type AgentPlaceBundle = {
+  place: AgentCard
+  deal?: AgentCard
+}
+
 type ScrollResult<T> = {
   list: T[]
   minTime?: number
@@ -313,6 +354,8 @@ const BLOG_PAGE_SIZE = 10
 const VENUE_TEMPLATE_COUNT = 8
 const FALLBACK_IMAGE = '/api/files/31/download'
 const FALLBACK_AVATAR = '/api/files/1/download'
+const HEADER_SCROLL_DELTA = 8
+const HEADER_HIDE_AFTER = 80
 const SALE_RANKS_BY_SPORT: Record<string, number[]> = {
   badminton: [1, 2, 3, 4, 7],
   football: [5],
@@ -320,6 +363,7 @@ const SALE_RANKS_BY_SPORT: Record<string, number[]> = {
 }
 
 const activeTab = ref<Tab>('home')
+const homeReturnTab = ref<Tab | null>(null)
 const selectedSport = ref('')
 type ProfileView = 'orders' | 'paid' | 'cart'
 const authToken = ref(getToken())
@@ -360,6 +404,18 @@ const socialProfile = ref<Player | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
 const profileBlogs = ref<BlogPost[]>([])
 const selectedBlog = ref<BlogPost | null>(null)
+const agentMessages = ref<AgentMessage[]>([
+  {
+    id: 'welcome',
+    role: 'assistant',
+    content: '你好，我是约个球助手。可以帮你找附近场所、可加入的约球活动，也能按预算推荐装备。'
+  }
+])
+const agentInput = ref('')
+const agentInputPlaceholder = ref('问问附近场地、约球活动、装备推荐')
+const agentConversationId = ref<number | null>(null)
+const agentQuickReplies = ref(['今晚附近能打球吗', '帮我找能加入的局', '推荐新手装备', '50 元以内的场地'])
+const agentAiEnabled = ref(false)
 const blogComposerVisible = ref(false)
 const blogComposerReturnTab = ref<Tab>('seckill')
 const cartCount = ref(0)
@@ -391,12 +447,14 @@ const followFeedOffset = ref(0)
 const followFeedHasMore = ref(true)
 const profileBlogsPage = ref(1)
 const profileBlogsTotal = ref(0)
+const headerVisible = ref(true)
+let lastHeaderScrollTop = 0
 
 const loggedIn = computed(() => Boolean(authToken.value))
 const activeSport = computed(() => sports.value.find((sport) => sport.code === selectedSport.value) || ALL_SPORT)
 const cartAmount = computed(() => cartItems.value.reduce((sum, item) => sum + Number(item.amount), 0))
 const showPhoneHeader = computed(() => !blogComposerVisible.value && !(activeTab.value === 'home' && selectedPlace.value))
-const showDiscoveryHeader = computed(() => !blogComposerVisible.value && activeTab.value !== 'profile')
+const showDiscoveryHeader = computed(() => !blogComposerVisible.value && activeTab.value !== 'profile' && activeTab.value !== 'assistant')
 const showCategoryHeader = computed(() => activeTab.value === 'equipment' && Boolean(selectedSport.value))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
 const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
@@ -473,7 +531,8 @@ const bottomTabs = [
   { key: 'seckill' as const, label: '社区', icon: Heart },
   { key: 'social' as const, label: '约球', icon: Users },
   { key: 'equipment' as const, label: '装备', icon: ShoppingBag },
-  { key: 'profile' as const, label: '我的', icon: UserRound }
+  { key: 'profile' as const, label: '我的', icon: UserRound },
+  { key: 'assistant' as const, label: '助手', icon: Bot }
 ]
 
 const loginForm = reactive({
@@ -487,6 +546,7 @@ const passwordLoginForm = reactive({
 })
 
 const authMode = ref<'code' | 'password'>('code')
+const passwordVisible = ref(false)
 
 const placeQuery = reactive({
   city: '西安',
@@ -621,6 +681,10 @@ const preciseLocationLabel = computed(() => placeQuery.preciseAddress || `${plac
 
 let messageTimer: ReturnType<typeof window.setTimeout> | undefined
 let codeTimer: ReturnType<typeof window.setInterval> | undefined
+
+watch([activeTab, selectedPlace, venueSaleView, blogComposerVisible], () => {
+  resetHeaderVisibility()
+})
 
 watch(message, (value) => {
   if (messageTimer) {
@@ -1222,9 +1286,33 @@ async function loadMoreCurrentTab() {
 }
 
 function handleWindowScroll() {
+  updateHeaderVisibility()
   if (nearPageBottom()) {
     void loadMoreCurrentTab()
   }
+}
+
+function updateHeaderVisibility() {
+  if (!showPhoneHeader.value) return
+  const current = Math.max(0, window.scrollY || document.documentElement.scrollTop || 0)
+  const delta = current - lastHeaderScrollTop
+  if (current <= 12) {
+    headerVisible.value = true
+    lastHeaderScrollTop = current
+    return
+  }
+  if (Math.abs(delta) < HEADER_SCROLL_DELTA) return
+  if (delta < 0) {
+    headerVisible.value = true
+  } else if (current > HEADER_HIDE_AFTER) {
+    headerVisible.value = false
+  }
+  lastHeaderScrollTop = current
+}
+
+function resetHeaderVisibility() {
+  headerVisible.value = true
+  lastHeaderScrollTop = Math.max(0, window.scrollY || document.documentElement.scrollTop || 0)
 }
 
 function refreshActivityWindowIfExpired(force = false) {
@@ -1237,6 +1325,9 @@ function refreshActivityWindowIfExpired(force = false) {
 
 async function switchTab(tab: Tab) {
   activeTab.value = tab
+  if (tab !== 'home') {
+    homeReturnTab.value = null
+  }
   selectedBlog.value = null
   blogComposerVisible.value = false
   profileEditorVisible.value = false
@@ -1931,10 +2022,18 @@ async function openVenueSalePage(productType: VenueSaleType, title: string, subt
 }
 
 async function closeVenueSalePage() {
+  const returnTab = homeReturnTab.value
   venueSaleView.value = null
   venueSaleItems.value = []
   venueSalesPage.value = 1
   venueSalesTotal.value = 0
+  if (returnTab) {
+    homeReturnTab.value = null
+    activeTab.value = returnTab
+    await nextTick()
+    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    return
+  }
   if (!places.value.length) {
     await wrap(loadPlaces)
   }
@@ -1952,6 +2051,218 @@ async function openVenueSaleItemPlace(item: VenueItem) {
     return
   }
   await selectPlace(place)
+}
+
+async function openAssistant(prefill = '') {
+  activeTab.value = 'assistant'
+  selectedBlog.value = null
+  blogComposerVisible.value = false
+  agentInput.value = ''
+  agentInputPlaceholder.value = prefill || '问问附近场地、约球活动、装备推荐'
+  await nextTick()
+  document.getElementById('agent-input')?.focus()
+}
+
+async function sendAgentMessage(text = agentInput.value) {
+  const content = text.trim()
+  if (!content || loading.value) return
+  agentInput.value = ''
+  agentMessages.value = [
+    ...agentMessages.value,
+    { id: `u-${Date.now()}`, role: 'user', content }
+  ]
+  await wrap(async () => {
+    const result = await api<AgentChatResponse>('/api/agent/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversationId: agentConversationId.value,
+        message: content,
+        sportCode: selectedSport.value,
+        city: placeQuery.city,
+        lng: placeQuery.lng,
+        lat: placeQuery.lat
+      })
+    })
+    agentConversationId.value = result.conversationId
+    agentQuickReplies.value = result.quickReplies?.length ? result.quickReplies : agentQuickReplies.value
+    agentAiEnabled.value = result.aiEnabled
+    agentMessages.value = [
+      ...agentMessages.value,
+      {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: result.answer,
+        cards: result.cards || []
+      }
+    ]
+    await nextTick()
+    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  })
+}
+
+function agentCardTags(card: AgentCard) {
+  return (card.tags || []).filter(Boolean).slice(0, 3)
+}
+
+function agentCardActionLabel(card: AgentCard) {
+  if (card.type === 'place') return '看场所'
+  if (card.type === 'venue_product') return '看团购'
+  if (card.type === 'activity') return '加入'
+  if (card.type === 'equipment') return '看装备'
+  if (card.type === 'seckill') return '去抢购'
+  return '查看'
+}
+
+function agentCardTypeLabel(card: AgentCard) {
+  if (card.type === 'place') return '场所'
+  if (card.type === 'activity') return '约球'
+  if (card.type === 'venue_product') return '团购'
+  if (card.type === 'seckill') return '秒杀'
+  return '装备'
+}
+
+function agentSummary(content: string) {
+  const text = content.replace(/\s+/g, ' ').trim()
+  if (text.length <= 42) return text
+  const firstSentence = text.match(/^.*?[。！？.!?]/)?.[0]
+  if (firstSentence && firstSentence.length <= 48) return firstSentence
+  return `${text.slice(0, 40)}...`
+}
+
+function agentPlaceKey(card: AgentCard) {
+  const meta = card.meta || {}
+  const sportCode = String(meta.sportCode || card.action?.payload?.sportCode || '')
+  const placeRank = String(meta.placeRank || card.action?.payload?.placeRank || '')
+  return sportCode && placeRank ? `${sportCode}:${placeRank}` : ''
+}
+
+function agentPlaceBundles(cards: AgentCard[] = []): AgentPlaceBundle[] {
+  const dealsByPlace = new Map<string, AgentCard[]>()
+  cards
+    .filter((card) => card.type === 'venue_product')
+    .forEach((card) => {
+      const key = agentPlaceKey(card)
+      if (!key) return
+      dealsByPlace.set(key, [...(dealsByPlace.get(key) || []), card])
+    })
+  return cards
+    .filter((card) => card.type === 'place')
+    .map((place) => ({
+      place,
+      deal: dealsByPlace.get(agentPlaceKey(place))?.[0]
+    }))
+}
+
+function agentStandaloneCards(cards: AgentCard[] = []) {
+  const placeKeys = new Set(cards.filter((card) => card.type === 'place').map(agentPlaceKey).filter(Boolean))
+  return cards.filter((card) => {
+    if (card.type === 'place') return false
+    if (card.type !== 'venue_product') return true
+    const key = agentPlaceKey(card)
+    return !key || !placeKeys.has(key)
+  })
+}
+
+async function handleAgentCardAction(card: AgentCard) {
+  const actionType = card.action?.type
+  if (actionType === 'open_place') {
+    await openAgentPlace(card)
+    return
+  }
+  if (actionType === 'open_venue_product') {
+    await openAgentVenueProduct(card)
+    return
+  }
+  if (actionType === 'open_equipment') {
+    await openAgentEquipment(card)
+    return
+  }
+  if (actionType === 'join_activity') {
+    const id = Number(card.action?.id)
+    if (Number.isFinite(id)) {
+      await joinActivity(id)
+    }
+    return
+  }
+  message.value = '暂不支持该操作'
+}
+
+async function openAgentPlace(card: AgentCard) {
+  homeReturnTab.value = 'assistant'
+  activeTab.value = 'home'
+  venueSaleView.value = null
+  venueSaleItems.value = []
+  venueSalesPage.value = 1
+  venueSalesTotal.value = 0
+  if (!places.value.length) {
+    await wrap(loadPlaces)
+  }
+  const id = card.action?.id || String(card.meta?.id || '')
+  const existed = places.value.find((place) => place.id === id)
+  await selectPlace(existed || placeFromAgentCard(card))
+}
+
+function placeFromAgentCard(card: AgentCard): Place {
+  const meta = card.meta || {}
+  const sportCode = String(meta.sportCode || selectedSport.value || 'badminton')
+  return {
+    id: card.action?.id || String(meta.id || card.title),
+    name: card.title,
+    sportCode,
+    sportName: String(meta.sportName || sportNameByCode(sportCode)),
+    city: String(meta.city || placeQuery.city || '西安市'),
+    area: String(meta.area || ''),
+    address: card.subtitle || '',
+    longitude: Number(meta.lng || placeQuery.lng),
+    latitude: Number(meta.lat || placeQuery.lat),
+    distanceMeters: Number(meta.distanceMeters || 0),
+    coverUrl: card.coverUrl,
+    facilities: agentCardTags(card),
+    source: 'agent'
+  }
+}
+
+async function openAgentVenueProduct(card: AgentCard) {
+  const id = Number(card.action?.id)
+  if (!Number.isFinite(id)) return
+  const sportCode = String(card.action?.payload?.sportCode || card.meta?.sportCode || selectedSport.value || '')
+  if (sportCode) {
+    selectedSport.value = sportCode
+  }
+  homeReturnTab.value = 'assistant'
+  activeTab.value = 'home'
+  selectedPlace.value = null
+  venueReviews.value = []
+  venueSaleView.value = { productType: '', title: '场馆团购', subtitle: 'AI 为你筛选的项目' }
+  venueSaleItems.value = []
+  venueSalesPage.value = 1
+  venueSalesTotal.value = 0
+  await wrap(async () => {
+    if (!places.value.length) {
+      await loadPlaces()
+    }
+    const detail = await api<VenueItem>(`/api/items/1/${id}`)
+    const mapped = productWithPlaceContext(detail, placeForEquipmentItem(detail))
+    venueSaleItems.value = [mapped]
+    venueSalesTotal.value = 1
+    await nextTick()
+    await scrollToRelatedItem('VENUE_PRODUCT', mapped.id)
+  })
+}
+
+async function openAgentEquipment(card: AgentCard) {
+  const id = Number(card.action?.id || card.meta?.productId)
+  if (!Number.isFinite(id)) return
+  activeTab.value = 'equipment'
+  productQuery.keyword = ''
+  productQuery.categoryId = ''
+  await wrap(async () => {
+    const detail = await api<EquipmentItem>(`/api/items/2/${id}`)
+    selectedSport.value = detail.sportCode || selectedSport.value
+    await Promise.all([loadEquipmentItems(), loadSeckill()])
+    products.value = [detail, ...products.value.filter((item) => item.id !== detail.id)]
+    await scrollToRelatedItem('EQUIPMENT', detail.id)
+  })
 }
 
 async function showSocial() {
@@ -1973,10 +2284,17 @@ async function selectPlace(place: Place) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-function closePlaceDetail() {
+async function closePlaceDetail() {
+  const returnTab = homeReturnTab.value
   selectedPlace.value = null
   venueReviews.value = []
   purchaseNotice.value = ''
+  if (returnTab) {
+    homeReturnTab.value = null
+    activeTab.value = returnTab
+    await nextTick()
+    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }
 }
 
 async function switchPlaceDetailTab(tab: 'deals' | 'reviews') {
@@ -2257,6 +2575,7 @@ function typeClass(productType: string) {
 }
 
 onMounted(async () => {
+  resetHeaderVisibility()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
   refreshActivityWindowIfExpired(true)
   try {
@@ -2333,9 +2652,18 @@ onBeforeUnmount(() => {
 
           <label class="auth-field">
             <span>密码</span>
-            <div class="auth-input">
+            <div class="auth-input password-input">
               <KeyRound :size="18" />
-              <input v-model="passwordLoginForm.password" type="password" placeholder="请输入密码" />
+              <input v-model="passwordLoginForm.password" :type="passwordVisible ? 'text' : 'password'" placeholder="请输入密码" />
+              <button
+                class="password-toggle"
+                type="button"
+                :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
+                @click="passwordVisible = !passwordVisible"
+              >
+                <EyeOff v-if="passwordVisible" :size="18" />
+                <Eye v-else :size="18" />
+              </button>
             </div>
           </label>
         </template>
@@ -2355,7 +2683,7 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
-    <header v-if="showPhoneHeader" class="phone-header" :class="{ compact: !showDiscoveryHeader }">
+    <header v-if="showPhoneHeader" class="phone-header" :class="{ compact: !showDiscoveryHeader, hidden: !headerVisible }">
       <div class="header-row">
         <div class="location-cluster">
           <button class="location-button" @click="useCurrentLocation" :disabled="locating">
@@ -2948,6 +3276,116 @@ onBeforeUnmount(() => {
         <div v-else-if="products.length && !hasMoreEquipmentItems" class="load-more-state muted-state">已经到底了</div>
       </section>
 
+      <section v-else-if="activeTab === 'assistant'" class="page-stack agent-page">
+        <div class="agent-hero">
+          <div class="agent-orb">
+            <Bot :size="18" />
+          </div>
+          <div>
+            <span>{{ agentAiEnabled ? 'DashScope 已接入' : '本地工具模式' }}</span>
+            <strong>约个球助手</strong>
+            <p>场地 · 约球 · 装备</p>
+          </div>
+        </div>
+
+        <div class="agent-quick-row">
+          <button v-for="reply in agentQuickReplies" :key="reply" type="button" @click="sendAgentMessage(reply)">
+            {{ reply }}
+          </button>
+        </div>
+
+        <section class="agent-chat-panel" aria-label="AI 助手聊天记录">
+          <article
+            v-for="item in agentMessages"
+            :key="item.id"
+            class="agent-message"
+            :class="item.role"
+          >
+            <div class="agent-bubble">
+              <p>{{ item.content }}</p>
+            </div>
+            <template v-if="item.cards?.length">
+              <section v-if="agentPlaceBundles(item.cards).length" class="agent-result-section">
+                <div class="agent-section-title">
+                  <strong>场所推荐</strong>
+                  <span>横滑查看更多</span>
+                </div>
+                <div class="agent-card-carousel">
+                  <article
+                    v-for="bundle in agentPlaceBundles(item.cards)"
+                    :key="`place-${bundle.place.action?.id || bundle.place.title}`"
+                    class="agent-place-card"
+                  >
+                    <button class="agent-place-main" type="button" @click="handleAgentCardAction(bundle.place)">
+                      <img v-if="bundle.place.coverUrl" :src="bundle.place.coverUrl" :alt="bundle.place.title" @error="imageFallback" />
+                      <div>
+                        <span>场所</span>
+                        <h3>{{ bundle.place.title }}</h3>
+                        <p>{{ bundle.place.subtitle }}</p>
+                        <div class="tag-row" v-if="agentCardTags(bundle.place).length">
+                          <span v-for="tag in agentCardTags(bundle.place)" :key="tag">{{ tag }}</span>
+                        </div>
+                      </div>
+                    </button>
+                    <div class="agent-place-action-row">
+                      <button type="button" @click="handleAgentCardAction(bundle.place)">看场所</button>
+                    </div>
+                    <button v-if="bundle.deal" class="agent-attached-deal" type="button" @click="handleAgentCardAction(bundle.deal)">
+                      <div>
+                        <span>可买团购</span>
+                        <strong>{{ bundle.deal.title }}</strong>
+                        <p>{{ bundle.deal.subtitle }}</p>
+                      </div>
+                      <em v-if="bundle.deal.price">{{ bundle.deal.price }}</em>
+                    </button>
+                    <div v-else class="agent-attached-empty">暂无在线团购，先看看场所详情</div>
+                  </article>
+                </div>
+              </section>
+
+              <section v-if="agentStandaloneCards(item.cards).length" class="agent-result-section">
+                <div class="agent-section-title">
+                  <strong>更多推荐</strong>
+                  <span>横滑查看更多</span>
+                </div>
+                <div class="agent-card-carousel">
+                  <article v-for="card in agentStandaloneCards(item.cards)" :key="`${card.type}-${card.action?.id || card.title}`" class="agent-result-card">
+                    <img v-if="card.coverUrl" :src="card.coverUrl" :alt="card.title" @error="imageFallback" />
+                    <div>
+                      <span>{{ agentCardTypeLabel(card) }}</span>
+                      <h3>{{ card.title }}</h3>
+                      <p>{{ card.subtitle }}</p>
+                      <div class="tag-row" v-if="agentCardTags(card).length">
+                        <span v-for="tag in agentCardTags(card)" :key="tag">{{ tag }}</span>
+                      </div>
+                    </div>
+                    <div class="agent-card-side">
+                      <strong v-if="card.price">{{ card.price }}</strong>
+                      <button type="button" @click="handleAgentCardAction(card)">
+                        {{ agentCardActionLabel(card) }}
+                      </button>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </template>
+          </article>
+          <div id="agent-chat-bottom"></div>
+        </section>
+
+        <div class="agent-input-bar">
+          <input
+            id="agent-input"
+            v-model="agentInput"
+            :placeholder="agentInputPlaceholder"
+            @keyup.enter="sendAgentMessage()"
+          />
+          <button class="primary" type="button" @click="sendAgentMessage()" :disabled="loading || !agentInput.trim()">
+            <Send :size="17" />
+          </button>
+        </div>
+      </section>
+
       <section v-else-if="activeTab === 'profile'" class="page-stack">
         <div class="section-title">
           <div>
@@ -3258,6 +3696,16 @@ onBeforeUnmount(() => {
         </section>
       </section>
     </main>
+
+    <button
+      v-if="activeTab === 'home' && !selectedPlace"
+      class="agent-fab"
+      type="button"
+      @click="openAssistant('帮我看看附近有什么适合的场地或约球活动')"
+    >
+      <Bot :size="18" />
+      <span>AI 助手</span>
+    </button>
 
     <nav class="bottom-nav">
       <button

@@ -32,6 +32,8 @@ drop table if exists cart_equipment;
 drop table if exists equipment;
 drop table if exists equipment_categories;
 drop table if exists blog_archive;
+drop table if exists agent_message;
+drop table if exists agent_conversation;
 drop table if exists blogs;
 drop table if exists follows;
 drop table if exists venue_favorites;
@@ -71,6 +73,30 @@ create table follows (
   unique key uk_follow_pair (user_id, follow_user_id),
   key idx_follow_user (user_id),
   key idx_follow_target (follow_user_id)
+) engine=InnoDB default charset=utf8mb4;
+
+create table agent_conversation (
+  id bigint primary key,
+  user_id bigint not null,
+  title varchar(128) not null,
+  status tinyint not null default 1,
+  created_at datetime not null default current_timestamp,
+  updated_at datetime not null default current_timestamp on update current_timestamp,
+  key idx_agent_conversation_user (user_id, updated_at)
+) engine=InnoDB default charset=utf8mb4;
+
+create table agent_message (
+  id bigint primary key,
+  conversation_id bigint not null,
+  user_id bigint not null,
+  role varchar(32) not null,
+  content text null,
+  cards_json json null,
+  tool_name varchar(64) null,
+  tool_result_json json null,
+  created_at datetime not null default current_timestamp,
+  key idx_agent_message_conversation (conversation_id, created_at),
+  key idx_agent_message_user (user_id, created_at)
 ) engine=InnoDB default charset=utf8mb4;
 
 create table place (

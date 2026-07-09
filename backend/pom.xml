@@ -20,6 +20,8 @@
     <properties>
         <java.version>21</java.version>
         <lombok.version>1.18.42</lombok.version>
+        <spring-ai-alibaba.version>1.1.0.0</spring-ai-alibaba.version>
+        <spring-ai.version>1.1.0</spring-ai.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -63,6 +65,16 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+            <version>${spring-ai-alibaba.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-client-chat</artifactId>
+            <version>${spring-ai.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

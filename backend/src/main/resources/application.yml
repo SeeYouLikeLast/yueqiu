@@ -4,6 +4,17 @@ server:
 spring:
   application:
     name: hm-badminton
+  ai:
+    model:
+      chat: dashscope
+    dashscope:
+      enabled: ${AI_DASHSCOPE_ENABLED:false}
+      api-key: ${AI_DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${AI_MODEL:qwen-plus}
+          temperature: 0.3
+          max-tokens: 1200
   servlet:
     multipart:
       max-file-size: 20MB
@@ -85,6 +96,12 @@ hm:
     allowed-origins:
       - http://localhost:5173
       - http://127.0.0.1:5173
+  agent:
+    enabled: true
+    max-history-messages: 10
+    max-tool-calls: 6
+    memory-ttl-minutes: 60
+    rate-limit-per-minute: 10
 
 logging:
   level:

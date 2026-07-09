@@ -29,6 +29,22 @@ function Test-ListeningPort {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
+function Import-ConfiguredEnvironment {
+    param([string[]]$Names)
+    foreach ($name in $Names) {
+        if ([Environment]::GetEnvironmentVariable($name, "Process")) {
+            continue
+        }
+        $value = [Environment]::GetEnvironmentVariable($name, "User")
+        if (-not $value) {
+            $value = [Environment]::GetEnvironmentVariable($name, "Machine")
+        }
+        if ($value) {
+            Set-Item -Path "env:$name" -Value $value
+        }
+    }
+}
+
 function Convert-ToWslPath {
     param([string]$WindowsPath)
     if (-not (Test-CommandExists "wsl")) {
@@ -95,6 +111,21 @@ New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 Write-Host "HM Badminton dev startup" -ForegroundColor Green
 Write-Host "Project root: $ProjectRoot"
 Write-Host "Logs dir:     $LogsDir"
+
+Import-ConfiguredEnvironment @(
+    "AI_DASHSCOPE_ENABLED",
+    "AI_DASHSCOPE_API_KEY",
+    "AI_MODEL",
+    "MAIL_USERNAME",
+    "MAIL_PASSWORD",
+    "AMAP_KEY"
+)
+
+if ($env:AI_DASHSCOPE_ENABLED -eq "true") {
+    Write-Host "AI DashScope: enabled, key configured: $([bool]$env:AI_DASHSCOPE_API_KEY)"
+} else {
+    Write-Host "AI DashScope: disabled, local tool mode will be used."
+}
 
 if (-not $SkipDocker) {
     Write-Step "Starting WSL Docker services: MySQL / Redis / RocketMQ / MinIO"
