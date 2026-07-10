@@ -47,12 +47,27 @@ import java.util.regex.Pattern;
 public class AgentServiceImpl implements IAgentService {
 
     private static final Pattern BUDGET_PATTERN = Pattern.compile("(\\d{2,5})\\s*(元|块|以内|以下|左右)?");
+    private static final List<String> MODEL_META_KEYS = List.of(
+            "distanceMeters",
+            "rating",
+            "reviewCount",
+            "available",
+            "stock",
+            "sold",
+            "suitableLevel",
+            "sceneTags",
+            "pros",
+            "cons",
+            "recommendScore",
+            "recommendReasons"
+    );
     private static final String SYSTEM_PROMPT = """
             你是“约个球”平台的 AI 助手。
             你的任务是帮助用户选择运动场所、查找可加入的约球活动、推荐可购买装备。
             你不能编造场所、价格、库存、活动人数。
             涉及场所、活动、装备时，必须基于系统提供的真实候选数据回答。
             下单、加入活动、加入购物车、抢购、支付必须由用户点击确认，不能自动替用户完成。
+            不要向用户展示任何内部字段名，例如 placeRank、id、payload、meta、action。
             回答要适合手机端展示，但要给出选择依据，例如距离、价格、可购买性、运动类型匹配、适合人群。
             优先给出 2 到 4 个选择，每个选择用一句话说明为什么推荐。
             """;
@@ -97,6 +112,11 @@ public class AgentServiceImpl implements IAgentService {
         this.idGenerator = idGenerator;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+    }
+
+    @Override
+    public boolean aiEnabled() {
+        return safeChatClientBuilder() != null;
     }
 
     @Override
@@ -234,7 +254,7 @@ public class AgentServiceImpl implements IAgentService {
             payload.put("sportCode", context.sportCode());
             payload.put("city", context.city());
             payload.put("budget", context.budget());
-            payload.put("cards", context.cards());
+            payload.put("cards", cardsForModel(context.cards()));
             payload.put("userPreference", userPreferenceTool.getCurrentUserPreference());
             String content = builder.build()
                     .prompt()
@@ -246,7 +266,7 @@ public class AgentServiceImpl implements IAgentService {
             if (content == null || content.isBlank()) {
                 return fallbackAnswer(context);
             }
-            return content.trim();
+            return sanitizeAnswer(content.trim());
         } catch (Exception ex) {
             return fallbackAnswer(context);
         }
@@ -290,13 +310,71 @@ public class AgentServiceImpl implements IAgentService {
 
     private List<String> quickReplies(AgentContext context) {
         List<String> replies = new ArrayList<>();
-        replies.add("只看 50 元以内");
-        replies.add("帮我找能加入的局");
-        replies.add("推荐新手装备");
-        if (context.sportCode() != null && !context.sportCode().isBlank()) {
-            replies.add("换个更近的场馆");
+        if (hasCardType(context, AgentConstants.CARD_PLACE)) {
+            addQuickReply(replies, "看看这些场所的团购");
+            addQuickReply(replies, "帮我按距离重新筛");
         }
-        return replies;
+        if (hasCardType(context, AgentConstants.CARD_VENUE_PRODUCT)) {
+            addQuickReply(replies, "哪一个团购最划算");
+            addQuickReply(replies, "帮我看预约规则");
+        }
+        if (hasCardType(context, AgentConstants.CARD_ACTIVITY)) {
+            addQuickReply(replies, "哪些局现在能加入");
+            addQuickReply(replies, "帮我选适合新手的局");
+        }
+        if (hasCardType(context, AgentConstants.CARD_EQUIPMENT) || hasCardType(context, AgentConstants.CARD_SECKILL)) {
+            addQuickReply(replies, "帮我按预算筛装备");
+            addQuickReply(replies, "这几件适合新手吗");
+        }
+        if (replies.isEmpty()) {
+            addQuickReply(replies, "换个运动类型试试");
+            addQuickReply(replies, "帮我扩大附近范围");
+            addQuickReply(replies, "推荐新手装备");
+            addQuickReply(replies, "帮我找能加入的局");
+        } else if (context.sportCode() != null && !context.sportCode().isBlank()) {
+            addQuickReply(replies, "换成离我更近的");
+        }
+        return replies.stream().limit(4).toList();
+    }
+
+    private boolean hasCardType(AgentContext context, String cardType) {
+        return context.cards().stream().anyMatch(card -> cardType.equals(card.getType()));
+    }
+
+    private void addQuickReply(List<String> replies, String text) {
+        if (!replies.contains(text)) {
+            replies.add(text);
+        }
+    }
+
+    private List<Map<String, Object>> cardsForModel(List<AgentCard> cards) {
+        return cards.stream()
+                .map(card -> {
+                    Map<String, Object> data = new LinkedHashMap<>();
+                    data.put("type", card.getType());
+                    data.put("title", card.getTitle());
+                    data.put("subtitle", card.getSubtitle());
+                    data.put("price", card.getPrice());
+                    data.put("tags", card.getTags());
+                    if (card.getMeta() != null) {
+                        for (String key : MODEL_META_KEYS) {
+                            Object value = card.getMeta().get(key);
+                            if (value != null) {
+                                data.put(key, value);
+                            }
+                        }
+                    }
+                    return data;
+                })
+                .toList();
+    }
+
+    private String sanitizeAnswer(String answer) {
+        return answer
+                .replaceAll("(?i)\\s*[（(]?\\s*placeRank\\s*=\\s*\\d+\\s*[）)]?\\s*[：:，,]?\\s*", "")
+                .replaceAll("(?i)placeRank\\s*=\\s*\\d+\\s*[：:，,]?\\s*", "")
+                .replaceAll("(?i)\\s*\\(\\s*placeRank\\s*\\)", "")
+                .trim();
     }
 
     private void saveMessage(Long conversationId,

@@ -74,7 +74,13 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                 .orderByDesc(Blog::getLiked)
                 .orderByDesc(Blog::getCreatedAt);
         Page<Blog> result = page(new Page<>(safePage, safeSize), wrapper);
-        return new PageResult<>(enrich(result.getRecords(), currentUser), result.getTotal(), safePage, safeSize);
+        List<Blog> records = result.getRecords();
+        long total = result.getTotal();
+        if (safePage == 1 && (keyword == null || keyword.isBlank()) && records.size() < safeSize) {
+            records = fillBlogPage(records, sportCode, safeSize);
+            total = Math.max(total, records.size());
+        }
+        return new PageResult<>(enrich(records, currentUser), total, safePage, safeSize);
     }
 
     @Override
@@ -384,6 +390,32 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
                     .like(Blog::getRelatedTitle, text));
         }
         return wrapper;
+    }
+
+    private List<Blog> fillBlogPage(List<Blog> records, String sportCode, int size) {
+        if (isAllSport(sportCode)) {
+            return records;
+        }
+        LinkedHashMap<Long, Blog> merged = new LinkedHashMap<>();
+        appendBlogs(merged, records);
+        if (merged.size() < size) {
+            appendBlogs(merged, list(new LambdaQueryWrapper<Blog>()
+                    .eq(Blog::getStatus, 1)
+                    .orderByDesc(Blog::getLiked)
+                    .orderByDesc(Blog::getCreatedAt)
+                    .last("limit " + (size * 2))));
+        }
+        return merged.values().stream().limit(size).toList();
+    }
+
+    private void appendBlogs(LinkedHashMap<Long, Blog> merged, List<Blog> records) {
+        for (Blog blog : records) {
+            merged.putIfAbsent(blog.getId(), blog);
+        }
+    }
+
+    private boolean isAllSport(String sportCode) {
+        return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
     }
 
     private List<BlogView> enrich(List<Blog> blogs, LoginUser currentUser) {

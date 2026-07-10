@@ -3769,3 +3769,262 @@ insert into cart_venue(id, user_id, product_id, inventory_id, quantity) values
 (7, 7, 7, 73, 1),
 (8, 8, 8, 85, 1);
 
+-- Demo refinement: make seed data more useful for AI recommendation.
+-- The bulk rows above keep enough volume; this section adds visible differences.
+update users
+set city = case
+        when id between 1 and 50 then '西安'
+        when id between 51 and 100 then '上海'
+        when id between 101 and 150 then '北京'
+        else '成都'
+    end,
+    level = case id % 4
+        when 0 then '新手'
+        when 1 then '中级'
+        when 2 then '高级'
+        else '不限'
+    end,
+    prefer_time = case id % 5
+        when 0 then '工作日 19:00 后'
+        when 1 then '周末上午'
+        when 2 then '周末下午'
+        when 3 then '工作日午休'
+        else '周三/周四晚上'
+    end
+where id between 1 and 200;
+
+update player_profiles
+set sport_code = case (user_id - 1) % 6
+        when 0 then 'badminton'
+        when 1 then 'table_tennis'
+        when 2 then 'football'
+        when 3 then 'basketball'
+        when 4 then 'tennis'
+        else 'volleyball'
+    end,
+    city = case
+        when user_id between 1 and 50 then '西安'
+        when user_id between 51 and 100 then '上海'
+        when user_id between 101 and 150 then '北京'
+        else '成都'
+    end,
+    area = case
+        when user_id between 1 and 50 then case user_id % 4 when 0 then '雁塔区' when 1 then '长安区' when 2 then '未央区' else '碑林区' end
+        when user_id between 51 and 100 then case user_id % 4 when 0 then '浦东新区' when 1 then '徐汇区' when 2 then '静安区' else '闵行区' end
+        when user_id between 101 and 150 then case user_id % 4 when 0 then '朝阳区' when 1 then '海淀区' when 2 then '丰台区' else '西城区' end
+        else case user_id % 4 when 0 then '武侯区' when 1 then '高新区' when 2 then '锦江区' else '成华区' end
+    end,
+    longitude = case
+        when user_id between 1 and 50 then 108.946465 + (user_id % 7) * 0.01
+        when user_id between 51 and 100 then 121.473667 + (user_id % 7) * 0.01
+        when user_id between 101 and 150 then 116.407526 + (user_id % 7) * 0.01
+        else 104.066541 + (user_id % 7) * 0.01
+    end,
+    latitude = case
+        when user_id between 1 and 50 then 34.347269 + (user_id % 5) * 0.01
+        when user_id between 51 and 100 then 31.230416 + (user_id % 5) * 0.01
+        when user_id between 101 and 150 then 39.904030 + (user_id % 5) * 0.01
+        else 30.572269 + (user_id % 5) * 0.01
+    end,
+    level = case user_id % 4
+        when 0 then '新手'
+        when 1 then '中级'
+        when 2 then '高级'
+        else '不限'
+    end,
+    play_style = case user_id % 6
+        when 0 then '稳定防守'
+        when 1 then '双打轮转'
+        when 2 then '进攻压迫'
+        when 3 then '体能训练'
+        when 4 then '亲子休闲'
+        else '下班快打'
+    end,
+    available_time = case user_id % 5
+        when 0 then '工作日 19:00 后'
+        when 1 then '周末上午'
+        when 2 then '周末下午'
+        when 3 then '工作日午休'
+        else '周三/周四晚上'
+    end
+where user_id between 1 and 200;
+
+update place
+set avg_price = case id % 6
+        when 0 then 29
+        when 1 then 45
+        when 2 then 68
+        when 3 then 88
+        when 4 then 118
+        else 39
+    end,
+    score = case id % 5
+        when 0 then 4.1
+        when 1 then 4.3
+        when 2 then 4.5
+        when 3 then 4.7
+        else 4.8
+    end,
+    open_hours = case id % 4
+        when 0 then '07:00-22:00'
+        when 1 then '09:00-22:30'
+        when 2 then '10:00-23:00'
+        else '08:30-21:30'
+    end,
+    facilities = case id % 8
+        when 0 then '空调,停车,淋浴,地铁近,夜场灯光好,适合高手对抗'
+        when 1 then '停车,新手练球,下班快打,价格友好,晚高峰稍挤'
+        when 2 then '空调,亲子友好,地铁近,适合新手,周末人多'
+        when 3 then '灯光好,高手对抗,双打氛围好,价格偏高'
+        when 4 then '淋浴,停车,体能训练,私教资源多,距离略远'
+        when 5 then '地铁近,早场低价,适合晨练,场地偏少'
+        when 6 then '夜场灯光好,下班快打,可预约,停车难'
+        else '空调,停车,新手友好,双打拼场,周末贵'
+    end
+where id between 1 and 40;
+
+update venue
+set description = case product_type
+        when 'TIME_PACKAGE' then concat('低峰时段畅打，适合个人练习、双人拉球和下班前补练。')
+        when 'COURT_SLOT' then concat('按小时预订单场，适合固定搭子、双打对抗和晚间热门时段。')
+        when 'COACH_LESSON' then concat('教练体验课，适合新手纠正动作、进阶提升和体能专项训练。')
+        else description
+    end,
+    tags = case product_type
+        when 'TIME_PACKAGE' then '早场低价,可核销,新手友好,低峰畅打'
+        when 'COURT_SLOT' then '单场时段,需预约,双打,晚场热门'
+        when 'COACH_LESSON' then '私教课,需预约,动作纠正,进阶提升'
+        else tags
+    end,
+    original_price = case
+        when id % 5 = 0 then null
+        when id % 7 = 0 then price
+        else original_price
+    end
+where id between 1 and 100;
+
+update equipment
+set description = case id % 8
+        when 0 then '入门训练款，重量轻、上手快，适合新手练习；缺点是进攻爆发一般。'
+        when 1 then '稳定控制取向，落点更容易掌握，适合进阶拉吊；缺点是价格略高。'
+        when 2 then '高强度对抗款，支撑和耐用性更好，适合频繁训练；缺点是新手会觉得偏硬。'
+        when 3 then '轻量便携款，适合通勤和周末约球；缺点是容量或保护性一般。'
+        when 4 then '防滑耐磨款，适合室内场地和快速移动；缺点是长时间穿着略闷。'
+        when 5 then '训练消耗款，价格友好，适合多人活动备用；缺点是手感不如高端款。'
+        when 6 then '进攻发力款，反馈直接，适合有一定基础的球友；缺点是容错较低。'
+        else '均衡通用款，兼顾稳定和控制，适合日常训练；缺点是特点不算极致。'
+    end,
+    stock = 8 + (id % 30),
+    score = round(4.1 + (id % 8) * 0.1, 1),
+    sold = 20 + id * 7
+where id between 1 and 50;
+
+update sport_activities
+set max_players = case id % 5
+        when 0 then 4
+        when 1 then 6
+        when 2 then 8
+        when 3 then 10
+        else 12
+    end,
+    current_players = case id % 5
+        when 0 then 3
+        when 1 then 2
+        when 2 then 5
+        when 3 then 8
+        else 6
+    end,
+    level_required = case id % 4
+        when 0 then '新手'
+        when 1 then '中级'
+        when 2 then '高级'
+        else '不限'
+    end,
+    fee_type = case id % 4
+        when 0 then 'AA'
+        when 1 then '场费平摊'
+        when 2 then '组织者先垫'
+        else '免费体验'
+    end
+where id between 1 and 80;
+
+update users u
+join (
+    select 1 as min_id, 50 as max_id, city from place where id = 1
+    union all select 51, 100, city from place where id = 2
+    union all select 101, 150, city from place where id = 3
+    union all select 151, 200, city from place where id = 4
+) seed on u.id between seed.min_id and seed.max_id
+set u.city = seed.city
+where u.id between 1 and 200;
+
+update player_profiles pp
+join (
+    select 1 as min_id, 50 as max_id, city, area from place where id = 1
+    union all select 51, 100, city, area from place where id = 2
+    union all select 101, 150, city, area from place where id = 3
+    union all select 151, 200, city, area from place where id = 4
+) seed on pp.user_id between seed.min_id and seed.max_id
+set pp.city = seed.city,
+    pp.area = seed.area
+where pp.user_id between 1 and 200;
+
+delete from venue_reviews;
+
+insert into venue_reviews(id, venue_id, user_id, rating, content, image_urls, likes, created_at)
+select
+    @review_id := @review_id + 1,
+    p.id,
+    matched.user_id,
+    case matched.rn when 1 then 5 when 2 then 4 else 5 end,
+    concat(
+        p.city,
+        ' · ',
+        case p.sport_code
+            when 'badminton' then '羽毛球'
+            when 'table_tennis' then '乒乓球'
+            when 'football' then '足球'
+            when 'basketball' then '篮球'
+            when 'tennis' then '网球'
+            when 'volleyball' then '排球'
+            else '运动'
+        end,
+        '体验：',
+        case matched.rn
+            when 1 then '场地维护不错，灯光和动线舒服，适合下班后约一场。'
+            when 2 then '位置好找，预约核销比较顺，晚高峰人会稍微多一些。'
+            else '设施比较齐，整体性价比可以，适合和固定搭子训练。'
+        end
+    ),
+    concat('/api/files/', 111 + (p.id + matched.rn) % 10, '/download'),
+    3 + (p.id + matched.rn) % 28,
+    date_add('2026-07-01 18:00:00', interval (p.id + matched.rn) % 7 day)
+from (select @review_id := 0) vars
+cross join place p
+join (
+    select user_id, city, sport_code, rn
+    from (
+        select
+            u.id as user_id,
+            u.city,
+            pp.sport_code,
+            row_number() over(partition by u.city, pp.sport_code order by u.id) as rn
+        from users u
+        join player_profiles pp on pp.user_id = u.id
+        where u.status = 1
+    ) reviewer
+    where rn <= 3
+) matched on matched.city = p.city and matched.sport_code = p.sport_code
+where p.id between 1 and 40
+order by p.id, matched.rn;
+
+update place p
+left join (
+    select venue_id, count(*) as review_count, round(avg(rating), 1) as score
+    from venue_reviews
+    group by venue_id
+) r on r.venue_id = p.id
+set p.review_count = coalesce(r.review_count, 0),
+    p.score = coalesce(r.score, p.score)
+where p.id between 1 and 40;
+

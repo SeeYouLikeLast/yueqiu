@@ -19,6 +19,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -27,6 +28,7 @@ import java.util.Map;
 public class AmapPlaceService implements IAmapPlaceService {
 
     private static final String AMAP_SOURCE = "amap";
+    private static final List<Integer> AUTO_RADIUS_STEPS = List.of(5000, 10000, 20000, 30000);
 
     private final AmapProperties amapProperties;
     private final ISportCatalogService sportCatalogService;
@@ -63,13 +65,36 @@ public class AmapPlaceService implements IAmapPlaceService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), Math.min(Math.max(1, amapProperties.getPageSize()), 25));
         int safeRadius = Math.min(Math.max(radius == null ? amapProperties.getRadius() : radius, 100), 50000);
+        LinkedHashMap<String, AmapPlace> merged = new LinkedHashMap<>();
+        long total = 0;
+        for (Integer currentRadius : autoRadiusSteps(safeRadius)) {
+            PageResult<AmapPlace> result = requestNearby(sport, keyword, city, lng, lat, currentRadius, safePage, safeSize);
+            total = Math.max(total, result.getTotal());
+            for (AmapPlace place : result.getRecords()) {
+                merged.putIfAbsent(place.getId(), place);
+            }
+            if (merged.size() >= safeSize) {
+                break;
+            }
+        }
+        return new PageResult<>(merged.values().stream().limit(safeSize).toList(), Math.max(total, merged.size()), safePage, safeSize);
+    }
+
+    private PageResult<AmapPlace> requestNearby(SportType sport,
+                                                String keyword,
+                                                String city,
+                                                Double lng,
+                                                Double lat,
+                                                int radius,
+                                                int page,
+                                                int size) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(amapProperties.getEndpoint())
                 .queryParam("key", amapProperties.getKey())
                 .queryParam("location", lng + "," + lat)
-                .queryParam("radius", safeRadius)
+                .queryParam("radius", radius)
                 .queryParam("keywords", buildKeywords(sport, keyword))
-                .queryParam("page_size", safeSize)
-                .queryParam("page_num", safePage)
+                .queryParam("page_size", size)
+                .queryParam("page_num", page)
                 .queryParam("show_fields", "business,photos");
         if (city != null && !city.isBlank()) {
             builder.queryParam("region", city.trim());
@@ -92,13 +117,13 @@ public class AmapPlaceService implements IAmapPlaceService {
         List<AmapPlace> places = new ArrayList<>();
         JsonNode pois = root.path("pois");
         if (pois.isArray()) {
-            int rank = (safePage - 1) * safeSize + 1;
+            int rank = (page - 1) * size + 1;
             for (JsonNode poi : pois) {
                 places.add(toPlace(poi, sport, rank++));
             }
         }
         long total = parseLong(root.path("count").asText(), places.size());
-        return new PageResult<>(places, total, safePage, safeSize);
+        return new PageResult<>(places, total, page, size);
     }
 
     public Map<String, Object> reverseGeocode(Double lng, Double lat) {
@@ -230,6 +255,20 @@ public class AmapPlaceService implements IAmapPlaceService {
 
     private boolean isAllSport(String sportCode) {
         return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
+    }
+
+    private List<Integer> autoRadiusSteps(int radius) {
+        List<Integer> steps = new ArrayList<>();
+        steps.add(radius);
+        for (Integer step : AUTO_RADIUS_STEPS) {
+            if (step > radius && step <= 50000) {
+                steps.add(step);
+            }
+        }
+        if (steps.get(steps.size() - 1) < radius) {
+            steps.add(radius);
+        }
+        return steps.stream().distinct().toList();
     }
 
     private String localPlaceCoverUrl(int rank) {

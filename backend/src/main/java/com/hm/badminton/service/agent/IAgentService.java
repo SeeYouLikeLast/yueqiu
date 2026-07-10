@@ -8,6 +8,8 @@ import com.hm.badminton.dto.agent.AgentMessageView;
 import java.util.List;
 
 public interface IAgentService {
+    boolean aiEnabled();
+
     AgentChatResponse chat(AgentChatRequest request, String clientIp);
 
     List<AgentConversationView> conversations(Long userId);

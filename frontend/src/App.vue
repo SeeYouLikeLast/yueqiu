@@ -315,11 +315,30 @@ type AgentMessage = {
   cards?: AgentCard[]
 }
 
+type AgentConversation = {
+  id: number
+  title: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+type AgentMessageRecord = {
+  id: number
+  role: string
+  content: string
+  cards?: AgentCard[]
+  createdAt?: string
+}
+
 type AgentChatResponse = {
   conversationId: number
   answer: string
   cards: AgentCard[]
   quickReplies: string[]
+  aiEnabled: boolean
+}
+
+type AgentStatus = {
   aiEnabled: boolean
 }
 
@@ -345,8 +364,6 @@ const fallbackSports: SportType[] = [
 
 const ALL_SPORT: SportType = { code: '', name: '全部运动', keywords: [] }
 const DEFAULT_PLACE_RADIUS = 5000
-const PLACE_RADIUS_STEPS = [DEFAULT_PLACE_RADIUS, 10000, 20000, 30000]
-const MIN_PLACE_RESULTS = 6
 const PLACE_PAGE_SIZE = 20
 const PRODUCT_PAGE_SIZE = 12
 const SOCIAL_PAGE_SIZE = 12
@@ -356,6 +373,12 @@ const FALLBACK_IMAGE = '/api/files/31/download'
 const FALLBACK_AVATAR = '/api/files/1/download'
 const HEADER_SCROLL_DELTA = 8
 const HEADER_HIDE_AFTER = 80
+const HEADER_SHOW_ACCUMULATE = 10
+const HEADER_HIDE_ACCUMULATE = 14
+const AGENT_WELCOME_MESSAGE = '你好，我是约个球助手。可以帮你找附近场所、可加入的约球活动，也能按预算推荐装备。'
+const AGENT_LOCAL_STORAGE_KEY = 'hm-badminton-agent-chat'
+const INITIAL_AGENT_QUICK_REPLIES = ['今晚附近能打球吗', '帮我找能加入的局', '推荐新手装备', '50 元以内的场地']
+const FALLBACK_AGENT_FOLLOW_UPS = ['再给我 3 个选择', '帮我按距离筛选', '帮我按预算筛选', '这些哪个更适合新手']
 const SALE_RANKS_BY_SPORT: Record<string, number[]> = {
   badminton: [1, 2, 3, 4, 7],
   football: [5],
@@ -404,18 +427,18 @@ const socialProfile = ref<Player | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
 const profileBlogs = ref<BlogPost[]>([])
 const selectedBlog = ref<BlogPost | null>(null)
-const agentMessages = ref<AgentMessage[]>([
-  {
-    id: 'welcome',
-    role: 'assistant',
-    content: '你好，我是约个球助手。可以帮你找附近场所、可加入的约球活动，也能按预算推荐装备。'
-  }
-])
+const agentMessages = ref<AgentMessage[]>(defaultAgentMessages())
 const agentInput = ref('')
 const agentInputPlaceholder = ref('问问附近场地、约球活动、装备推荐')
 const agentConversationId = ref<number | null>(null)
-const agentQuickReplies = ref(['今晚附近能打球吗', '帮我找能加入的局', '推荐新手装备', '50 元以内的场地'])
+const agentConversations = ref<AgentConversation[]>([])
+const agentQuickReplies = ref<string[]>(initialAgentQuickReplies())
 const agentAiEnabled = ref(false)
+const agentThinking = ref(false)
+const agentHistoryLoaded = ref(false)
+const agentHistoryVisible = ref(false)
+const deletingAgentConversation = ref<AgentConversation | null>(null)
+const loadingAgentHistory = ref(false)
 const blogComposerVisible = ref(false)
 const blogComposerReturnTab = ref<Tab>('seckill')
 const cartCount = ref(0)
@@ -449,6 +472,9 @@ const profileBlogsPage = ref(1)
 const profileBlogsTotal = ref(0)
 const headerVisible = ref(true)
 let lastHeaderScrollTop = 0
+let headerScrollUpDistance = 0
+let headerScrollDownDistance = 0
+let lastTouchClientY: number | null = null
 
 const loggedIn = computed(() => Boolean(authToken.value))
 const activeSport = computed(() => sports.value.find((sport) => sport.code === selectedSport.value) || ALL_SPORT)
@@ -456,6 +482,30 @@ const cartAmount = computed(() => cartItems.value.reduce((sum, item) => sum + Nu
 const showPhoneHeader = computed(() => !blogComposerVisible.value && !(activeTab.value === 'home' && selectedPlace.value))
 const showDiscoveryHeader = computed(() => !blogComposerVisible.value && activeTab.value !== 'profile' && activeTab.value !== 'assistant')
 const showCategoryHeader = computed(() => activeTab.value === 'equipment' && Boolean(selectedSport.value))
+const showAgentFab = computed(() => activeTab.value !== 'assistant')
+const assistantFabPrompt = computed(() => {
+  if (activeTab.value === 'home' && selectedPlace.value) {
+    return `帮我分析一下${selectedPlace.value.name}适合买什么团购，或者怎么约球`
+  }
+  if (activeTab.value === 'home' && venueSaleView.value) {
+    return '帮我从这些场馆团购里选一个性价比高的'
+  }
+  if (activeTab.value === 'social') {
+    return '帮我看看有没有适合加入的约球活动'
+  }
+  if (activeTab.value === 'equipment') {
+    return '帮我按预算和运动类型推荐装备'
+  }
+  if (activeTab.value === 'seckill') {
+    return '帮我看看社区里有哪些值得参考的装备或场馆体验'
+  }
+  if (activeTab.value === 'profile') {
+    return '帮我看看我的订单、购物车或运动偏好'
+  }
+  return '帮我看看附近有什么适合的场地或约球活动'
+})
+const hasAgentConversation = computed(() => agentMessages.value.some((item) => item.role === 'user'))
+const visibleAgentQuickReplies = computed(() => agentThinking.value ? [] : agentQuickReplies.value.slice(0, 4))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
 const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
 const hasMoreEquipmentItems = computed(() => products.value.length < productsTotal.value)
@@ -479,10 +529,6 @@ const visibleEquipmentOrders = computed(() => profileView.value === 'paid'
   : equipmentOrders.value)
 const profileVenueOrderCards = computed<ProfileOrderCard[]>(() => visibleVenueOrders.value)
 const profileEquipmentOrderCards = computed<ProfileOrderCard[]>(() => visibleEquipmentOrders.value)
-function nextPlaceRadius() {
-  return PLACE_RADIUS_STEPS.find((radius) => radius > placeQuery.radius)
-}
-
 const selectedPlaceVenueItems = computed(() => {
   if (!selectedPlace.value) return []
   const records = saleVenueItems(selectedPlace.value)
@@ -772,6 +818,7 @@ function resetLoginState() {
   publicProfileReturnTab.value = 'seckill'
   profileOrderPageVisible.value = false
   profileEditorVisible.value = false
+  resetAgentChat()
 }
 
 function handleRequestError(error: unknown) {
@@ -780,6 +827,271 @@ function handleRequestError(error: unknown) {
     resetLoginState()
   }
   return text
+}
+
+function defaultAgentMessages(): AgentMessage[] {
+  return [
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: AGENT_WELCOME_MESSAGE
+    }
+  ]
+}
+
+function initialAgentQuickReplies() {
+  return [...INITIAL_AGENT_QUICK_REPLIES]
+}
+
+function resetAgentChat() {
+  agentMessages.value = defaultAgentMessages()
+  agentConversationId.value = null
+  agentConversations.value = []
+  agentQuickReplies.value = initialAgentQuickReplies()
+  agentThinking.value = false
+  agentHistoryLoaded.value = false
+  agentHistoryVisible.value = false
+  deletingAgentConversation.value = null
+  loadingAgentHistory.value = false
+}
+
+function saveGuestAgentChat() {
+  if (loggedIn.value) return
+  localStorage.setItem(AGENT_LOCAL_STORAGE_KEY, JSON.stringify({
+    conversationId: agentConversationId.value,
+    messages: agentMessages.value,
+    quickReplies: agentQuickReplies.value
+  }))
+}
+
+function restoreGuestAgentChat() {
+  try {
+    const raw = localStorage.getItem(AGENT_LOCAL_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as { conversationId?: number; messages?: AgentMessage[] }
+    if (Array.isArray(parsed.messages) && parsed.messages.length) {
+      agentMessages.value = parsed.messages
+      agentConversationId.value = parsed.conversationId || null
+      agentQuickReplies.value = normalizeQuickReplies((parsed as { quickReplies?: string[] }).quickReplies)
+      if (!agentQuickReplies.value.length) {
+        syncAgentQuickRepliesFromMessages()
+      }
+    }
+  } catch {
+    localStorage.removeItem(AGENT_LOCAL_STORAGE_KEY)
+  }
+}
+
+function toAgentMessage(record: AgentMessageRecord): AgentMessage | null {
+  const role = record.role === 'user' ? 'user' : record.role === 'assistant' ? 'assistant' : null
+  if (!role || !record.content) return null
+  return {
+    id: `m-${record.id}`,
+    role,
+    content: record.content,
+    cards: record.cards || []
+  }
+}
+
+async function loadLatestAgentHistory() {
+  if (agentHistoryLoaded.value) return
+  if (!loggedIn.value) {
+    restoreGuestAgentChat()
+    agentHistoryLoaded.value = true
+    return
+  }
+  try {
+    const conversations = await api<AgentConversation[]>('/api/agent/conversations')
+    agentConversations.value = conversations
+    const latest = conversations[0]
+    if (!latest) {
+      agentHistoryLoaded.value = true
+      return
+    }
+    const records = await api<AgentMessageRecord[]>(`/api/agent/conversations/${latest.id}/messages`)
+    const restored = records.map(toAgentMessage).filter(Boolean) as AgentMessage[]
+    agentConversationId.value = latest.id
+    agentMessages.value = restored.length ? restored : defaultAgentMessages()
+    syncAgentQuickRepliesFromMessages()
+  } catch (error) {
+    message.value = handleRequestError(error)
+  } finally {
+    agentHistoryLoaded.value = true
+  }
+}
+
+async function loadAgentConversations() {
+  if (!loggedIn.value) {
+    agentConversations.value = []
+    return
+  }
+  loadingAgentHistory.value = true
+  try {
+    agentConversations.value = await api<AgentConversation[]>('/api/agent/conversations')
+  } catch (error) {
+    message.value = handleRequestError(error)
+  } finally {
+    loadingAgentHistory.value = false
+  }
+}
+
+async function loadAgentStatus() {
+  try {
+    const status = await api<AgentStatus>('/api/agent/status')
+    agentAiEnabled.value = status.aiEnabled
+  } catch {
+    agentAiEnabled.value = false
+  }
+}
+
+async function openAgentHistory() {
+  if (!requireLogin('登录后可以切换历史聊天')) return
+  if (!loggedIn.value) {
+    message.value = '登录后可以切换历史聊天'
+    return
+  }
+  agentHistoryVisible.value = true
+  deletingAgentConversation.value = null
+  await loadAgentConversations()
+}
+
+function closeAgentHistory() {
+  agentHistoryVisible.value = false
+  deletingAgentConversation.value = null
+}
+
+async function switchAgentConversation(conversation: AgentConversation) {
+  if (conversation.id === agentConversationId.value) {
+    closeAgentHistory()
+    return
+  }
+  loadingAgentHistory.value = true
+  try {
+    const records = await api<AgentMessageRecord[]>(`/api/agent/conversations/${conversation.id}/messages`)
+    const restored = records.map(toAgentMessage).filter(Boolean) as AgentMessage[]
+    agentConversationId.value = conversation.id
+    agentMessages.value = restored.length ? restored : defaultAgentMessages()
+    syncAgentQuickRepliesFromMessages()
+    closeAgentHistory()
+    await nextTick()
+    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  } catch (error) {
+    message.value = handleRequestError(error)
+  } finally {
+    loadingAgentHistory.value = false
+  }
+}
+
+function startNewAgentConversation() {
+  closeAgentHistory()
+  agentConversationId.value = null
+  agentMessages.value = defaultAgentMessages()
+  agentQuickReplies.value = initialAgentQuickReplies()
+  agentThinking.value = false
+  agentInput.value = ''
+  if (!loggedIn.value) {
+    localStorage.removeItem(AGENT_LOCAL_STORAGE_KEY)
+  }
+  void nextTick(() => {
+    document.getElementById('agent-input')?.focus()
+  })
+}
+
+function askDeleteAgentConversation(conversation: AgentConversation) {
+  deletingAgentConversation.value = conversation
+}
+
+function deleteAgentConversation(conversation: AgentConversation) {
+  askDeleteAgentConversation(conversation)
+}
+
+function cancelDeleteAgentConversation() {
+  deletingAgentConversation.value = null
+}
+
+async function confirmDeleteAgentConversation() {
+  if (!loggedIn.value || !deletingAgentConversation.value) return
+  const conversation = deletingAgentConversation.value
+  loadingAgentHistory.value = true
+  try {
+    await api(`/api/agent/conversations/${conversation.id}`, { method: 'DELETE' })
+    agentConversations.value = agentConversations.value.filter((item) => item.id !== conversation.id)
+    deletingAgentConversation.value = null
+    if (conversation.id === agentConversationId.value) {
+      startNewAgentConversation()
+    }
+  } catch (error) {
+    message.value = handleRequestError(error)
+  } finally {
+    loadingAgentHistory.value = false
+  }
+}
+
+function agentConversationTitle(conversation: AgentConversation) {
+  return conversation.title?.trim() || '新的约球咨询'
+}
+
+function agentConversationTime(conversation: AgentConversation) {
+  const value = conversation.updatedAt || conversation.createdAt
+  if (!value) return '刚刚'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.replace('T', ' ').slice(5, 16)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
+function normalizeQuickReplies(replies?: string[]) {
+  const unique: string[] = []
+  for (const reply of replies || []) {
+    const text = reply?.trim()
+    if (text && !unique.includes(text)) {
+      unique.push(text)
+    }
+  }
+  return unique.slice(0, 4)
+}
+
+function syncAgentQuickRepliesFromMessages() {
+  for (let i = agentMessages.value.length - 1; i >= 0; i--) {
+    const item = agentMessages.value[i]
+    if (item.role === 'assistant' && item.id !== 'welcome') {
+      agentQuickReplies.value = buildAgentFollowUps(item.cards || [], item.content)
+      return
+    }
+  }
+  agentQuickReplies.value = initialAgentQuickReplies()
+}
+
+function agentNextQuickReplies(replies: string[] | undefined, cards: AgentCard[] = [], answer = '') {
+  const normalized = normalizeQuickReplies(replies)
+  return normalized.length ? normalized : buildAgentFollowUps(cards, answer)
+}
+
+function buildAgentFollowUps(cards: AgentCard[] = [], answer = '') {
+  const types = new Set(cards.map((card) => card.type))
+  const replies: string[] = []
+  if (types.has('place')) {
+    replies.push('看看这些场所的团购', '帮我按距离重新筛')
+  }
+  if (types.has('venue_product')) {
+    replies.push('哪一个团购最划算', '帮我看预约规则')
+  }
+  if (types.has('activity')) {
+    replies.push('哪些局现在能加入', '帮我选适合新手的局')
+  }
+  if (types.has('equipment') || types.has('seckill')) {
+    replies.push('帮我按预算筛装备', '这几件适合新手吗')
+  }
+  if (answer.includes('预算') || answer.includes('价格')) {
+    replies.push('帮我换成更便宜的')
+  }
+  if (answer.includes('附近') || answer.includes('距离')) {
+    replies.push('换成离我更近的')
+  }
+  return normalizeQuickReplies(replies.length ? replies : FALLBACK_AGENT_FOLLOW_UPS)
 }
 
 async function wrap(action: () => Promise<void>, okMessage?: string) {
@@ -823,6 +1135,7 @@ async function login() {
     })
     setToken(result.token)
     authToken.value = result.token
+    agentHistoryLoaded.value = false
     activeTab.value = authReturnTab.value
     authPageVisible.value = false
     const located = await refreshCurrentLocation({ reload: false, showMessage: false })
@@ -920,7 +1233,7 @@ function setPagingParams(params: URLSearchParams, page: number, pageSize: number
   if (pageSize !== defaultPageSize) params.set('size', String(pageSize))
 }
 
-async function loadPlaces(page = 1, append = false, autoExpand = true) {
+async function loadPlaces(page = 1, append = false) {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
   params.set('lng', String(placeQuery.lng))
@@ -935,16 +1248,6 @@ async function loadPlaces(page = 1, append = false, autoExpand = true) {
   if (!append && selectedPlace.value && !result.records.some((place) => place.id === selectedPlace.value?.id)) {
     selectedPlace.value = null
     venueReviews.value = []
-  }
-  if (autoExpand && page === 1 && !placeQuery.keyword.trim() && places.value.length < MIN_PLACE_RESULTS) {
-    const radius = nextPlaceRadius()
-    if (radius) {
-      placeQuery.radius = radius
-      await loadPlaces(1, true, true)
-      if (!append && places.value.length > result.records.length) {
-        message.value = `附近结果较少，已扩大到 ${Math.round(placeQuery.radius / 1000)}km`
-      }
-    }
   }
 }
 
@@ -1224,16 +1527,24 @@ async function loadCurrentTab() {
       ? loadProfileBlogs(viewedUserProfile.value.id)
       : loadMyProfileHome())
   }
+  if (activeTab.value === 'assistant') {
+    tasks.push(loadAgentStatus())
+    tasks.push(loadLatestAgentHistory())
+  }
   const failed = (await Promise.allSettled(tasks)).find((result) => result.status === 'rejected')
   if (failed && failed.status === 'rejected') {
     message.value = handleRequestError(failed.reason)
   }
 }
 
+function currentScrollTop() {
+  return Math.max(0, document.scrollingElement?.scrollTop || window.scrollY || document.documentElement.scrollTop || 0)
+}
+
 function nearPageBottom() {
-  const scrollTop = window.scrollY || document.documentElement.scrollTop
+  const scrollTop = currentScrollTop()
   const viewport = window.innerHeight || document.documentElement.clientHeight
-  const height = document.documentElement.scrollHeight
+  const height = document.scrollingElement?.scrollHeight || document.documentElement.scrollHeight
   return scrollTop + viewport >= height - 180
 }
 
@@ -1241,7 +1552,7 @@ async function loadMoreCurrentTab() {
   if (loading.value || loadingMore.value) return
   if (activeTab.value === 'home' && selectedPlace.value) return
   if (activeTab.value === 'home' && venueSaleView.value && !hasMoreVenueSales.value) return
-  if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value && !nextPlaceRadius()) return
+  if (activeTab.value === 'home' && !venueSaleView.value && !hasMorePlaces.value) return
   if (activeTab.value === 'equipment' && !hasMoreEquipmentItems.value) return
   if (activeTab.value === 'social' && !hasMoreSocial.value) return
   if (activeTab.value === 'seckill' && !hasMoreBlogs.value) return
@@ -1254,16 +1565,7 @@ async function loadMoreCurrentTab() {
       if (venueSaleView.value) {
         await loadVenueSaleItems(venueSalesPage.value + 1, true)
       } else {
-        if (!hasMorePlaces.value) {
-          const radius = nextPlaceRadius()
-          if (radius) {
-            placeQuery.radius = radius
-            await loadPlaces(1, true)
-            message.value = `已扩大到 ${Math.round(radius / 1000)}km 继续查找`
-          }
-        } else {
-          await loadPlaces(placesPage.value + 1, true)
-        }
+        await loadPlaces(placesPage.value + 1, true)
       }
     } else if (activeTab.value === 'equipment') {
       await loadEquipmentItems(productsPage.value + 1, true)
@@ -1292,27 +1594,86 @@ function handleWindowScroll() {
   }
 }
 
-function updateHeaderVisibility() {
-  if (!showPhoneHeader.value) return
-  const current = Math.max(0, window.scrollY || document.documentElement.scrollTop || 0)
-  const delta = current - lastHeaderScrollTop
+function applyHeaderScrollIntent(deltaY: number) {
+  if (!showPhoneHeader.value || Math.abs(deltaY) < 2) return
+  const current = currentScrollTop()
   if (current <= 12) {
+    resetHeaderVisibility()
+    return
+  }
+  if (deltaY < 0) {
     headerVisible.value = true
+    headerScrollUpDistance = 0
+    headerScrollDownDistance = 0
     lastHeaderScrollTop = current
     return
   }
-  if (Math.abs(delta) < HEADER_SCROLL_DELTA) return
-  if (delta < 0) {
+  if (current > HEADER_HIDE_AFTER) {
+    headerScrollDownDistance += deltaY
+    headerScrollUpDistance = 0
+    if (headerScrollDownDistance >= HEADER_HIDE_ACCUMULATE) {
+      headerVisible.value = false
+      headerScrollDownDistance = 0
+      lastHeaderScrollTop = current
+    }
+  }
+}
+
+function handleHeaderWheel(event: WheelEvent) {
+  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+  applyHeaderScrollIntent(event.deltaY)
+}
+
+function handleHeaderTouchStart(event: TouchEvent) {
+  lastTouchClientY = event.touches[0]?.clientY ?? null
+}
+
+function handleHeaderTouchMove(event: TouchEvent) {
+  const currentY = event.touches[0]?.clientY
+  if (currentY == null || lastTouchClientY == null) return
+  applyHeaderScrollIntent(lastTouchClientY - currentY)
+  lastTouchClientY = currentY
+}
+
+function handleHeaderTouchEnd() {
+  lastTouchClientY = null
+}
+
+function updateHeaderVisibility() {
+  if (!showPhoneHeader.value) return
+  const current = currentScrollTop()
+  const delta = current - lastHeaderScrollTop
+  if (current <= 12) {
     headerVisible.value = true
+    headerScrollUpDistance = 0
+    headerScrollDownDistance = 0
+    lastHeaderScrollTop = current
+    return
+  }
+  if (Math.abs(delta) < 1) return
+  if (delta < 0) {
+    headerScrollUpDistance += Math.abs(delta)
+    headerScrollDownDistance = 0
+    if (headerScrollUpDistance >= HEADER_SHOW_ACCUMULATE) {
+      headerVisible.value = true
+      headerScrollUpDistance = 0
+    }
   } else if (current > HEADER_HIDE_AFTER) {
-    headerVisible.value = false
+    headerScrollDownDistance += delta
+    headerScrollUpDistance = 0
+    if (headerScrollDownDistance >= Math.max(HEADER_SCROLL_DELTA, HEADER_HIDE_ACCUMULATE)) {
+      headerVisible.value = false
+      headerScrollDownDistance = 0
+    }
   }
   lastHeaderScrollTop = current
 }
 
 function resetHeaderVisibility() {
   headerVisible.value = true
-  lastHeaderScrollTop = Math.max(0, window.scrollY || document.documentElement.scrollTop || 0)
+  headerScrollUpDistance = 0
+  headerScrollDownDistance = 0
+  lastHeaderScrollTop = currentScrollTop()
 }
 
 function refreshActivityWindowIfExpired(force = false) {
@@ -2059,18 +2420,42 @@ async function openAssistant(prefill = '') {
   blogComposerVisible.value = false
   agentInput.value = ''
   agentInputPlaceholder.value = prefill || '问问附近场地、约球活动、装备推荐'
+  await loadAgentStatus()
+  await loadLatestAgentHistory()
   await nextTick()
   document.getElementById('agent-input')?.focus()
+}
+
+function scrollAgentChatToBottom(behavior: ScrollBehavior = 'smooth') {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior, block: 'end' })
+    })
+  })
+}
+
+function scrollAgentMessageIntoView(messageId: string, behavior: ScrollBehavior = 'smooth', block: ScrollLogicalPosition = 'end') {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById(`agent-message-${messageId}`)?.scrollIntoView({ behavior, block })
+    })
+  })
 }
 
 async function sendAgentMessage(text = agentInput.value) {
   const content = text.trim()
   if (!content || loading.value) return
   agentInput.value = ''
+  const userMessageId = `u-${Date.now()}`
   agentMessages.value = [
     ...agentMessages.value,
-    { id: `u-${Date.now()}`, role: 'user', content }
+    { id: userMessageId, role: 'user', content }
   ]
+  agentQuickReplies.value = []
+  saveGuestAgentChat()
+  agentThinking.value = true
+  await nextTick()
+  scrollAgentMessageIntoView(userMessageId)
   await wrap(async () => {
     const result = await api<AgentChatResponse>('/api/agent/chat', {
       method: 'POST',
@@ -2084,7 +2469,7 @@ async function sendAgentMessage(text = agentInput.value) {
       })
     })
     agentConversationId.value = result.conversationId
-    agentQuickReplies.value = result.quickReplies?.length ? result.quickReplies : agentQuickReplies.value
+    agentQuickReplies.value = agentNextQuickReplies(result.quickReplies, result.cards || [], result.answer)
     agentAiEnabled.value = result.aiEnabled
     agentMessages.value = [
       ...agentMessages.value,
@@ -2095,9 +2480,40 @@ async function sendAgentMessage(text = agentInput.value) {
         cards: result.cards || []
       }
     ]
+    saveGuestAgentChat()
+    agentThinking.value = false
     await nextTick()
-    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
   })
+  if (agentThinking.value) {
+    agentThinking.value = false
+  }
+  if (!agentQuickReplies.value.length) {
+    syncAgentQuickRepliesFromMessages()
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderAgentContent(content: string) {
+  return escapeHtml(stripInternalAgentFields(content))
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n{2,}/g, '<br><br>')
+    .replace(/\n/g, '<br>')
+}
+
+function stripInternalAgentFields(content: string) {
+  return content
+    .replace(/\s*[（(]?\s*placeRank\s*=\s*\d+\s*[）)]?\s*[：:，,]?\s*/gi, '')
+    .replace(/placeRank\s*=\s*\d+\s*[：:，,]?\s*/gi, '')
+    .replace(/\s*\(\s*placeRank\s*\)/gi, '')
 }
 
 function agentCardTags(card: AgentCard) {
@@ -2577,6 +2993,11 @@ function typeClass(productType: string) {
 onMounted(async () => {
   resetHeaderVisibility()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
+  window.addEventListener('wheel', handleHeaderWheel, { passive: true })
+  window.addEventListener('touchstart', handleHeaderTouchStart, { passive: true })
+  window.addEventListener('touchmove', handleHeaderTouchMove, { passive: true })
+  window.addEventListener('touchend', handleHeaderTouchEnd, { passive: true })
+  window.addEventListener('touchcancel', handleHeaderTouchEnd, { passive: true })
   refreshActivityWindowIfExpired(true)
   try {
     await loadSports()
@@ -2591,6 +3012,11 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleWindowScroll)
+  window.removeEventListener('wheel', handleHeaderWheel)
+  window.removeEventListener('touchstart', handleHeaderTouchStart)
+  window.removeEventListener('touchmove', handleHeaderTouchMove)
+  window.removeEventListener('touchend', handleHeaderTouchEnd)
+  window.removeEventListener('touchcancel', handleHeaderTouchEnd)
 })
 </script>
 
@@ -2694,6 +3120,27 @@ onBeforeUnmount(() => {
         </div>
         <span v-if="loggedIn" class="login-chip"><ShieldCheck :size="15" /> 已登录</span>
         <button v-else class="login-chip muted" @click="openAuthPage(activeTab)"><LogIn :size="15" /> 去登录</button>
+      </div>
+
+      <div v-if="activeTab === 'assistant'" class="agent-hero header-agent-hero">
+        <div class="agent-orb">
+          <Bot :size="18" />
+        </div>
+        <div class="agent-hero-copy">
+          <span>{{ agentAiEnabled ? 'DashScope 已接入' : '本地工具模式' }}</span>
+          <strong>约个球助手</strong>
+          <p>场地 · 约球 · 装备</p>
+        </div>
+        <div class="agent-hero-actions">
+          <button type="button" @click="openAgentHistory">
+            <MessageCircle :size="14" />
+            历史
+          </button>
+          <button type="button" class="primary" @click="startNewAgentConversation">
+            <PenLine :size="14" />
+            新对话
+          </button>
+        </div>
       </div>
 
       <div v-if="showDiscoveryHeader" class="search-bar">
@@ -3035,7 +3482,7 @@ onBeforeUnmount(() => {
           </template>
           <div v-if="loadingMore" class="load-more-state">正在加载更多场所</div>
           <div v-else-if="places.length && !hasMorePlaces" class="load-more-state muted-state">
-            {{ nextPlaceRadius() ? '继续上滑，将扩大附近范围' : '已经到底了' }}
+            已经到底了
           </div>
         </section>
         </template>
@@ -3277,32 +3724,38 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else-if="activeTab === 'assistant'" class="page-stack agent-page">
-        <div class="agent-hero">
+        <div v-if="false" class="agent-hero" :class="{ hidden: !headerVisible }">
           <div class="agent-orb">
             <Bot :size="18" />
           </div>
-          <div>
+          <div class="agent-hero-copy">
             <span>{{ agentAiEnabled ? 'DashScope 已接入' : '本地工具模式' }}</span>
             <strong>约个球助手</strong>
             <p>场地 · 约球 · 装备</p>
           </div>
-        </div>
-
-        <div class="agent-quick-row">
-          <button v-for="reply in agentQuickReplies" :key="reply" type="button" @click="sendAgentMessage(reply)">
-            {{ reply }}
-          </button>
+          <div class="agent-hero-actions">
+            <button type="button" @click="openAgentHistory">
+              <MessageCircle :size="14" />
+              历史
+            </button>
+            <button type="button" class="primary" @click="startNewAgentConversation">
+              <PenLine :size="14" />
+              新对话
+            </button>
+          </div>
         </div>
 
         <section class="agent-chat-panel" aria-label="AI 助手聊天记录">
           <article
             v-for="item in agentMessages"
+            :id="`agent-message-${item.id}`"
             :key="item.id"
             class="agent-message"
             :class="item.role"
           >
             <div class="agent-bubble">
-              <p>{{ item.content }}</p>
+              <p v-if="item.role === 'assistant'" v-html="renderAgentContent(item.content)"></p>
+              <p v-else>{{ item.content }}</p>
             </div>
             <template v-if="item.cards?.length">
               <section v-if="agentPlaceBundles(item.cards).length" class="agent-result-section">
@@ -3370,6 +3823,24 @@ onBeforeUnmount(() => {
               </section>
             </template>
           </article>
+          <div v-if="visibleAgentQuickReplies.length" class="agent-quick-list" :class="{ followup: hasAgentConversation }">
+            <div class="agent-quick-title">
+              <span>{{ hasAgentConversation ? '下一步可以问' : '试试这样问' }}</span>
+            </div>
+            <div class="agent-quick-stack">
+              <button v-for="reply in visibleAgentQuickReplies" :key="reply" type="button" @click="sendAgentMessage(reply)">
+                <span>{{ reply }}</span>
+              </button>
+            </div>
+          </div>
+          <article v-if="agentThinking" class="agent-message assistant agent-thinking">
+            <div class="agent-bubble">
+              <span>AI 正在思考</span>
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+          </article>
           <div id="agent-chat-bottom"></div>
         </section>
 
@@ -3384,6 +3855,47 @@ onBeforeUnmount(() => {
             <Send :size="17" />
           </button>
         </div>
+
+        <div v-if="agentHistoryVisible" class="agent-history-backdrop" @click="closeAgentHistory"></div>
+        <section v-if="agentHistoryVisible" class="agent-history-sheet" aria-label="AI 助手聊天历史">
+          <div class="agent-history-head">
+            <div>
+              <span>聊天记录</span>
+              <strong>切换历史会话</strong>
+            </div>
+            <button type="button" @click="agentHistoryVisible = false" aria-label="关闭聊天记录">
+              <X :size="17" />
+            </button>
+          </div>
+          <div v-if="loadingAgentHistory" class="agent-history-empty">正在加载聊天记录</div>
+          <div v-else-if="!agentConversations.length" class="agent-history-empty">暂无历史会话</div>
+          <div v-else class="agent-history-list">
+            <article
+              v-for="conversation in agentConversations"
+              :key="conversation.id"
+              class="agent-history-item"
+              :class="{ active: conversation.id === agentConversationId }"
+            >
+              <button class="agent-history-main" type="button" @click="switchAgentConversation(conversation)">
+                <strong>{{ agentConversationTitle(conversation) }}</strong>
+                <span>{{ agentConversationTime(conversation) }}</span>
+              </button>
+              <button class="agent-history-delete" type="button" @click="deleteAgentConversation(conversation)" aria-label="删除会话">
+                <Trash2 :size="15" />
+              </button>
+            </article>
+          </div>
+          <div v-if="deletingAgentConversation" class="agent-history-confirm">
+            <div>
+              <strong>确认删除这条会话？</strong>
+              <span>{{ agentConversationTitle(deletingAgentConversation) }}</span>
+            </div>
+            <div>
+              <button type="button" @click="cancelDeleteAgentConversation">取消</button>
+              <button class="danger" type="button" @click="confirmDeleteAgentConversation" :disabled="loadingAgentHistory">删除</button>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section v-else-if="activeTab === 'profile'" class="page-stack">
@@ -3698,10 +4210,10 @@ onBeforeUnmount(() => {
     </main>
 
     <button
-      v-if="activeTab === 'home' && !selectedPlace"
+      v-if="showAgentFab"
       class="agent-fab"
       type="button"
-      @click="openAssistant('帮我看看附近有什么适合的场地或约球活动')"
+      @click="openAssistant(assistantFabPrompt)"
     >
       <Bot :size="18" />
       <span>AI 助手</span>

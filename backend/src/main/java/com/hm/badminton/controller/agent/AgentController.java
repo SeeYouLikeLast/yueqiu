@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/agent")
@@ -29,6 +30,11 @@ public class AgentController {
     public AgentController(IAgentService agentService, UserContext userContext) {
         this.agentService = agentService;
         this.userContext = userContext;
+    }
+
+    @GetMapping("/status")
+    public ApiResponse<Map<String, Boolean>> status() {
+        return ApiResponse.ok(Map.of("aiEnabled", agentService.aiEnabled()));
     }
 
     @PostMapping("/chat")

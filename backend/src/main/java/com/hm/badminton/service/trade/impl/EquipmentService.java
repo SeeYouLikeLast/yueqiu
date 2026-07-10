@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 @Service
@@ -61,14 +62,39 @@ public class EquipmentService implements IEquipmentService {
         }
         String text = keyword == null || keyword.isBlank() ? null : keyword.trim();
         Long total = equipmentMapper.countEquipments(normalizedSport, categoryId, text);
-        return new PageResult<>(
-                equipmentMapper.selectEquipments(normalizedSport, categoryId, text, safeSize,
-                        (safePage - 1) * safeSize),
-                total == null ? 0 : total, safePage, safeSize);
+        List<Equipment> records = equipmentMapper.selectEquipments(normalizedSport, categoryId, text, safeSize,
+                (safePage - 1) * safeSize);
+        long safeTotal = total == null ? 0 : total;
+        if (safePage == 1 && text == null && records.size() < safeSize) {
+            records = fillEquipmentPage(records, normalizedSport, categoryId, safeSize);
+            safeTotal = Math.max(safeTotal, records.size());
+        }
+        return new PageResult<>(records, safeTotal, safePage, safeSize);
     }
 
     private boolean isAllSport(String sportCode) {
         return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
+    }
+
+    private List<Equipment> fillEquipmentPage(List<Equipment> records,
+                                              String sportCode,
+                                              Long categoryId,
+                                              int size) {
+        LinkedHashMap<Long, Equipment> merged = new LinkedHashMap<>();
+        appendEquipment(merged, records);
+        if (categoryId != null && merged.size() < size) {
+            appendEquipment(merged, equipmentMapper.selectEquipments(sportCode, null, null, size * 2, 0));
+        }
+        if (sportCode != null && merged.size() < size) {
+            appendEquipment(merged, equipmentMapper.selectEquipments(null, null, null, size * 2, 0));
+        }
+        return merged.values().stream().limit(size).toList();
+    }
+
+    private void appendEquipment(LinkedHashMap<Long, Equipment> merged, List<Equipment> records) {
+        for (Equipment item : records) {
+            merged.putIfAbsent(item.getId(), item);
+        }
     }
 
     public Equipment detail(Long id) {

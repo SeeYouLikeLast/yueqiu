@@ -1,8 +1,11 @@
 package com.hm.badminton.service.catalog.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.hm.badminton.common.BusinessException;
+import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.entity.SportType;
 import com.hm.badminton.service.catalog.ISportCatalogService;
+import com.hm.badminton.utils.CacheClient;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,8 +19,10 @@ public class SportCatalogService implements ISportCatalogService {
 
     private final Map<String, SportType> sports = new LinkedHashMap<>();
     private final Map<String, String> aliases = new LinkedHashMap<>();
+    private final CacheClient cacheClient;
 
-    public SportCatalogService() {
+    public SportCatalogService(CacheClient cacheClient) {
+        this.cacheClient = cacheClient;
         register(new SportType("badminton", "羽毛球", List.of("羽毛球馆", "羽毛球场", "羽毛球")));
         register(new SportType("table_tennis", "乒乓球", List.of("乒乓球馆", "乒乓球室", "乒乓球")));
         register(new SportType("football", "足球", List.of("足球场", "足球俱乐部", "足球")));
@@ -32,7 +37,12 @@ public class SportCatalogService implements ISportCatalogService {
     }
 
     public List<SportType> list() {
-        return new ArrayList<>(sports.values());
+        return cacheClient.querySimple(
+                RedisConstants.SPORT_LIST_KEY,
+                new TypeReference<>() {
+                },
+                this::snapshot,
+                RedisConstants.SPORT_LIST_TTL);
     }
 
     public SportType require(String code) {
@@ -54,6 +64,10 @@ public class SportCatalogService implements ISportCatalogService {
 
     private void register(SportType sportType) {
         sports.put(sportType.getCode(), sportType);
+    }
+
+    private List<SportType> snapshot() {
+        return new ArrayList<>(sports.values());
     }
 
     private void alias(String alias, String code) {

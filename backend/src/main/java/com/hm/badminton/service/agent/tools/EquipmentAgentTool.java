@@ -50,10 +50,140 @@ public class EquipmentAgentTool {
             meta.put("id", item.getId());
             meta.put("sportCode", item.getSportCode());
             meta.put("categoryId", item.getCategoryId());
+            meta.put("available", item.getStock() != null && item.getStock() > 0);
+            meta.put("stock", item.getStock());
+            meta.put("rating", item.getScore());
+            meta.put("sold", item.getSold());
+            meta.put("suitableLevel", suitableLevel(item));
+            meta.put("sceneTags", sceneTags(item));
+            meta.put("pros", pros(item, maxPrice));
+            meta.put("cons", cons(item));
+            meta.put("recommendScore", equipmentScore(item, maxPrice));
+            meta.put("recommendReasons", pros(item, maxPrice).stream().limit(3).toList());
             card.setMeta(meta);
             cards.add(card);
         }
         return cards;
+    }
+
+    private String suitableLevel(Equipment item) {
+        if (item.getPrice() == null) {
+            return "通用";
+        }
+        if (item.getPrice().compareTo(BigDecimal.valueOf(150)) <= 0) {
+            return "初学者";
+        }
+        if (item.getPrice().compareTo(BigDecimal.valueOf(500)) <= 0) {
+            return "进阶";
+        }
+        return "高强度/进阶";
+    }
+
+    private List<String> sceneTags(Equipment item) {
+        List<String> tags = new ArrayList<>();
+        tags.add(nullToText(item.getBrand()));
+        tags.add(nullToText(item.getCategoryName()));
+        String text = (item.getName() + " " + item.getDescription()).toLowerCase();
+        if (text.contains("轻") || text.contains("light")) {
+            tags.add("轻量");
+        }
+        if (text.contains("稳") || text.contains("stable")) {
+            tags.add("稳定");
+        }
+        if (text.contains("控") || text.contains("control")) {
+            tags.add("控制");
+        }
+        return tags.stream().distinct().limit(6).toList();
+    }
+
+    private List<String> pros(Equipment item, Integer maxPrice) {
+        List<String> pros = new ArrayList<>();
+        if (item.getPrice() != null && (maxPrice == null || item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) <= 0)) {
+            pros.add("价格符合预算");
+        }
+        if (item.getScore() != null && item.getScore().compareTo(BigDecimal.valueOf(4.5)) >= 0) {
+            pros.add("评分较高");
+        }
+        if (item.getSold() != null && item.getSold() >= 100) {
+            pros.add("销量反馈多");
+        }
+        if (item.getStock() != null && item.getStock() > 10) {
+            pros.add("库存充足");
+        }
+        if (pros.isEmpty()) {
+            pros.add("可作为当前运动的备选装备");
+        }
+        return pros;
+    }
+
+    private List<String> cons(Equipment item) {
+        List<String> cons = new ArrayList<>();
+        if (item.getStock() != null && item.getStock() <= 5) {
+            cons.add("库存偏少");
+        }
+        if (item.getPrice() != null && item.getPrice().compareTo(BigDecimal.valueOf(500)) > 0) {
+            cons.add("价格偏高，更适合有明确需求的用户");
+        }
+        if (item.getScore() != null && item.getScore().compareTo(BigDecimal.valueOf(4.2)) < 0) {
+            cons.add("评分一般，建议对比后再买");
+        }
+        return cons;
+    }
+
+    private int equipmentScore(Equipment item, Integer maxPrice) {
+        int score = 45;
+        if (item.getPrice() != null) {
+            if (maxPrice != null && item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) <= 0) {
+                score += 25;
+            } else if (item.getPrice().compareTo(BigDecimal.valueOf(150)) <= 0) {
+                score += 18;
+            } else if (item.getPrice().compareTo(BigDecimal.valueOf(500)) <= 0) {
+                score += 12;
+            }
+        }
+        if (item.getScore() != null) {
+            score += Math.max(0, item.getScore().subtract(BigDecimal.valueOf(4)).multiply(BigDecimal.TEN).intValue());
+        }
+        if (item.getSold() != null) {
+            score += Math.min(10, item.getSold() / 50);
+        }
+        if (item.getStock() != null && item.getStock() > 0) {
+            score += 10;
+        }
+        return Math.min(100, score);
+    }
+
+    private List<String> seckillPros(SeckillActivity activity) {
+        List<String> pros = new ArrayList<>();
+        if (activity.getOriginalPrice() != null && activity.getSeckillPrice() != null
+                && activity.getOriginalPrice().compareTo(activity.getSeckillPrice()) > 0) {
+            pros.add("限时价低于原价");
+        }
+        if (activity.getStock() != null && activity.getStock() > 0) {
+            pros.add("当前可抢购");
+        }
+        return pros;
+    }
+
+    private List<String> seckillCons(SeckillActivity activity) {
+        List<String> cons = new ArrayList<>();
+        if (activity.getStock() != null && activity.getStock() <= 5) {
+            cons.add("库存紧张");
+        }
+        cons.add("需要在活动时间内完成抢购");
+        return cons;
+    }
+
+    private int seckillScore(SeckillActivity activity) {
+        int score = 55;
+        if (activity.getOriginalPrice() != null && activity.getSeckillPrice() != null
+                && activity.getOriginalPrice().compareTo(activity.getSeckillPrice()) > 0) {
+            score += 20;
+        }
+        if (activity.getStock() != null) {
+            score += activity.getStock() > 10 ? 15 : activity.getStock() > 0 ? 8 : 0;
+        }
+        return Math.min(100, score);
     }
 
     @Tool(name = "searchSeckillEquipment", description = "Search available seckill equipment products.")
@@ -73,6 +203,14 @@ public class EquipmentAgentTool {
             meta.put("id", activity.getId());
             meta.put("productId", activity.getProductId());
             meta.put("sportCode", activity.getSportCode());
+            meta.put("available", activity.getStock() != null && activity.getStock() > 0);
+            meta.put("stock", activity.getStock());
+            meta.put("suitableLevel", "限时抢购");
+            meta.put("sceneTags", List.of(nullToText(activity.getCategoryName()), "限时价"));
+            meta.put("pros", seckillPros(activity));
+            meta.put("cons", seckillCons(activity));
+            meta.put("recommendScore", seckillScore(activity));
+            meta.put("recommendReasons", seckillPros(activity).stream().limit(3).toList());
             card.setMeta(meta);
             cards.add(card);
         }
@@ -85,5 +223,9 @@ public class EquipmentAgentTool {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String nullToText(String value) {
+        return value == null || value.isBlank() ? "未分类" : value;
     }
 }

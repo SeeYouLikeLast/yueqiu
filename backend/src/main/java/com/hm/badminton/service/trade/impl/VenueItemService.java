@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -68,7 +69,12 @@ public class VenueItemService implements IVenueItemService {
                 .stream()
                 .map(this::toItem)
                 .toList();
-        return new PageResult<>(records, total == null ? 0 : total, safePage, safeSize);
+        long safeTotal = total == null ? 0 : total;
+        if (safePage == 1 && text == null && records.size() < safeSize) {
+            records = fillSaleItemPage(records, normalizedSport, type, safeSize);
+            safeTotal = Math.max(safeTotal, records.size());
+        }
+        return new PageResult<>(records, safeTotal, safePage, safeSize);
     }
 
     @Override
@@ -181,6 +187,33 @@ public class VenueItemService implements IVenueItemService {
 
     private boolean isAllSport(String sportCode) {
         return sportCode == null || sportCode.isBlank() || "all".equalsIgnoreCase(sportCode);
+    }
+
+    private List<VenueItem> fillSaleItemPage(List<VenueItem> records,
+                                             String sportCode,
+                                             String productType,
+                                             int size) {
+        LinkedHashMap<Long, VenueItem> merged = new LinkedHashMap<>();
+        appendSaleItems(merged, records);
+        if (productType != null && merged.size() < size) {
+            appendSaleItems(merged, venueItemMapper.selectItems(sportCode, null, null, null, null, null, size * 2, 0)
+                    .stream()
+                    .map(this::toItem)
+                    .toList());
+        }
+        if (sportCode != null && merged.size() < size) {
+            appendSaleItems(merged, venueItemMapper.selectItems(null, null, null, null, null, null, size * 2, 0)
+                    .stream()
+                    .map(this::toItem)
+                    .toList());
+        }
+        return merged.values().stream().limit(size).toList();
+    }
+
+    private void appendSaleItems(LinkedHashMap<Long, VenueItem> merged, List<VenueItem> records) {
+        for (VenueItem item : records) {
+            merged.putIfAbsent(item.getId(), item);
+        }
     }
 
     private VenueItemMapper.VenueItemSale loadSale(Long productId, Long inventoryId) {

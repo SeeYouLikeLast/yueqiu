@@ -26,6 +26,7 @@ public final class RedisConstants {
     public static final String AMAP_REGEOCODE_KEY = "amap:regeo:";
     public static final String SOCIAL_PLAYERS_KEY = "social:players:";
     public static final String SOCIAL_ACTIVITIES_KEY = "social:activities:";
+    public static final String SPORT_LIST_KEY = "catalog:sports";
     public static final String CACHE_REBUILD_LOCK_KEY = "lock:cache:rebuild:";
     public static final String FOLLOW_KEY = "follows:";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
@@ -40,6 +41,7 @@ public final class RedisConstants {
     public static final Duration CACHE_DETAIL_TTL = Duration.ofMinutes(30);
     public static final Duration AMAP_REGEOCODE_TTL = Duration.ofMinutes(30);
     public static final Duration SOCIAL_LIST_TTL = Duration.ofMinutes(1);
+    public static final Duration SPORT_LIST_TTL = Duration.ofHours(24);
     public static final Duration AGENT_MEMORY_TTL = Duration.ofMinutes(60);
     public static final Duration AGENT_RATE_TTL = Duration.ofMinutes(1);
     public static final Duration CACHE_LOGICAL_TTL = Duration.ofMinutes(30);
