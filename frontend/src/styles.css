@@ -2380,7 +2380,6 @@ p {
 }
 
 .agent-page {
-  min-height: calc(100dvh - 210px);
   padding-bottom: 0;
 }
 
@@ -2572,12 +2571,88 @@ p {
   white-space: nowrap;
 }
 
+.agent-sport-picker {
+  display: grid;
+  gap: 10px;
+  width: min(390px, 94%);
+  padding: 12px;
+  border: 1px solid #cfe1d5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(20, 62, 45, 0.08);
+}
+
+.agent-sport-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-sport-picker-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.agent-sport-picker-head span {
+  color: #16281f;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.agent-sport-picker-head small,
+.agent-sport-picker p {
+  color: #758078;
+  font-size: 12px;
+}
+
+.agent-sport-picker-head > button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: #f4f7f3;
+}
+
+.agent-sport-picker p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.agent-sport-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.agent-sport-options button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 5px;
+  border-color: #dfe8dc;
+  background: #f8faf7;
+  color: #425047;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.agent-sport-options button.active {
+  border-color: #15845f;
+  background: #15845f;
+  color: #ffffff;
+}
+
+.agent-sport-confirm {
+  width: 100%;
+  min-height: 40px;
+}
+
 .agent-chat-panel {
   display: grid;
-  align-content: end;
   gap: 12px;
-  min-height: calc(100dvh - 260px);
-  padding-bottom: 66px;
+  align-content: start;
+  padding-bottom: 72px;
 }
 
 .agent-message {

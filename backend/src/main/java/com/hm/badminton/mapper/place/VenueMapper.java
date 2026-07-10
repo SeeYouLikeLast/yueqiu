@@ -14,6 +14,19 @@ import java.util.List;
 public interface VenueMapper {
 
     @Select("""
+            select id
+            from place
+            where status = 1
+              and replace(city, '市', '') = replace(#{city}, '市', '')
+              and sport_code = #{sportCode}
+            order by id
+            limit 1 offset #{offset}
+            """)
+    Long selectPlaceIdBySlot(@Param("city") String city,
+                             @Param("sportCode") String sportCode,
+                             @Param("offset") int offset);
+
+    @Select("""
             select r.id, r.venue_id, r.user_id, u.nickname, u.avatar, r.rating, r.content,
                    r.image_urls, r.likes, r.created_at
             from venue_reviews r

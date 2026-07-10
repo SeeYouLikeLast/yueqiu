@@ -368,7 +368,7 @@ const PLACE_PAGE_SIZE = 20
 const PRODUCT_PAGE_SIZE = 12
 const SOCIAL_PAGE_SIZE = 12
 const BLOG_PAGE_SIZE = 10
-const VENUE_TEMPLATE_COUNT = 8
+const VENUE_TEMPLATE_COUNT = 2
 const FALLBACK_IMAGE = '/api/files/31/download'
 const FALLBACK_AVATAR = '/api/files/1/download'
 const HEADER_SCROLL_DELTA = 8
@@ -379,12 +379,6 @@ const AGENT_WELCOME_MESSAGE = '你好，我是约个球助手。可以帮你找�
 const AGENT_LOCAL_STORAGE_KEY = 'hm-badminton-agent-chat'
 const INITIAL_AGENT_QUICK_REPLIES = ['今晚附近能打球吗', '帮我找能加入的局', '推荐新手装备', '50 元以内的场地']
 const FALLBACK_AGENT_FOLLOW_UPS = ['再给我 3 个选择', '帮我按距离筛选', '帮我按预算筛选', '这些哪个更适合新手']
-const SALE_RANKS_BY_SPORT: Record<string, number[]> = {
-  badminton: [1, 2, 3, 4, 7],
-  football: [5],
-  basketball: [6, 8]
-}
-
 const activeTab = ref<Tab>('home')
 const homeReturnTab = ref<Tab | null>(null)
 const selectedSport = ref('')
@@ -433,6 +427,9 @@ const agentInputPlaceholder = ref('问问附近场地、约球活动、装备推
 const agentConversationId = ref<number | null>(null)
 const agentConversations = ref<AgentConversation[]>([])
 const agentQuickReplies = ref<string[]>(initialAgentQuickReplies())
+const agentSportPickerVisible = ref(false)
+const agentPendingQuickReply = ref('')
+const agentSelectedSportCodes = ref<string[]>([])
 const agentAiEnabled = ref(false)
 const agentThinking = ref(false)
 const agentHistoryLoaded = ref(false)
@@ -505,7 +502,7 @@ const assistantFabPrompt = computed(() => {
   return '帮我看看附近有什么适合的场地或约球活动'
 })
 const hasAgentConversation = computed(() => agentMessages.value.some((item) => item.role === 'user'))
-const visibleAgentQuickReplies = computed(() => agentThinking.value ? [] : agentQuickReplies.value.slice(0, 4))
+const visibleAgentQuickReplies = computed(() => agentThinking.value || agentSportPickerVisible.value ? [] : agentQuickReplies.value.slice(0, 4))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
 const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
 const hasMoreEquipmentItems = computed(() => products.value.length < productsTotal.value)
@@ -848,6 +845,9 @@ function resetAgentChat() {
   agentConversationId.value = null
   agentConversations.value = []
   agentQuickReplies.value = initialAgentQuickReplies()
+  agentSportPickerVisible.value = false
+  agentPendingQuickReply.value = ''
+  agentSelectedSportCodes.value = []
   agentThinking.value = false
   agentHistoryLoaded.value = false
   agentHistoryVisible.value = false
@@ -987,6 +987,9 @@ function startNewAgentConversation() {
   agentConversationId.value = null
   agentMessages.value = defaultAgentMessages()
   agentQuickReplies.value = initialAgentQuickReplies()
+  agentSportPickerVisible.value = false
+  agentPendingQuickReply.value = ''
+  agentSelectedSportCodes.value = []
   agentThinking.value = false
   agentInput.value = ''
   if (!loggedIn.value) {
@@ -1170,16 +1173,6 @@ function placeIndex(place: Place) {
 }
 
 function placeRankFor(place: Place) {
-  const index = Math.max(0, placeIndex(place))
-  const sportCode = place.sportCode || selectedSport.value
-  const sportRanks = SALE_RANKS_BY_SPORT[sportCode]
-  if (sportRanks?.length) {
-    return sportRanks[index % sportRanks.length]
-  }
-  return (index % VENUE_TEMPLATE_COUNT) + 1
-}
-
-function reviewRankFor(place: Place) {
   const index = Math.max(0, placeIndex(place))
   return (index % VENUE_TEMPLATE_COUNT) + 1
 }
@@ -2442,9 +2435,49 @@ function scrollAgentMessageIntoView(messageId: string, behavior: ScrollBehavior 
   })
 }
 
-async function sendAgentMessage(text = agentInput.value) {
+function openAgentSportPicker(reply: string) {
+  agentPendingQuickReply.value = reply
+  agentSelectedSportCodes.value = selectedSport.value ? [selectedSport.value] : []
+  agentSportPickerVisible.value = true
+  void nextTick(() => {
+    document.getElementById('agent-sport-picker')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+}
+
+function toggleAgentSport(code: string) {
+  if (!code) {
+    agentSelectedSportCodes.value = []
+    return
+  }
+  agentSelectedSportCodes.value = agentSelectedSportCodes.value.includes(code)
+    ? agentSelectedSportCodes.value.filter((item) => item !== code)
+    : [...agentSelectedSportCodes.value, code]
+}
+
+function closeAgentSportPicker() {
+  agentSportPickerVisible.value = false
+  agentPendingQuickReply.value = ''
+  agentSelectedSportCodes.value = []
+}
+
+function confirmAgentQuickReply() {
+  const prompt = agentPendingQuickReply.value.trim()
+  if (!prompt) return
+  const sportCodes = [...agentSelectedSportCodes.value]
+  const sportNames = sportCodes
+    .map((code) => sports.value.find((sport) => sport.code === code)?.name)
+    .filter(Boolean)
+  const content = sportNames.length ? `${prompt}（${sportNames.join('、')}）` : `${prompt}（不限球类）`
+  closeAgentSportPicker()
+  void sendAgentMessage(content, sportCodes)
+}
+
+async function sendAgentMessage(text = agentInput.value, requestedSportCodes: string[] = []) {
   const content = text.trim()
   if (!content || loading.value) return
+  const effectiveSportCodes = requestedSportCodes.length
+    ? requestedSportCodes
+    : selectedSport.value ? [selectedSport.value] : []
   agentInput.value = ''
   const userMessageId = `u-${Date.now()}`
   agentMessages.value = [
@@ -2462,7 +2495,8 @@ async function sendAgentMessage(text = agentInput.value) {
       body: JSON.stringify({
         conversationId: agentConversationId.value,
         message: content,
-        sportCode: selectedSport.value,
+        sportCode: effectiveSportCodes.length === 1 ? effectiveSportCodes[0] : '',
+        sportCodes: effectiveSportCodes,
         city: placeQuery.city,
         lng: placeQuery.lng,
         lat: placeQuery.lat
@@ -2721,7 +2755,13 @@ async function switchPlaceDetailTab(tab: 'deals' | 'reviews') {
 }
 
 async function loadVenueReviewsForPlace(place: Place) {
-  venueReviews.value = await api<VenueReview[]>(`/api/venues/${reviewRankFor(place)}/reviews?size=5`)
+  const query = new URLSearchParams({
+    city: place.city || placeQuery.city,
+    sport: place.sportCode || selectedSport.value,
+    placeRank: String(placeRankFor(place)),
+    size: '5'
+  })
+  venueReviews.value = await api<VenueReview[]>(`/api/venues/reviews?${query.toString()}`)
 }
 
 async function buyVenueItem(product: VenueItem) {
@@ -3828,11 +3868,42 @@ onBeforeUnmount(() => {
               <span>{{ hasAgentConversation ? '下一步可以问' : '试试这样问' }}</span>
             </div>
             <div class="agent-quick-stack">
-              <button v-for="reply in visibleAgentQuickReplies" :key="reply" type="button" @click="sendAgentMessage(reply)">
+              <button v-for="reply in visibleAgentQuickReplies" :key="reply" type="button" @click="openAgentSportPicker(reply)">
                 <span>{{ reply }}</span>
               </button>
             </div>
           </div>
+          <section v-if="agentSportPickerVisible" id="agent-sport-picker" class="agent-sport-picker" aria-label="选择运动类型">
+            <div class="agent-sport-picker-head">
+              <div>
+                <span>按哪些球类查找</span>
+                <small>可多选</small>
+              </div>
+              <button type="button" aria-label="取消选择" @click="closeAgentSportPicker">
+                <X :size="16" />
+              </button>
+            </div>
+            <p>{{ agentPendingQuickReply }}</p>
+            <div class="agent-sport-options">
+              <button
+                type="button"
+                :class="{ active: !agentSelectedSportCodes.length }"
+                :aria-pressed="!agentSelectedSportCodes.length"
+                @click="toggleAgentSport('')"
+              >不限</button>
+              <button
+                v-for="sport in sports"
+                :key="sport.code"
+                type="button"
+                :class="{ active: agentSelectedSportCodes.includes(sport.code) }"
+                :aria-pressed="agentSelectedSportCodes.includes(sport.code)"
+                @click="toggleAgentSport(sport.code)"
+              >{{ sport.name }}</button>
+            </div>
+            <button class="primary agent-sport-confirm" type="button" @click="confirmAgentQuickReply">
+              按所选球类查询
+            </button>
+          </section>
           <article v-if="agentThinking" class="agent-message assistant agent-thinking">
             <div class="agent-bubble">
               <span>AI 正在思考</span>

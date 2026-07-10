@@ -28,6 +28,15 @@ public class VenueController {
         return ApiResponse.ok(venueService.reviews(id, page, size));
     }
 
+    @GetMapping("/reviews")
+    public ApiResponse<List<VenueReview>> reviewsByPlaceSlot(@RequestParam String city,
+                                                             @RequestParam String sport,
+                                                             @RequestParam(defaultValue = "1") int placeRank,
+                                                             @RequestParam(defaultValue = "1") int page,
+                                                             @RequestParam(defaultValue = "10") int size) {
+        return ApiResponse.ok(venueService.reviewsByPlaceSlot(city, sport, placeRank, page, size));
+    }
+
 }
 
 

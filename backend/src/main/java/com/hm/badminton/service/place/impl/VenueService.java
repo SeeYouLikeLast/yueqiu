@@ -22,4 +22,14 @@ public class VenueService implements IVenueService {
         int safeSize = Math.min(Math.max(size, 1), 50);
         return venueMapper.selectReviews(venueId, safeSize, (safePage - 1) * safeSize);
     }
+
+    @Override
+    public List<VenueReview> reviewsByPlaceSlot(String city, String sportCode, int placeRank, int page, int size) {
+        int safeRank = Math.max(placeRank, 1);
+        Long venueId = venueMapper.selectPlaceIdBySlot(city.trim(), sportCode.trim(), safeRank - 1);
+        if (venueId == null) {
+            return List.of();
+        }
+        return reviews(venueId, page, size);
+    }
 }

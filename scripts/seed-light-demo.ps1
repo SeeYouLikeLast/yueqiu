@@ -21,14 +21,18 @@ function Money([double]$Value) {
     return $Value.ToString("0.00", $Invariant)
 }
 
-function Add-Insert([System.Text.StringBuilder]$SqlBuilder, [string]$Table, [string[]]$Columns, [object[]]$Rows) {
+function Add-Section([System.Text.StringBuilder]$Builder, [string]$Title) {
+    [void]$Builder.AppendLine("-- $Title")
+}
+
+function Add-Insert([System.Text.StringBuilder]$Builder, [string]$Table, [string[]]$Columns, [object[]]$Rows) {
     if (-not $Rows -or $Rows.Count -eq 0) { return }
-    [void]$SqlBuilder.AppendLine("insert into $Table($($Columns -join ', ')) values")
+    [void]$Builder.AppendLine("insert into $Table($($Columns -join ', ')) values")
     for ($i = 0; $i -lt $Rows.Count; $i++) {
         $suffix = if ($i -eq $Rows.Count - 1) { ";" } else { "," }
-        [void]$SqlBuilder.AppendLine("(" + ($Rows[$i] -join ", ") + ")$suffix")
+        [void]$Builder.AppendLine("(" + ($Rows[$i] -join ", ") + ")$suffix")
     }
-    [void]$SqlBuilder.AppendLine()
+    [void]$Builder.AppendLine()
 }
 
 function Set-Utf8NoBomContent([string]$Path, [string]$Value) {
@@ -87,26 +91,34 @@ function New-DemoImage([string]$Path, [int]$Width, [int]$Height, [string]$Title,
     $bitmap.Dispose()
 }
 
+$SelectedFileIds = @(
+    (1..24) +
+    (31..42) +
+    (56..73) +
+    (81..98) +
+    (111..118)
+)
+
 function Build-DemoAssets {
     if ($SkipAssets) { return }
     $colors = @(
         @("#d9f99d", "#34d399"), @("#bfdbfe", "#38bdf8"), @("#fde68a", "#fb923c"),
         @("#fecdd3", "#f472b6"), @("#ddd6fe", "#8b5cf6"), @("#bbf7d0", "#14b8a6")
     )
-    for ($id = 1; $id -le 120; $id++) {
+    foreach ($id in $SelectedFileIds) {
         $objectName = FileObjectName $id
         $path = Join-Path $AssetsRoot $objectName
         $pair = $colors[($id - 1) % $colors.Count]
         if ($id -le 30) {
             New-DemoImage $path 320 320 "球友 $($id.ToString('00'))" "约个球" $pair[0] $pair[1]
         } elseif ($id -le 55) {
-            New-DemoImage $path 900 600 "运动场馆" "本地 MinIO 封面 $($id - 30)" $pair[0] $pair[1]
+            New-DemoImage $path 900 600 "运动场馆" "场馆服务与团购" $pair[0] $pair[1]
         } elseif ($id -le 80) {
-            New-DemoImage $path 720 720 "装备好物" "本地 MinIO 商品图 $($id - 55)" $pair[0] $pair[1]
+            New-DemoImage $path 720 720 "装备好物" "训练与实战装备" $pair[0] $pair[1]
         } elseif ($id -le 110) {
             New-DemoImage $path 900 900 "球友动态" "训练、装备、场馆体验" $pair[0] $pair[1]
         } else {
-            New-DemoImage $path 900 600 "真实评价" "场地、服务、氛围" $pair[0] $pair[1]
+            New-DemoImage $path 900 600 "场馆评价" "场地、服务、氛围" $pair[0] $pair[1]
         }
     }
 }
@@ -156,245 +168,20 @@ function Upload-DemoAssets {
 }
 
 $cities = @(
-    @{ Name = "西安"; Count = 60; Area = @("雁塔区", "长安区", "未央区", "碑林区"); Lng = 108.9402; Lat = 34.3416 },
-    @{ Name = "上海"; Count = 50; Area = @("浦东新区", "徐汇区", "静安区", "闵行区"); Lng = 121.4737; Lat = 31.2304 },
-    @{ Name = "北京"; Count = 50; Area = @("朝阳区", "海淀区", "丰台区", "西城区"); Lng = 116.4074; Lat = 39.9042 },
-    @{ Name = "成都"; Count = 40; Area = @("武侯区", "锦江区", "高新区", "成华区"); Lng = 104.0665; Lat = 30.5723 }
+    @{ Name = "西安"; Areas = @("雁塔区", "长安区", "未央区"); Lng = 108.9402; Lat = 34.3416 },
+    @{ Name = "上海"; Areas = @("浦东新区", "徐汇区", "闵行区"); Lng = 121.4737; Lat = 31.2304 },
+    @{ Name = "北京"; Areas = @("朝阳区", "海淀区", "丰台区"); Lng = 116.4074; Lat = 39.9042 },
+    @{ Name = "成都"; Areas = @("武侯区", "锦江区", "高新区"); Lng = 104.0665; Lat = 30.5723 }
 )
 
 $sports = @(
-    @{ Code = "badminton"; Name = "羽毛球"; Count = 75 },
-    @{ Code = "table_tennis"; Name = "乒乓球"; Count = 40 },
-    @{ Code = "basketball"; Name = "篮球"; Count = 35 },
-    @{ Code = "football"; Name = "足球"; Count = 25 },
-    @{ Code = "tennis"; Name = "网球"; Count = 15 },
-    @{ Code = "volleyball"; Name = "排球"; Count = 10 }
+    @{ Code = "badminton"; Name = "羽毛球" },
+    @{ Code = "table_tennis"; Name = "乒乓球" },
+    @{ Code = "football"; Name = "足球" },
+    @{ Code = "basketball"; Name = "篮球" },
+    @{ Code = "tennis"; Name = "网球" },
+    @{ Code = "volleyball"; Name = "排球" }
 )
-
-function CityFor([int]$Index) {
-    $cursor = 0
-    foreach ($city in $cities) {
-        $cursor += $city.Count
-        if ($Index -le $cursor) { return $city }
-    }
-    return $cities[-1]
-}
-
-function SportFor([int]$Index) {
-    $cursor = 0
-    foreach ($sport in $sports) {
-        $cursor += $sport.Count
-        if ($Index -le $cursor) { return $sport }
-    }
-    return $sports[-1]
-}
-
-function SportByCode([string]$Code) {
-    return ($sports | Where-Object { $_.Code -eq $Code })[0]
-}
-
-function EquipmentDescription([string]$SportCode, [int]$CategoryId) {
-    switch ($SportCode) {
-        "badminton" {
-            switch ($CategoryId) {
-                1 { return "中杆回弹清晰，攻防转换顺手，适合中前场连贯和后场突击。" }
-                2 { return "包裹稳定，侧向支撑扎实，急停启动时脚感更稳。" }
-                3 { return "飞行稳定，落点清晰，适合日常训练和俱乐部对抗。" }
-                default { return "容量适中，可放球拍、球鞋和换洗衣物，通勤约球都方便。" }
-            }
-        }
-        "table_tennis" {
-            switch ($CategoryId) {
-                5 { return "底板手感通透，借力和发力都容易控制，适合弧圈结合快攻。" }
-                6 { return "胶面摩擦稳定，拉球吃球感明显，台内控制更细腻。" }
-                default { return "弹跳均匀，旋转反馈清楚，适合多球训练和实战练习。" }
-            }
-        }
-        "football" {
-            switch ($CategoryId) {
-                8 { return "鞋面贴合，抓地稳定，适合人草场地的启动和变向。" }
-                9 { return "球面耐磨，脚感扎实，适合训练传接球和小场比赛。" }
-                default { return "轻量防护，贴合小腿，降低对抗中的碰撞不适。" }
-            }
-        }
-        "basketball" {
-            switch ($CategoryId) {
-                11 { return "缓震回弹均衡，外底抓地稳定，适合突破和急停跳投。" }
-                12 { return "球面纹理清晰，控球手感稳定，室内外训练都顺手。" }
-                default { return "提供膝踝基础支撑，适合日常训练和轻度对抗。" }
-            }
-        }
-        "tennis" { return "拍面甜区友好，挥拍稳定，适合底线拉打和上网截击练习。" }
-        "volleyball" { return "触球柔和，弹性稳定，适合传垫扣综合训练和团队热身。" }
-        default { return "设计稳定耐用，适合日常训练、社群活动和进阶练习。" }
-    }
-}
-
-function VenueProductDescription([string]$SportName, [string]$ProductType) {
-    switch ($ProductType) {
-        "TIME_PACKAGE" { return "上午低峰畅打套餐，适合个人练习、双人拉球和下班前补练。" }
-        "COURT_SLOT" { return "黄金时段单场预订，适合约搭子开局、朋友小队训练和临时组局。" }
-        "COACH_LESSON" { return "$SportName 私教体验课，包含动作评估、基础纠错和针对性训练建议。" }
-        default { return "$SportName 场馆项目，可在线预订并到店核销使用。" }
-    }
-}
-
-$levels = @("新手", "初级", "中级", "高级")
-$styles = @("双打/防守反击", "进攻型/后场突击", "控球型/稳定多拍", "娱乐局/氛围组", "小班训练/技术提升")
-$times = @("工作日 19:00 后", "周二/周四晚上", "周末上午", "周末下午", "每天晚上")
-$rng = New-Object System.Random(20260707)
-$sb = New-Object System.Text.StringBuilder
-[void]$sb.AppendLine("set names utf8mb4;")
-[void]$sb.AppendLine()
-
-Build-DemoAssets
-
-$fileRows = @()
-for ($id = 1; $id -le 120; $id++) {
-    $objectName = FileObjectName $id
-    $assetPath = Join-Path $AssetsRoot $objectName
-    $fileSize = if (Test-Path -LiteralPath $assetPath) { (Get-Item -LiteralPath $assetPath).Length } else { 65536 }
-    $fileRows += ,@(
-        $id,
-        "null",
-        (Sql (BizTypeForFile $id)),
-        "null",
-        (Sql "hm-badminton"),
-        (Sql $objectName),
-        (Sql (Split-Path $objectName -Leaf)),
-        (Sql "image/png"),
-        $fileSize,
-        (Sql "demo-$id"),
-        (Sql (FileUrl $id)),
-        (Sql "可用")
-    )
-}
-Add-Insert $sb "file_metadata" @("id", "owner_user_id", "biz_type", "biz_id", "bucket_name", "object_name", "original_filename", "content_type", "file_size", "etag", "public_url", "status") $fileRows
-
-$userRows = @()
-$profileRows = @()
-for ($i = 1; $i -le 200; $i++) {
-    $city = CityFor $i
-    $sport = SportFor $i
-    $area = $city.Area[($i - 1) % $city.Area.Count]
-    $level = $levels[($i + 1) % $levels.Count]
-    $lng = $city.Lng + (($rng.NextDouble() - 0.5) * 0.09)
-    $lat = $city.Lat + (($rng.NextDouble() - 0.5) * 0.07)
-    $avatarId = (($i - 1) % 30) + 1
-    $nickname = if ($i -le 10) { "$($city.Name)$($sport.Name)达人$($i.ToString('00'))" } elseif ($i -le 50) { "$($city.Name)$($sport.Name)教练$($i.ToString('00'))" } else { "$($city.Name)$($sport.Name)球友$($i.ToString('000'))" }
-    $isBigV = if ($i -le 10) { 1 } else { 0 }
-    $userRows += ,@(
-        $i,
-        (Sql ("139{0:D8}" -f $i)),
-        (Sql ("demo{0:D3}@example.com" -f $i)),
-        (Sql ("demo_user_{0:D3}" -f $i)),
-        (Sql "{plain}123456"),
-        (Sql $nickname),
-        (Sql (FileUrl $avatarId)),
-        (Sql $city.Name),
-        (Sql $level),
-        (Sql $times[$i % $times.Count]),
-        $isBigV,
-        1,
-        (Sql ("2026-07-{0:D2} 10:{1:D2}:00" -f ((($i - 1) % 7) + 1), ($i % 60)))
-    )
-    $profileRows += ,@(
-        $i,
-        (Sql $sport.Code),
-        (Sql $city.Name),
-        (Sql $area),
-        ($lng.ToString("0.000000", $Invariant)),
-        ($lat.ToString("0.000000", $Invariant)),
-        (Sql $level),
-        (Sql $styles[$i % $styles.Count]),
-        (Sql $times[$i % $times.Count]),
-        (Sql "喜欢$($sport.Name)，希望找到稳定搭子，准时、好沟通。"),
-        1
-    )
-}
-Add-Insert $sb "users" @("id", "phone", "email", "username", "password_hash", "nickname", "avatar", "city", "level", "prefer_time", "is_big_v", "status", "created_at") $userRows
-Add-Insert $sb "player_profiles" @("user_id", "sport_code", "city", "area", "longitude", "latitude", "level", "play_style", "available_time", "intro", "allow_invite") $profileRows
-
-$followRows = @()
-$seenFollows = @{}
-for ($i = 1; $i -le 200; $i++) {
-    $targets = @((1 + (($i * 7) % 10)), (1 + (($i + 17) % 200)), (1 + (($i + 43) % 200)))
-    foreach ($target in $targets) {
-        if ($target -eq $i) { $target = (($target + 11) % 200) + 1 }
-        $key = "$i-$target"
-        if (-not $seenFollows.ContainsKey($key)) {
-            $seenFollows[$key] = $true
-            $followRows += ,@($i, $target)
-        }
-    }
-}
-Add-Insert $sb "follows" @("user_id", "follow_user_id") $followRows
-
-$placeRows = @()
-for ($i = 1; $i -le 40; $i++) {
-    $city = $cities[($i - 1) % $cities.Count]
-    $sport = $sports[($i - 1) % $sports.Count]
-    $area = $city.Area[($i - 1) % $city.Area.Count]
-    $placeRows += ,@(
-        $i,
-        (Sql $sport.Code),
-        (Sql "$($city.Name)$($sport.Name)高德缓存槽位$($i.ToString('00'))"),
-        (Sql $city.Name),
-        (Sql $area),
-        (Sql "$area 演示路 $i 号"),
-        (($city.Lng + (($i % 5) * 0.006)).ToString("0.000000", $Invariant)),
-        (($city.Lat + (($i % 4) * 0.005)).ToString("0.000000", $Invariant)),
-        (40 + ($i % 12) * 8),
-        (Money (4.2 + (($i % 7) * 0.1))),
-        (20 + $i * 3),
-        (Sql "09:00-22:00"),
-        (Sql (FileUrl (31 + (($i - 1) % 25)))),
-        (Sql "$($sport.Name),停车,更衣室,饮水机"),
-        1
-    )
-}
-Add-Insert $sb "place" @("id", "sport_code", "name", "city", "area", "address", "longitude", "latitude", "avg_price", "score", "review_count", "open_hours", "cover_url", "facilities", "status") $placeRows
-
-$operatorRows = @()
-for ($i = 1; $i -le 20; $i++) {
-    $city = $cities[($i - 1) % $cities.Count]
-    $sport = $sports[($i - 1) % $sports.Count]
-    $rank = (($i - 1) % 8) + 1
-    $operatorRows += ,@(
-        $i,
-        (50 + $i),
-        (Sql $city.Name),
-        (Sql $sport.Code),
-        $rank,
-        (Sql "$($city.Name)$($sport.Name)场馆号$rank"),
-        (Sql (FileUrl ((($i - 1) % 30) + 1))),
-        (Sql "发布场馆团购、活动公告和$($sport.Name)约球信息。"),
-        1
-    )
-}
-Add-Insert $sb "venue_operators" @("id", "user_id", "city", "sport_code", "place_rank", "operator_name", "avatar", "intro", "status") $operatorRows
-
-$coachRows = @()
-for ($i = 1; $i -le 40; $i++) {
-    $city = $cities[($i - 1) % $cities.Count]
-    $sport = $sports[($i - 1) % $sports.Count]
-    $rank = (($i - 1) % 8) + 1
-    $coachRows += ,@(
-        $i,
-        $rank,
-        "null",
-        (Sql "$rank"),
-        (Sql $sport.Code),
-        (Sql "$($sport.Name)教练$($i.ToString('00'))"),
-        (Sql (FileUrl ((($i + 5) % 30) + 1))),
-        (Sql $levels[($i + 2) % $levels.Count]),
-        (Sql "基础,进阶,陪练"),
-        (Sql "擅长$($sport.Name)基础纠正和实战陪练，适合下班后训练。"),
-        (Money (99 + (($i % 8) * 20))),
-        1
-    )
-}
-Add-Insert $sb "coaches" @("id", "venue_id", "amap_place_id", "venue_name", "sport_code", "name", "avatar", "level", "tags", "intro", "price_per_hour", "status") $coachRows
 
 $categoryRows = @(
     @(1, (Sql "badminton"), (Sql "羽毛球拍"), (Sql "racquet"), 1),
@@ -413,315 +200,413 @@ $categoryRows = @(
     @(14, (Sql "tennis"), (Sql "网球拍"), (Sql "racquet"), 1),
     @(15, (Sql "volleyball"), (Sql "排球"), (Sql "ball"), 1)
 )
-Add-Insert $sb "equipment_categories" @("id", "sport_code", "name", "icon", "sort") $categoryRows
 
-$categoryBySport = @{
-    badminton = @(1, 2, 3, 4); table_tennis = @(5, 6, 7); basketball = @(11, 12, 13);
-    football = @(8, 9, 10); tennis = @(14); volleyball = @(15)
-}
-$equipmentIdsBySport = @{}
-$venueIdsBySport = @{}
-foreach ($sport in $sports) {
-    $equipmentIdsBySport[$sport.Code] = @()
-    $venueIdsBySport[$sport.Code] = @()
-}
-$equipmentMetaById = @{}
-$venueMetaById = @{}
-
-$equipmentRows = @()
-for ($i = 1; $i -le 50; $i++) {
-    $sport = SportFor ([Math]::Min(200, ($i * 4)))
-    $category = $categoryBySport[$sport.Code][($i - 1) % $categoryBySport[$sport.Code].Count]
-    $equipmentName = "$($sport.Name)精选装备 $($i.ToString('00'))"
-    $equipmentCover = FileUrl (56 + (($i - 1) % 25))
-    $equipmentPrice = 49 + (($i * 17) % 520)
-    $equipmentDescription = EquipmentDescription $sport.Code $category
-    $equipmentIdsBySport[$sport.Code] = @($equipmentIdsBySport[$sport.Code] + $i)
-    $equipmentMetaById[$i] = @{
-        Title = $equipmentName
-        Cover = $equipmentCover
-        Price = $equipmentPrice
-    }
-    $equipmentRows += ,@(
-        $i,
-        (Sql $sport.Code),
-        $category,
-        (Sql $equipmentName),
-        (Sql (@("YUDONG", "SHUTTLELAB", "COURTGO", "SAFEPLAY", "BASELINE")[$i % 5])),
-        (Sql $equipmentDescription),
-        (Sql $equipmentCover),
-        (Money $equipmentPrice),
-        (80 + (($i * 13) % 420)),
-        (Money (4.2 + (($i % 7) * 0.1))),
-        (20 + (($i * 19) % 600)),
-        1
+$equipmentCatalog = @{
+    badminton = @(
+        @{ Category = 1; Name = "轻羽 5U 新手羽毛球拍"; Brand = "YUDONG"; Price = 89; Description = "适合：新手和力量较小的球友；特点：5U 轻量、甜区大；优点：挥拍轻松、容错高；不足：重杀力量一般。" },
+        @{ Category = 2; Name = "疾风缓震羽毛球鞋"; Brand = "FEATHERX"; Price = 329; Description = "适合：每周训练 2 至 3 次的进阶球友；特点：侧向支撑和缓震均衡；优点：急停稳定；不足：鞋楦偏窄。" },
+        @{ Category = 1; Name = "破风 7 Pro 进攻羽毛球拍"; Brand = "SHUTTLELAB"; Price = 699; Description = "适合：中高级后场进攻；特点：头重、硬中杆；优点：点杀和重杀有力；不足：对发力和体能要求较高。" }
     )
+    table_tennis = @(
+        @{ Category = 5; Name = "控旋入门乒乓球拍"; Brand = "SPINUP"; Price = 69; Description = "适合：零基础和娱乐对打；特点：控制稳定、手感柔和；优点：容易上手；不足：远台底劲有限。" },
+        @{ Category = 7; Name = "弧圈均衡底板套装"; Brand = "RALLY"; Price = 259; Description = "适合：初中级弧圈结合快攻；特点：持球感清晰；优点：旋转和速度均衡；不足：胶皮需要定期养护。" },
+        @{ Category = 5; Name = "极速进攻碳素乒乓球拍"; Brand = "SPINUP"; Price = 599; Description = "适合：进阶快攻球友；特点：碳层支撑、出球快；优点：借力反击直接；不足：小球控制难度较高。" }
+    )
+    football = @(
+        @{ Category = 9; Name = "耐磨训练足球 5 号"; Brand = "COURTGO"; Price = 79; Description = "适合：日常传接球和小场训练；特点：耐磨、气密性好；优点：价格低；不足：湿地触感偏硬。" },
+        @{ Category = 8; Name = "疾速 TF 人草足球鞋"; Brand = "STRIKER"; Price = 289; Description = "适合：人造草小场比赛；特点：碎钉抓地、鞋面贴合；优点：启动灵活；不足：不适合天然草。" },
+        @{ Category = 10; Name = "轻量防撞护腿板"; Brand = "SAFEPLAY"; Price = 129; Description = "适合：高频对抗和联赛；特点：轻量硬壳、透气内衬；优点：防护稳定；不足：需要搭配固定袜套。" }
+    )
+    basketball = @(
+        @{ Category = 12; Name = "室内外耐磨篮球"; Brand = "BASELINE"; Price = 99; Description = "适合：新手练运球和投篮；特点：纹路深、耐磨；优点：室内外通用；不足：初次使用手感略硬。" },
+        @{ Category = 11; Name = "回弹缓震实战篮球鞋"; Brand = "JUMPHIGH"; Price = 359; Description = "适合：后卫突破和急停；特点：前掌回弹、外底抓地；优点：启动快；不足：脚踝包裹中等。" },
+        @{ Category = 13; Name = "高强度护膝套装"; Brand = "SAFEPLAY"; Price = 219; Description = "适合：频繁起跳和对抗训练；特点：髌骨支撑、透气；优点：稳定性好；不足：长时间佩戴偏紧。" }
+    )
+    tennis = @(
+        @{ Category = 14; Name = "大甜区新手网球拍"; Brand = "BASELINE"; Price = 159; Description = "适合：新手底线练习；特点：大拍面、轻量；优点：容错高；不足：高速来球稳定性一般。" },
+        @{ Category = 14; Name = "全场均衡网球拍"; Brand = "RALLY"; Price = 459; Description = "适合：初中级底线和上网结合；特点：平衡点适中；优点：攻守均衡；不足：旋转上限一般。" },
+        @{ Category = 14; Name = "控制型竞赛网球拍"; Brand = "BASELINE"; Price = 899; Description = "适合：进阶全场型球员；特点：小拍面、控球精准；优点：落点反馈清楚；不足：甜区小、上手要求高。" }
+    )
+    volleyball = @(
+        @{ Category = 15; Name = "柔软训练排球"; Brand = "COURTGO"; Price = 89; Description = "适合：新手垫球和校园娱乐；特点：表皮柔软；优点：手臂冲击小；不足：比赛球感略轻。" },
+        @{ Category = 15; Name = "室内比赛排球"; Brand = "RALLY"; Price = 259; Description = "适合：社团训练和正式比赛；特点：飞行稳定、触球清晰；优点：控球准确；不足：不耐粗糙室外地面。" },
+        @{ Category = 15; Name = "沙排耐候排球"; Brand = "WAVE"; Price = 399; Description = "适合：沙滩和户外训练；特点：防水耐候、表面防滑；优点：潮湿环境稳定；不足：室内触感偏重。" }
+    )
+}
+
+$levels = @("新手", "初级", "中级", "高级")
+$times = @("工作日 19:00 后", "周二/周四晚上", "周末上午")
+$sb = New-Object System.Text.StringBuilder
+[void]$sb.AppendLine("set names utf8mb4;")
+[void]$sb.AppendLine()
+
+Build-DemoAssets
+
+Add-Section $sb "MinIO 文件元数据：仅保留页面会引用的 80 个对象"
+$fileRows = @()
+foreach ($id in $SelectedFileIds) {
+    $objectName = FileObjectName $id
+    $assetPath = Join-Path $AssetsRoot $objectName
+    $fileSize = if (Test-Path -LiteralPath $assetPath) { (Get-Item -LiteralPath $assetPath).Length } else { 65536 }
+    $fileRows += ,@($id, "null", (Sql (BizTypeForFile $id)), "null", (Sql "hm-badminton"), (Sql $objectName),
+        (Sql (Split-Path $objectName -Leaf)), (Sql "image/png"), $fileSize, (Sql "demo-$id"), (Sql (FileUrl $id)), (Sql "可用"))
+}
+Add-Insert $sb "file_metadata" @("id", "owner_user_id", "biz_type", "biz_id", "bucket_name", "object_name", "original_filename", "content_type", "file_size", "etag", "public_url", "status") $fileRows
+
+Add-Section $sb "用户和球友资料：西安每种运动 3 人，其余城市每种运动 2 人"
+$userRows = @()
+$profileRows = @()
+$usersBySlot = @{}
+$usersBySport = @{}
+foreach ($sport in $sports) { $usersBySport[$sport.Code] = @() }
+$userId = 1
+for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
+    $city = $cities[$cityIndex]
+    for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+        $sport = $sports[$sportIndex]
+        $personaCount = if ($city.Name -eq "西安") { 3 } else { 2 }
+        $slot = "$($city.Name)|$($sport.Code)"
+        $usersBySlot[$slot] = @()
+        for ($persona = 1; $persona -le $personaCount; $persona++) {
+            $id = $userId++
+            $area = $city.Areas[($sportIndex + $persona - 1) % $city.Areas.Count]
+            $nickname = if ($id -eq 1) { "陈予" } elseif ($persona -eq 1) { "$($city.Name)$($sport.Name)达人" } elseif ($persona -eq 2) { "$($city.Name)$($sport.Name)搭子" } else { "$($city.Name)$($sport.Name)新秀" }
+            $level = $levels[($sportIndex + $persona) % $levels.Count]
+            $isBigV = if ($persona -eq 1 -and ($sportIndex -eq 0 -or $sportIndex -eq 2)) { 1 } else { 0 }
+            $avatarId = (($id - 1) % 24) + 1
+            $lng = $city.Lng + (($sportIndex - 2.5) * 0.004) + ($persona * 0.0005)
+            $lat = $city.Lat + (($persona - 1) * 0.002) + ($sportIndex * 0.0004)
+            $userRows += ,@($id, (Sql ("139{0:D8}" -f $id)), (Sql ("demo{0:D3}@example.com" -f $id)),
+                (Sql ("demo_user_{0:D3}" -f $id)), (Sql "{plain}123456"), (Sql $nickname), (Sql (FileUrl $avatarId)),
+                (Sql $city.Name), (Sql $level), (Sql $times[($persona - 1) % $times.Count]), $isBigV, 1,
+                "date_sub(now(), interval $($id + 3) day)")
+            $profileRows += ,@($id, (Sql $sport.Code), (Sql $city.Name), (Sql $area),
+                $lng.ToString("0.000000", $Invariant), $lat.ToString("0.000000", $Invariant), (Sql $level),
+                (Sql @("稳健多拍", "主动进攻", "轻松娱乐")[$persona - 1]), (Sql $times[($persona - 1) % $times.Count]),
+                (Sql "常打$($sport.Name)，希望找到时间稳定、守时好沟通的搭子。"), 1)
+            $usersBySlot[$slot] = @($usersBySlot[$slot] + $id)
+            $usersBySport[$sport.Code] = @($usersBySport[$sport.Code] + $id)
+        }
+    }
+}
+Add-Insert $sb "users" @("id", "phone", "email", "username", "password_hash", "nickname", "avatar", "city", "level", "prefer_time", "is_big_v", "status", "created_at") $userRows
+Add-Insert $sb "player_profiles" @("user_id", "sport_code", "city", "area", "longitude", "latitude", "level", "play_style", "available_time", "intro", "allow_invite") $profileRows
+
+Add-Section $sb "关注关系：优先关注同城同运动达人，并补充跨城同运动内容"
+$followRows = @()
+$seenFollows = @{}
+for ($id = 1; $id -lt $userId; $id++) {
+    $own = $profileRows[$id - 1]
+    $sportCode = ([string]$own[1]).Trim("'")
+    $sameSport = $usersBySport[$sportCode]
+    $targets = @($sameSport[0], $sameSport[[Math]::Min(2, $sameSport.Count - 1)], (($id + 6) % ($userId - 1)) + 1)
+    foreach ($target in $targets) {
+        if ($target -eq $id) { continue }
+        $key = "$id-$target"
+        if (-not $seenFollows.ContainsKey($key)) {
+            $seenFollows[$key] = $true
+            $followRows += ,@($id, $target)
+        }
+    }
+}
+Add-Insert $sb "follows" @("user_id", "follow_user_id") $followRows
+
+Add-Section $sb "本地场所模板与评价：城市、运动和评价人严格匹配"
+$placeRows = @()
+$reviewRows = @()
+$placeId = 1
+$reviewId = 1
+for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
+    $city = $cities[$cityIndex]
+    for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+        $sport = $sports[$sportIndex]
+        $matchedUsers = $usersBySlot["$($city.Name)|$($sport.Code)"]
+        for ($rank = 1; $rank -le 2; $rank++) {
+            $id = $placeId++
+            $area = $city.Areas[($sportIndex + $rank - 1) % $city.Areas.Count]
+            $isBudget = $rank -eq 1
+            $name = if ($isBudget) { "$($city.Name)$($sport.Name)通勤馆" } else { "$($city.Name)$($sport.Name)训练中心" }
+            $price = if ($isBudget) { 29 + $sportIndex * 4 } else { 68 + $sportIndex * 9 }
+            $score = if ($isBudget) { 4.3 + (($sportIndex % 2) * 0.1) } else { 4.7 + (($sportIndex % 2) * 0.1) }
+            $facilities = if ($isBudget) {
+                "近地铁,夜场灯光,饮水机;适合:下班快打、新手练习;不足:晚高峰较拥挤、停车位少"
+            } else {
+                "空调,停车,淋浴,专业地胶;适合:进阶训练、亲子体验;不足:价格较高、距离市中心略远"
+            }
+            $openHours = if ($isBudget) { "10:00-23:00" } else { "08:00-22:00" }
+            $reviewRating = if ($isBudget) { 4 } else { 5 }
+            $placeRows += ,@($id, (Sql $sport.Code), (Sql $name), (Sql $city.Name), (Sql $area),
+                (Sql "$area 运动路 $($sportIndex * 10 + $rank) 号"),
+                ($city.Lng + ($sportIndex * 0.004) + ($rank * 0.002)).ToString("0.000000", $Invariant),
+                ($city.Lat + ($sportIndex * 0.003) + ($rank * 0.001)).ToString("0.000000", $Invariant),
+                $price, (Money $score), 1, (Sql $openHours),
+                (Sql (FileUrl (31 + (($id - 1) % 12)))), (Sql $facilities), 1)
+            $reviewContent = if ($isBudget) {
+                "$($city.Name)的$($sport.Name)场地离地铁近，夜场灯光够用，价格友好；晚高峰更衣区会有些拥挤。"
+            } else {
+                "$($sport.Name)场地维护和淋浴都不错，教练服务专业，适合系统训练；价格比周边普通馆略高。"
+            }
+            $reviewRows += ,@($reviewId++, $id, $matchedUsers[($rank - 1) % $matchedUsers.Count], $reviewRating,
+                (Sql $reviewContent), (Sql (FileUrl (111 + (($id - 1) % 8)))), (3 + (($id * 7) % 29)),
+                "date_sub(now(), interval $($id % 18 + 1) day)")
+        }
+    }
+}
+Add-Insert $sb "place" @("id", "sport_code", "name", "city", "area", "address", "longitude", "latitude", "avg_price", "score", "review_count", "open_hours", "cover_url", "facilities", "status") $placeRows
+Add-Insert $sb "venue_reviews" @("id", "venue_id", "user_id", "rating", "content", "image_urls", "likes", "created_at") $reviewRows
+
+Add-Section $sb "场馆号与教练：按城市、运动、附近场所顺序绑定"
+$operatorRows = @()
+$operatorId = 1
+foreach ($city in $cities) {
+    foreach ($sport in $sports) {
+        $matchedUsers = $usersBySlot["$($city.Name)|$($sport.Code)"]
+        for ($rank = 1; $rank -le 2; $rank++) {
+            $operatorRows += ,@($operatorId++, $matchedUsers[0], (Sql $city.Name), (Sql $sport.Code), $rank,
+                (Sql "$($city.Name)$($sport.Name)场馆号 $rank"), (Sql (FileUrl ((($matchedUsers[0] - 1) % 24) + 1))),
+                (Sql "发布$($sport.Name)团购、开放时段和约球活动，信息由平台演示数据维护。"), 1)
+        }
+    }
+}
+Add-Insert $sb "venue_operators" @("id", "user_id", "city", "sport_code", "place_rank", "operator_name", "avatar", "intro", "status") $operatorRows
+
+$coachRows = @()
+$coachId = 1
+for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+    $sport = $sports[$sportIndex]
+    for ($rank = 1; $rank -le 2; $rank++) {
+        $coachLevel = if ($rank -eq 1) { "基础认证" } else { "高级认证" }
+        $coachTags = if ($rank -eq 1) { "新手纠错,基础动作" } else { "实战战术,进阶训练" }
+        $coachIntro = if ($rank -eq 1) { "耐心讲解基础动作，适合第一次体验。" } else { "侧重实战节奏和专项技术，训练强度较高。" }
+        $coachPrice = if ($rank -eq 1) { 99 + $sportIndex * 10 } else { 169 + $sportIndex * 15 }
+        $coachRows += ,@($coachId, $rank, "null", (Sql "$rank"), (Sql $sport.Code),
+            (Sql "$($sport.Name)教练 $rank"), (Sql (FileUrl ((($coachId + 4) % 24) + 1))),
+            (Sql $coachLevel), (Sql $coachTags), (Sql $coachIntro), (Money $coachPrice), 1)
+        $coachId++
+    }
+}
+Add-Insert $sb "coaches" @("id", "venue_id", "amap_place_id", "venue_name", "sport_code", "name", "avatar", "level", "tags", "intro", "price_per_hour", "status") $coachRows
+
+Add-Section $sb "装备分类与商品：每种运动 3 件，覆盖入门、进阶和专项"
+Add-Insert $sb "equipment_categories" @("id", "sport_code", "name", "icon", "sort") $categoryRows
+$equipmentRows = @()
+$equipmentMetaById = @{}
+$equipmentIdsBySport = @{}
+$equipmentId = 1
+for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+    $sport = $sports[$sportIndex]
+    $equipmentIdsBySport[$sport.Code] = @()
+    $items = $equipmentCatalog[$sport.Code]
+    for ($itemIndex = 0; $itemIndex -lt $items.Count; $itemIndex++) {
+        $item = $items[$itemIndex]
+        $id = $equipmentId++
+        $cover = FileUrl (56 + (($id - 1) % 18))
+        $score = @(4.3, 4.6, 4.8)[$itemIndex]
+        $stock = @(80, 45, 20)[$itemIndex]
+        $sold = @(128, 76, 35)[$itemIndex] + ($sportIndex * 7)
+        $equipmentRows += ,@($id, (Sql $sport.Code), $item.Category, (Sql $item.Name), (Sql $item.Brand),
+            (Sql $item.Description), (Sql $cover), (Money $item.Price), $stock, (Money $score), $sold, 1)
+        $equipmentMetaById[$id] = @{ Title = $item.Name; Cover = $cover; Price = [double]$item.Price; Sport = $sport.Code }
+        $equipmentIdsBySport[$sport.Code] = @($equipmentIdsBySport[$sport.Code] + $id)
+    }
 }
 Add-Insert $sb "equipment" @("id", "sport_code", "category_id", "name", "brand", "description", "cover_url", "price", "stock", "score", "sold", "status") $equipmentRows
 
+Add-Section $sb "场馆商品和未来库存：每种运动 2 个场所顺序，每个顺序 3 类商品"
 $venueRows = @()
 $inventoryRows = @()
+$venueMetaById = @{}
+$venueIdsBySport = @{}
 $productTypes = @("TIME_PACKAGE", "COURT_SLOT", "COACH_LESSON")
-for ($i = 1; $i -le 100; $i++) {
-    $sport = SportFor ([Math]::Min(200, $i * 2))
-    $rank = (($i - 1) % 8) + 1
-    $type = $productTypes[($i - 1) % $productTypes.Count]
-    $baseTitle = if ($type -eq "TIME_PACKAGE") { "08:00-12:00 单人畅打" } elseif ($type -eq "COURT_SLOT") { "黄金单场 1 小时" } else { "私教体验 60 分钟" }
-    $title = "$($sport.Name) $baseTitle"
-    $venueDescription = VenueProductDescription $sport.Name $type
-    $price = if ($type -eq "TIME_PACKAGE") { 29 + ($i % 5) * 5 } elseif ($type -eq "COURT_SLOT") { 68 + ($i % 6) * 10 } else { 99 + ($i % 8) * 20 }
-    $original = if ($i % 4 -eq 0) { $null } elseif ($i % 5 -eq 0) { $price } else { $price + 30 + ($i % 5) * 12 }
-    $originalSql = if ($null -eq $original) { "null" } else { Money $original }
-    $venueCover = FileUrl (31 + (($i - 1) % 25))
-    $venueIdsBySport[$sport.Code] = @($venueIdsBySport[$sport.Code] + $i)
-    $venueMetaById[$i] = @{
-        Title = $title
-        Cover = $venueCover
-        Price = $price
-    }
-    $venueRows += ,@(
-        $i,
-        "null",
-        "null",
-        (Sql "$rank"),
-        $rank,
-        (Sql $sport.Code),
-        (Sql $type),
-        (Sql $title),
-        (Sql $venueDescription),
-        (Sql $venueCover),
-        (Money $price),
-        $originalSql,
-        (Sql "$($sport.Name),可核销,本地演示"),
-        (Sql "购买后按所选日期和时间入场，入场需出示核销码。"),
-        (Sql "开场前 2 小时可退，过期不可退。"),
-        (Sql "2026-07-01 00:00:00"),
-        (Sql "2026-12-31 23:59:59"),
-        1
-    )
-    for ($d = 1; $d -le 12; $d++) {
-        $inventoryId = (($i - 1) * 12) + $d
-        $stock = if ($type -eq "TIME_PACKAGE") { 20 + ($i % 12) } elseif ($type -eq "COURT_SLOT") { 1 } else { 3 + ($i % 4) }
-        $sold = if ($d % 5 -eq 0) { [Math]::Min($stock, 1 + ($i % 3)) } else { 0 }
-        $available = [Math]::Max(0, $stock - $sold)
-        $courtName = if ($type -eq "COACH_LESSON") { "私教训练场" } else { "标准场地" }
-        $coachId = if ($type -eq "COACH_LESSON") { (($i - 1) % 40) + 1 } else { "null" }
-        $startTime = if ($type -eq "TIME_PACKAGE") { "08:00:00" } elseif ($type -eq "COURT_SLOT") { "19:00:00" } else { "18:00:00" }
-        $endTime = if ($type -eq "TIME_PACKAGE") { "12:00:00" } elseif ($type -eq "COURT_SLOT") { "20:00:00" } else { "19:00:00" }
-        $inventoryRows += ,@(
-            $inventoryId,
-            $i,
-            "null",
-            (Sql $courtName),
-            $coachId,
-            (Sql ("2026-07-{0:D2}" -f (7 + $d))),
-            (Sql $startTime),
-            (Sql $endTime),
-            $stock,
-            $available,
-            0,
-            $sold,
-            (Money $price),
-            (Sql "可售")
-        )
+$venueId = 1
+$inventoryId = 1
+for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+    $sport = $sports[$sportIndex]
+    $venueIdsBySport[$sport.Code] = @()
+    for ($rank = 1; $rank -le 2; $rank++) {
+        for ($typeIndex = 0; $typeIndex -lt $productTypes.Count; $typeIndex++) {
+            $type = $productTypes[$typeIndex]
+            $id = $venueId++
+            $basePrice = if ($type -eq "TIME_PACKAGE") { 25 + $sportIndex * 4 } elseif ($type -eq "COURT_SLOT") { 58 + $sportIndex * 12 } else { 89 + $sportIndex * 15 }
+            $rankPremium = if ($type -eq "COACH_LESSON") { 50 } else { 16 }
+            $price = $basePrice + (($rank - 1) * $rankPremium)
+            $title = if ($type -eq "TIME_PACKAGE") { "$($sport.Name) 08:00-12:00 单人畅打" } elseif ($type -eq "COURT_SLOT") { "$($sport.Name) 晚间黄金单场 1 小时" } else { "$($sport.Name) 私教体验 60 分钟" }
+            $description = if ($type -eq "TIME_PACKAGE") {
+                if ($rank -eq 1) { "工作日上午低峰套餐，适合新手练习和双人拉球；价格低，但周末不可用。" } else { "周末上午畅打套餐，含更衣和淋浴；环境更舒适，但需要提前一天预约。" }
+            } elseif ($type -eq "COURT_SLOT") {
+                if ($rank -eq 1) { "19:00 后热门单场，靠近地铁，适合下班快打；余位较少。" } else { "专业场地黄金时段，灯光和地胶更好；适合进阶对抗，价格略高。" }
+            } else {
+                if ($rank -eq 1) { "新手体验课，包含动作评估和基础纠错；两人即可开课。" } else { "进阶专项课，包含实战节奏和技术训练；强度较高，适合有基础球友。" }
+            }
+            $isDiscount = ($typeIndex + $rank + $sportIndex) % 2 -eq 0
+            $original = if ($isDiscount) { Money ($price + 20 + $typeIndex * 15) } else { "null" }
+            $tags = if ($rank -eq 1) { "$($sport.Name),近地铁,预算友好,适合新手" } else { "$($sport.Name),可停车,有淋浴,进阶训练" }
+            $refundRule = if ($type -eq "COURT_SLOT") { "开场前 4 小时可退，逾期不可退。" } else { "使用前 2 小时可退，已核销不可退。" }
+            $cover = FileUrl (31 + (($sportIndex * 2 + $rank - 1) % 12))
+            $venueRows += ,@($id, "null", "null", (Sql "$rank"), $rank, (Sql $sport.Code), (Sql $type),
+                (Sql $title), (Sql $description), (Sql $cover), (Money $price), $original, (Sql $tags),
+                (Sql "购买后选择日期和时段，到店出示核销码；每人每天限购 1 份。"), (Sql $refundRule),
+                "date_sub(now(), interval 1 day)", "date_add(now(), interval 365 day)", 1)
+            $venueMetaById[$id] = @{ Title = $title; Cover = $cover; Price = [double]$price; Sport = $sport.Code; Rank = $rank }
+            $venueIdsBySport[$sport.Code] = @($venueIdsBySport[$sport.Code] + $id)
+            for ($day = 1; $day -le 4; $day++) {
+                $stock = if ($type -eq "TIME_PACKAGE") { 12 - $rank } elseif ($type -eq "COURT_SLOT") { 1 } else { 4 - $rank }
+                $sold = if ($type -eq "COURT_SLOT") { 0 } else { ($day + $rank + $sportIndex) % 3 }
+                $available = [Math]::Max(1, $stock - $sold)
+                $startTime = if ($type -eq "TIME_PACKAGE") { "08:00:00" } elseif ($type -eq "COURT_SLOT") { "19:00:00" } else { "18:00:00" }
+                $endTime = if ($type -eq "TIME_PACKAGE") { "12:00:00" } elseif ($type -eq "COURT_SLOT") { "20:00:00" } else { "19:00:00" }
+                $courtName = if ($type -eq "COACH_LESSON") { "私教训练场" } else { "标准场地 $rank" }
+                $inventoryCoachId = if ($type -eq "COACH_LESSON") { (($sportIndex * 2) + $rank) } else { "null" }
+                $inventoryRows += ,@($inventoryId++, $id, "null", (Sql $courtName), $inventoryCoachId,
+                    "date_add(current_date, interval $day day)", (Sql $startTime), (Sql $endTime), $stock, $available, 0, $sold, (Money $price), (Sql "可售"))
+            }
+        }
     }
 }
 Add-Insert $sb "venue" @("id", "venue_id", "amap_place_id", "venue_name", "place_rank", "sport_code", "product_type", "title", "description", "cover_url", "price", "original_price", "tags", "use_rule", "refund_rule", "sale_start_at", "sale_end_at", "status") $venueRows
 Add-Insert $sb "venue_inventory" @("id", "product_id", "venue_id", "court_name", "coach_id", "service_date", "start_time", "end_time", "total_stock", "available_stock", "locked_stock", "sold_stock", "price", "status") $inventoryRows
 
-$reviewRows = @()
-for ($i = 1; $i -le 100; $i++) {
-    $reviewVenueId = (($i - 1) % 40) + 1
-    $reviewUserId = (($i * 7) % 200) + 1
-    $reviewRating = 4 + ($i % 2)
-    $reviewRows += ,@(
-        $i,
-        $reviewVenueId,
-        $reviewUserId,
-        $reviewRating,
-        (Sql "场地维护不错，灯光和动线比较舒服，适合下班后约一场。"),
-        (Sql (FileUrl (111 + (($i - 1) % 10)))),
-        ($i % 37),
-        (Sql ("2026-07-{0:D2} 18:00:00" -f ((($i - 1) % 7) + 1)))
-    )
-}
-Add-Insert $sb "venue_reviews" @("id", "venue_id", "user_id", "rating", "content", "image_urls", "likes", "created_at") $reviewRows
-
+Add-Section $sb "博客：每种运动 6 篇，分别覆盖场馆、装备、预算、训练和避坑"
 $blogRows = @()
-for ($i = 1; $i -le 200; $i++) {
-    $sport = SportFor $i
-    $author = (($i * 13) % 200) + 1
-    $isEquipment = $i % 2 -eq 1
-    if ($isEquipment) {
-        $relatedPool = $equipmentIdsBySport[$sport.Code]
-        $relatedId = $relatedPool[($i - 1) % $relatedPool.Count]
-        $relatedType = "EQUIPMENT"
-        $relatedMeta = $equipmentMetaById[$relatedId]
-    } else {
-        $relatedPool = $venueIdsBySport[$sport.Code]
-        $relatedId = $relatedPool[($i - 1) % $relatedPool.Count]
-        $relatedType = "VENUE_PRODUCT"
-        $relatedMeta = $venueMetaById[$relatedId]
+$blogTitles = @("新手第一套装备怎么选", "下班后一小时场馆体验", "进阶训练装备实测", "预算内的周末场地", "训练中最容易忽略的细节", "本周约球复盘")
+$blogContents = @(
+    "从价格、容错和使用频率出发选择，不必一步到顶。优点是容易上手，缺点是高强度对抗上限有限。",
+    "交通和可预约时段比装修更重要。这个选择离地铁近、价格友好，但晚高峰会比较拥挤。",
+    "连续训练后更关注支撑和稳定。它的实战反馈直接，但对动作基础和体能有一定要求。",
+    "按距离、时段和退款规则对比后，这个方案总价可控；不足是热门时间需要提前预约。",
+    "热身、补水和节奏控制会直接影响体验，新手先稳定动作，进阶球友再增加对抗强度。",
+    "本周组局整体顺利，场地灯光和队友沟通都不错；下次会避开晚高峰并提前确认人数。"
+)
+$blogId = 1
+for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+    $sport = $sports[$sportIndex]
+    $authors = $usersBySport[$sport.Code]
+    for ($i = 0; $i -lt 6; $i++) {
+        $isEquipment = $i % 2 -eq 0
+        if ($isEquipment) {
+            $relatedId = $equipmentIdsBySport[$sport.Code][($i / 2) % 3]
+            $relatedType = "EQUIPMENT"
+            $meta = $equipmentMetaById[$relatedId]
+        } else {
+            $relatedId = $venueIdsBySport[$sport.Code][$i % $venueIdsBySport[$sport.Code].Count]
+            $relatedType = "VENUE_PRODUCT"
+            $meta = $venueMetaById[$relatedId]
+        }
+        $blogRows += ,@($blogId, $authors[$i % $authors.Count], (Sql $sport.Code), (Sql "$($sport.Name)：$($blogTitles[$i])"),
+            (Sql $blogContents[$i]), (Sql (FileUrl (81 + (($blogId - 1) % 18)))), (Sql $relatedType), $relatedId,
+            (Sql $meta.Title), (Sql $meta.Cover), (Money $meta.Price), (12 + (($blogId * 17) % 180)), 1,
+            "date_sub(now(), interval $($blogId * 3) hour)")
+        $blogId++
     }
-    $liked = if ($i -le 20) { 80 + $i * 3 } elseif ($i -le 80) { 15 + ($i % 45) } else { $i % 12 }
-    $blogRows += ,@(
-        $i,
-        $author,
-        (Sql $sport.Code),
-        (Sql "$($sport.Name)体验分享 $($i.ToString('000'))"),
-        (Sql "这次体验重点是手感、场地和搭子配合。整体适合周末约球，也适合新手逐步进阶。"),
-        (Sql (FileUrl (81 + (($i - 1) % 30)))),
-        (Sql $relatedType),
-        $relatedId,
-        (Sql $relatedMeta.Title),
-        (Sql $relatedMeta.Cover),
-        (Money $relatedMeta.Price),
-        $liked,
-        1,
-        (Sql ("2026-07-{0:D2} {1:D2}:20:00" -f ((($i - 1) % 7) + 1), (8 + ($i % 12))))
-    )
 }
 Add-Insert $sb "blogs" @("id", "user_id", "sport_code", "title", "content", "image_urls", "related_type", "related_id", "related_title", "related_cover_url", "related_price", "liked", "status", "created_at") $blogRows
 
+Add-Section $sb "普通订单：少量覆盖待支付、已支付和已完成状态"
 $venueOrderRows = @()
-for ($i = 1; $i -le 120; $i++) {
-    $productId = (($i - 1) % 100) + 1
-    $inventoryId = (($productId - 1) * 12) + (($i - 1) % 12) + 1
-    $rank = (($productId - 1) % 8) + 1
-    $venueOrderStatus = if ($i % 7 -eq 0) { "待支付" } elseif ($i % 11 -eq 0) { "已完成" } else { "已支付" }
-    $venueOrderUserId = (($i * 5) % 200) + 1
-    $venueOrderRows += ,@(
-        $i,
-        $venueOrderUserId,
-        $productId,
-        $inventoryId,
-        "null",
-        (Sql "DEMO_AMAP_$rank"),
-        (Sql "高德真实场所快照 $rank"),
-        (Sql "场馆服务订单 $productId"),
-        (Sql $productTypes[($productId - 1) % $productTypes.Count]),
-        (Sql ("2026-07-{0:D2}" -f (8 + ($i % 12)))),
-        (Sql "19:00:00"),
-        (Sql "20:00:00"),
-        (Money (39 + ($productId % 12) * 8)),
-        (Sql $venueOrderStatus),
-        (Sql ("{0:D6}" -f (400000 + $i))),
-        (Sql ("2026-07-{0:D2} 12:00:00" -f ((($i - 1) % 7) + 1)))
-    )
+for ($i = 1; $i -le 12; $i++) {
+    $productId = (($i - 1) % $venueMetaById.Count) + 1
+    $meta = $venueMetaById[$productId]
+    $inventory = (($productId - 1) * 4) + 1
+    $status = @("已支付", "已完成", "待支付")[$i % 3]
+    $paidAt = if ($status -eq "待支付") { "null" } else { "date_sub(now(), interval $i hour)" }
+    $orderUserId = if ($i -le 4) { 1 } else { (($i * 3) % ($userId - 1)) + 1 }
+    $venueOrderRows += ,@($i, $orderUserId, $productId, $inventory,
+        "null", (Sql "DEMO_PLACE_$($meta.Rank)"), (Sql "附近场所快照 $($meta.Rank)"), (Sql $meta.Title),
+        (Sql $productTypes[($productId - 1) % 3]), "date_add(current_date, interval 1 day)", (Sql "19:00:00"), (Sql "20:00:00"),
+        (Money $meta.Price), (Sql $status), (Sql ("{0:D6}" -f (520000 + $i))), $paidAt)
 }
 Add-Insert $sb "order_venue" @("id", "user_id", "product_id", "inventory_id", "venue_id", "amap_place_id", "venue_name", "product_title", "product_type", "service_date", "start_time", "end_time", "amount", "status", "verify_code", "paid_at") $venueOrderRows
 
 $equipmentOrderRows = @()
 $equipmentOrderItemRows = @()
-$itemId = 1
-for ($i = 1; $i -le 80; $i++) {
-    $equipmentId = (($i - 1) % 50) + 1
-    $quantity = ($i % 3) + 1
-    $amount = (49 + (($equipmentId * 17) % 520)) * $quantity
-    $equipmentOrderStatus = if ($i % 9 -eq 0) { "待支付" } elseif ($i % 13 -eq 0) { "已取消" } else { "已支付" }
-    $equipmentOrderUserId = (($i * 9) % 200) + 1
-    $equipmentOrderRows += ,@(
-        $i,
-        $equipmentOrderUserId,
-        (Money $amount),
-        (Sql $equipmentOrderStatus),
-        (Sql "演示收货地址 $i 号"),
-        (Sql ("2026-07-{0:D2} 14:00:00" -f ((($i - 1) % 7) + 1)))
-    )
-    $equipmentOrderItemRows += ,@(
-        $itemId++,
-        $i,
-        $equipmentId,
-        (Sql "精选装备 $equipmentId"),
-        (Sql (FileUrl (56 + (($equipmentId - 1) % 25)))),
-        (Money (49 + (($equipmentId * 17) % 520))),
-        $quantity
-    )
+for ($i = 1; $i -le 8; $i++) {
+    $productId = (($i - 1) % $equipmentMetaById.Count) + 1
+    $meta = $equipmentMetaById[$productId]
+    $quantity = if ($i % 4 -eq 0) { 2 } else { 1 }
+    $status = if ($i % 4 -eq 0) { "待支付" } else { "已支付" }
+    $paidAt = if ($status -eq "待支付") { "null" } else { "date_sub(now(), interval $($i + 2) hour)" }
+    $orderUserId = if ($i -le 3) { 1 } else { (($i * 5) % ($userId - 1)) + 1 }
+    $equipmentOrderRows += ,@($i, $orderUserId,
+        (Money ($meta.Price * $quantity)), (Sql $status), (Sql "演示收货地址 $i 号"), $paidAt)
+    $equipmentOrderItemRows += ,@($i, $i, $productId, (Sql $meta.Title), (Sql $meta.Cover), (Money $meta.Price), $quantity)
 }
 Add-Insert $sb "order_equipment" @("id", "user_id", "total_amount", "status", "address", "paid_at") $equipmentOrderRows
 Add-Insert $sb "order_equipment_item" @("id", "order_id", "product_id", "product_name", "cover_url", "price", "quantity") $equipmentOrderItemRows
 
+Add-Section $sb "秒杀：每种运动各 1 个装备和场馆商品，秒杀价始终低于原商品价"
 $seckillEquipmentRows = @()
-for ($i = 1; $i -le 7; $i++) {
-    $equipmentId = (($i - 1) % 50) + 1
-    $seckillEquipmentRows += ,@($i, $equipmentId, (Money (29 + $i * 30)), (120 + $i * 10), (Sql "2026-07-01 00:00:00"), (Sql "2026-12-31 23:59:59"), 1)
+$seckillEquipmentOrderRows = @()
+$seckillVenueRows = @()
+$seckillVenueOrderRows = @()
+for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+    $seckillId = $sportIndex + 1
+    $equipmentIdForSeckill = $equipmentIdsBySport[$sports[$sportIndex].Code][0]
+    $equipmentMeta = $equipmentMetaById[$equipmentIdForSeckill]
+    $equipmentSeckillPrice = [Math]::Max(1, [Math]::Floor($equipmentMeta.Price * 0.72))
+    $seckillEquipmentRows += ,@($seckillId, $equipmentIdForSeckill, (Money $equipmentSeckillPrice), (18 + $sportIndex * 3),
+        "date_sub(now(), interval 1 day)", "date_add(now(), interval 90 day)", 1)
+    if ($sportIndex -lt 4) {
+        $seckillEquipmentOrderRows += ,@((1000 + $seckillId), $seckillId, $equipmentIdForSeckill, ($sportIndex + 1),
+            (Money $equipmentSeckillPrice), (Sql "已抢到"))
+    }
+
+    $venueIdForSeckill = $venueIdsBySport[$sports[$sportIndex].Code][0]
+    $venueMeta = $venueMetaById[$venueIdForSeckill]
+    $venueSeckillPrice = [Math]::Max(1, [Math]::Floor($venueMeta.Price * 0.70))
+    $seckillVenueRows += ,@($seckillId, $venueIdForSeckill, (Money $venueSeckillPrice), (12 + $sportIndex * 2),
+        "date_sub(now(), interval 1 day)", "date_add(now(), interval 90 day)", 1)
+    if ($sportIndex -lt 3) {
+        $seckillVenueOrderRows += ,@((2000 + $seckillId), $seckillId, $venueIdForSeckill, ($sportIndex + 2),
+            (Money $venueSeckillPrice), (Sql "已抢到"))
+    }
 }
 Add-Insert $sb "seckill_equipment" @("id", "equipment_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillEquipmentRows
-
-$seckillVenueRows = @()
-for ($i = 1; $i -le 3; $i++) {
-    $seckillVenueRows += ,@($i, $i, (Money (19 + $i * 20)), (80 + $i * 10), (Sql "2026-07-01 00:00:00"), (Sql "2026-12-31 23:59:59"), 1)
-}
 Add-Insert $sb "seckill_venue" @("id", "venue_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillVenueRows
-
-$seckillEquipmentOrderRows = @()
-for ($i = 1; $i -le 70; $i++) {
-    $seckillId = (($i - 1) % 7) + 1
-    $equipmentId = $seckillId
-    $seckillEquipmentOrderRows += ,@((1000 + $i), $seckillId, $equipmentId, ((($i * 3) % 200) + 1), (Money (29 + $seckillId * 30)), (Sql "已抢到"))
-}
 Add-Insert $sb "order_seckill_equipment" @("id", "seckill_id", "equipment_id", "user_id", "amount", "status") $seckillEquipmentOrderRows
-
-$seckillVenueOrderRows = @()
-for ($i = 1; $i -le 30; $i++) {
-    $seckillId = (($i - 1) % 3) + 1
-    $seckillVenueOrderRows += ,@((2000 + $i), $seckillId, $seckillId, ((($i * 11) % 200) + 1), (Money (19 + $seckillId * 20)), (Sql "已抢到"))
-}
 Add-Insert $sb "order_seckill_venue" @("id", "seckill_id", "venue_id", "user_id", "amount", "status") $seckillVenueOrderRows
 
+Add-Section $sb "约球活动：每个城市、每种运动 1 场，时间、水平、费用和余位有差异"
 $activityRows = @()
 $memberRows = @()
+$activityId = 1
 $memberId = 1
-for ($i = 1; $i -le 80; $i++) {
-    $city = $cities[($i - 1) % $cities.Count]
-    $sport = $sports[($i - 1) % $sports.Count]
-    $creator = (($i * 5) % 200) + 1
-    $maxPlayers = 4 + ($i % 6)
-    $currentPlayers = 2 + ($i % [Math]::Max(2, $maxPlayers - 1))
-    if ($currentPlayers -gt $maxPlayers) { $currentPlayers = $maxPlayers }
-    $rank = (($i - 1) % 8) + 1
-    $activityStatus = if ($currentPlayers -ge $maxPlayers) { "已满员" } elseif ($i % 8 -eq 0) { "已结束" } else { "招募中" }
-    $activityRows += ,@(
-        $i,
-        (Sql $sport.Code),
-        $creator,
-        $rank,
-        (Sql "amap"),
-        (Sql "DEMO_AMAP_$rank"),
-        (Sql "$($city.Name)$($sport.Name)约球场地$rank"),
-        (Sql "$($sport.Name)下班后一场 $($i.ToString('00'))"),
-        (Sql $city.Name),
-        (Sql ("2026-07-{0:D2} 19:00:00" -f (8 + ($i % 14)))),
-        (Sql ("2026-07-{0:D2} 21:00:00" -f (8 + ($i % 14)))),
-        $maxPlayers,
-        $currentPlayers,
-        (Sql $levels[$i % $levels.Count]),
-        (Sql "AA"),
-        (Sql $activityStatus)
-    )
-    for ($m = 1; $m -le $currentPlayers; $m++) {
-        $userId = if ($m -eq 1) { $creator } else { (($creator + $m * 13) % 200) + 1 }
-        $role = if ($m -eq 1) { "OWNER" } else { "MEMBER" }
-        $memberRows += ,@($memberId++, $i, $userId, (Sql $role), (Sql "已加入"))
+for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
+    $city = $cities[$cityIndex]
+    for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
+        $sport = $sports[$sportIndex]
+        $matchedUsers = $usersBySlot["$($city.Name)|$($sport.Code)"]
+        $maxPlayers = @(4, 6, 8, 6, 4, 8)[$sportIndex]
+        $currentPlayers = if (($activityId % 4) -eq 0) { $maxPlayers - 1 } else { [Math]::Min(3, $matchedUsers.Count) }
+        $currentPlayers = [Math]::Min($currentPlayers, $matchedUsers.Count)
+        $level = @("新手友好", "初级以上", "中级对抗", "不限")[$activityId % 4]
+        $fee = @("AA", "免费", "场地费均摊")[$activityId % 3]
+        $creator = $matchedUsers[0]
+        $activityKind = if ($level -eq "新手友好") { "新手友好局" } else { "下班对抗局" }
+        $activityRows += ,@($activityId, (Sql $sport.Code), $creator, (($sportIndex * 2) + (($activityId % 2) + 1)),
+            (Sql "amap"), (Sql "DEMO_$($cityIndex + 1)_$($sportIndex + 1)"), (Sql "$($city.Name)$($sport.Name)附近场地"),
+            (Sql "$($sport.Name)$activityKind"), (Sql $city.Name),
+            "timestamp(date_add(current_date, interval $(($activityId % 7) + 1) day), '19:00:00')",
+            "timestamp(date_add(current_date, interval $(($activityId % 7) + 1) day), '21:00:00')",
+            $maxPlayers, $currentPlayers, (Sql $level), (Sql $fee), (Sql "招募中"))
+        for ($m = 0; $m -lt $currentPlayers; $m++) {
+            $memberUser = $matchedUsers[$m % $matchedUsers.Count]
+            $memberRole = if ($m -eq 0) { "OWNER" } else { "MEMBER" }
+            $memberRows += ,@($memberId++, $activityId, $memberUser, (Sql $memberRole), (Sql "已加入"))
+        }
+        $activityId++
     }
 }
 Add-Insert $sb "sport_activities" @("id", "sport_code", "creator_id", "venue_id", "place_source", "place_id", "venue_name", "title", "city", "start_time", "end_time", "max_players", "current_players", "level_required", "fee_type", "status") $activityRows
 Add-Insert $sb "sport_activity_members" @("id", "activity_id", "user_id", "role", "status") $memberRows
 
-$cartEquipmentRows = @()
-for ($i = 1; $i -le 12; $i++) {
-    $cartEquipmentProductId = (($i * 2) % 50) + 1
-    $cartEquipmentQuantity = ($i % 3) + 1
-    $cartEquipmentRows += ,@($i, $i, $cartEquipmentProductId, $cartEquipmentQuantity)
-}
-Add-Insert $sb "cart_equipment" @("id", "user_id", "product_id", "quantity") $cartEquipmentRows
-
+Add-Section $sb "购物车：仅给演示账号准备少量待结算项目"
+$cartEquipmentRows = @(
+    @(1, 1, 1, 1),
+    @(2, 1, 2, 2)
+)
 $cartVenueRows = @()
-for ($i = 1; $i -le 8; $i++) {
-    $productId = (($i - 1) % 100) + 1
-    $cartVenueInventoryId = (($productId - 1) * 12) + 1
-    $cartVenueRows += ,@($i, $i, $productId, $cartVenueInventoryId, 1)
-}
+$cartVenueRows += ,@(1, 1, 1, 1, 1)
+Add-Insert $sb "cart_equipment" @("id", "user_id", "product_id", "quantity") $cartEquipmentRows
 Add-Insert $sb "cart_venue" @("id", "user_id", "product_id", "inventory_id", "quantity") $cartVenueRows
 
 Set-Utf8NoBomContent $DataSqlPath $sb.ToString()
@@ -730,14 +615,4 @@ Upload-DemoAssets
 Write-Host "Light demo data generated:" -ForegroundColor Green
 Write-Host "  SQL:    $DataSqlPath"
 Write-Host "  Assets: $AssetsRoot"
-Write-Host "Counts: users=200, venueItems=100, inventory=1200, equipment=50, blogs=200, venueOrders=120, equipmentOrders=80, seckillOrders=100, follows=$($followRows.Count), activities=80, members=$($memberRows.Count), files=120"
-
-
-
-
-
-
-
-
-
-
+Write-Host "Counts: users=$($userRows.Count), places=$($placeRows.Count), reviews=$($reviewRows.Count), venueItems=$($venueRows.Count), inventory=$($inventoryRows.Count), equipment=$($equipmentRows.Count), blogs=$($blogRows.Count), activities=$($activityRows.Count), files=$($fileRows.Count)"

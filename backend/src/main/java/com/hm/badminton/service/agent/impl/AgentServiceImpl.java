@@ -205,7 +205,8 @@ public class AgentServiceImpl implements IAgentService {
 
     private AgentContext buildContext(AgentChatRequest request, LoginUser loginUser) {
         String message = request.getMessage();
-        String sportCode = normalizeSport(firstNotBlank(request.getSportCode(), guessSport(message)));
+        List<String> sportCodes = normalizeSports(request.getSportCodes(), request.getSportCode(), guessSport(message));
+        List<String> querySports = sportCodes.isEmpty() ? List.of("") : sportCodes;
         String city = firstNotBlank(request.getCity(), loginUser == null ? null : loginUser.getCity(), "西安市");
         Double lng = request.getLng() != null ? request.getLng() : loginUser == null ? null : loginUser.getLongitude();
         Double lat = request.getLat() != null ? request.getLat() : loginUser == null ? null : loginUser.getLatitude();
@@ -216,32 +217,34 @@ public class AgentServiceImpl implements IAgentService {
         boolean broad = !wantsActivity && !wantsEquipment && !wantsPlace;
 
         List<AgentCard> cards = new ArrayList<>();
-        List<AgentCard> places = List.of();
-        if (wantsPlace || broad) {
-            places = placeTool.searchNearbyPlaces(sportCode, city, lng, lat, 8000, null);
-            cards.addAll(places.stream().limit(3).toList());
-            for (AgentCard place : places.stream().limit(3).toList()) {
-                Integer placeRank = placeRankOf(place);
-                if (placeRank != null) {
-                    String placeSportCode = firstNotBlank(stringMeta(place, "sportCode"), sportCode);
-                    cards.addAll(venueProductTool.searchVenueProducts(placeSportCode, placeRank, null, budget).stream().limit(1).toList());
+        for (String sportCode : querySports) {
+            List<AgentCard> places = List.of();
+            if (wantsPlace || broad) {
+                places = placeTool.searchNearbyPlaces(sportCode, city, lng, lat, 8000, null);
+                cards.addAll(places.stream().limit(2).toList());
+                for (AgentCard place : places.stream().limit(2).toList()) {
+                    Integer placeRank = placeRankOf(place);
+                    if (placeRank != null) {
+                        String placeSportCode = firstNotBlank(stringMeta(place, "sportCode"), sportCode);
+                        cards.addAll(venueProductTool.searchVenueProducts(placeSportCode, placeRank, null, budget).stream().limit(1).toList());
+                    }
+                }
+            }
+            if (wantsActivity || broad) {
+                Long currentUserId = loginUser == null ? null : loginUser.getId();
+                cards.addAll(activityTool.searchJoinableActivities(sportCode, city, loginUser == null ? null : loginUser.getLevel(), currentUserId)
+                        .stream()
+                        .limit(2)
+                        .toList());
+            }
+            if (wantsEquipment || broad) {
+                cards.addAll(equipmentTool.searchEquipment(sportCode, cleanKeyword(message), budget).stream().limit(2).toList());
+                if (containsAny(message, "秒杀", "特价", "抢购", "便宜")) {
+                    cards.addAll(equipmentTool.searchSeckillEquipment(sportCode).stream().limit(2).toList());
                 }
             }
         }
-        if (wantsActivity || broad) {
-            Long currentUserId = loginUser == null ? null : loginUser.getId();
-            cards.addAll(activityTool.searchJoinableActivities(sportCode, city, loginUser == null ? null : loginUser.getLevel(), currentUserId)
-                    .stream()
-                    .limit(3)
-                    .toList());
-        }
-        if (wantsEquipment || broad) {
-            cards.addAll(equipmentTool.searchEquipment(sportCode, cleanKeyword(message), budget).stream().limit(4).toList());
-            if (containsAny(message, "秒杀", "特价", "抢购", "便宜")) {
-                cards.addAll(equipmentTool.searchSeckillEquipment(sportCode).stream().limit(3).toList());
-            }
-        }
-        return new AgentContext(sportCode, city, lng, lat, budget, cards);
+        return new AgentContext(sportCodes, city, lng, lat, budget, cards.stream().limit(18).toList());
     }
 
     private String callModelOrFallback(AgentChatRequest request, AgentContext context, ChatClient.Builder builder) {
@@ -251,7 +254,7 @@ public class AgentServiceImpl implements IAgentService {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("userMessage", request.getMessage());
-            payload.put("sportCode", context.sportCode());
+            payload.put("sportCodes", context.sportCodes());
             payload.put("city", context.city());
             payload.put("budget", context.budget());
             payload.put("cards", cardsForModel(context.cards()));
@@ -331,7 +334,7 @@ public class AgentServiceImpl implements IAgentService {
             addQuickReply(replies, "帮我扩大附近范围");
             addQuickReply(replies, "推荐新手装备");
             addQuickReply(replies, "帮我找能加入的局");
-        } else if (context.sportCode() != null && !context.sportCode().isBlank()) {
+        } else if (!context.sportCodes().isEmpty()) {
             addQuickReply(replies, "换成离我更近的");
         }
         return replies.stream().limit(4).toList();
@@ -478,6 +481,25 @@ public class AgentServiceImpl implements IAgentService {
         return sportCode == null ? "" : sportCode.trim();
     }
 
+    private List<String> normalizeSports(List<String> sportCodes, String sportCode, String guessedSport) {
+        List<String> values = new ArrayList<>();
+        if (sportCodes != null) {
+            sportCodes.stream()
+                    .map(this::normalizeSport)
+                    .filter(value -> !value.isBlank())
+                    .distinct()
+                    .limit(6)
+                    .forEach(values::add);
+        }
+        if (values.isEmpty()) {
+            String fallback = normalizeSport(firstNotBlank(sportCode, guessedSport));
+            if (!fallback.isBlank()) {
+                values.add(fallback);
+            }
+        }
+        return values;
+    }
+
     private String guessSport(String message) {
         String text = message == null ? "" : message;
         if (text.contains("乒乓") || text.contains("乒乓球")) return "table_tennis";
@@ -531,7 +553,7 @@ public class AgentServiceImpl implements IAgentService {
         return "";
     }
 
-    private record AgentContext(String sportCode,
+    private record AgentContext(List<String> sportCodes,
                                 String city,
                                 Double lng,
                                 Double lat,
