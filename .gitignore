@@ -4,6 +4,19 @@ dist/
 .idea/
 .vscode/
 *.iml
+logs/
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Local environment files may contain passwords, API keys and mail authorization codes.
+.env
+.env.*
+!.env.example
+!*.env.example
+deploy/.env
+deploy/production/.env
+
+# Local runtime data and uploaded files must stay on the deployment server.
+data/
+uploads/
