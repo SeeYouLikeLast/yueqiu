@@ -6,9 +6,12 @@ import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.LoginUser;
 import com.hm.badminton.dto.social.ActivityRequest;
 import com.hm.badminton.dto.social.ProfileRequest;
+import com.hm.badminton.dto.social.VenueActivityBookingRequest;
+import com.hm.badminton.dto.social.VenueActivityBookingResult;
 import com.hm.badminton.entity.PlayerProfile;
 import com.hm.badminton.entity.SportActivity;
 import com.hm.badminton.service.social.ISocialService;
+import com.hm.badminton.service.social.IVenueActivityBookingService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,10 +28,14 @@ import java.util.Map;
 public class SocialController {
 
     private final ISocialService socialService;
+    private final IVenueActivityBookingService venueActivityBookingService;
     private final UserContext userContext;
 
-    public SocialController(ISocialService socialService, UserContext userContext) {
+    public SocialController(ISocialService socialService,
+                            IVenueActivityBookingService venueActivityBookingService,
+                            UserContext userContext) {
         this.socialService = socialService;
+        this.venueActivityBookingService = venueActivityBookingService;
         this.userContext = userContext;
     }
 
@@ -69,15 +76,29 @@ public class SocialController {
     public ApiResponse<PageResult<SportActivity>> activities(@RequestParam(required = false) String sport,
                                                              @RequestParam(required = false) String city,
                                                              @RequestParam(required = false) String level,
+                                                             @RequestParam(defaultValue = "others") String scope,
                                                              @RequestParam(defaultValue = "1") int page,
                                                              @RequestParam(defaultValue = "12") int size) {
         LoginUser user = userContext.current().orElse(null);
-        return ApiResponse.ok(socialService.activities(sport, firstText(city, user == null ? null : user.getCity()), level, page, size));
+        return ApiResponse.ok(socialService.activities(
+                sport,
+                firstText(city, user == null ? null : user.getCity()),
+                level,
+                user == null ? null : user.getId(),
+                scope,
+                page,
+                size));
     }
 
     @PostMapping("/activities")
     public ApiResponse<Map<String, Long>> create(@Valid @RequestBody ActivityRequest request) {
         return ApiResponse.ok(Map.of("activityId", socialService.createActivity(userContext.requireUserId(), request)));
+    }
+
+    /** 用户确认后购买指定场馆时段，并在同一时段发起约球活动。 */
+    @PostMapping("/activities/book-and-create")
+    public ApiResponse<VenueActivityBookingResult> bookAndCreate(@Valid @RequestBody VenueActivityBookingRequest request) {
+        return ApiResponse.ok(venueActivityBookingService.bookAndCreateActivity(userContext.requireUserId(), request));
     }
 
     @PostMapping("/activities/{id}/join")

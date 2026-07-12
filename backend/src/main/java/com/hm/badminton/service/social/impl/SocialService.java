@@ -75,19 +75,29 @@ public class SocialService implements ISocialService {
     }
 
     @Override
-    public PageResult<SportActivity> activities(String sportCode, String city, String level, int page, int size) {
+    public PageResult<SportActivity> activities(String sportCode,
+                                                String city,
+                                                String level,
+                                                Long currentUserId,
+                                                String scope,
+                                                int page,
+                                                int size) {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 50);
         String normalizedSport = normalizeSport(sportCode);
         String cityText = blankToNull(city);
         String levelText = blankToNull(level);
-        String key = RedisConstants.SOCIAL_ACTIVITIES_KEY + listCacheKey(normalizedSport, cityText, null, levelText, safePage, safeSize, null, null);
-        return cacheClient.querySimple(key, new TypeReference<PageResult<SportActivity>>() {
-        }, () -> {
-            Long total = socialMapper.countActivities(normalizedSport, cityText, levelText);
-            return new PageResult<>(socialMapper.selectActivities(normalizedSport, cityText, levelText, safeSize, (safePage - 1) * safeSize),
-                    total == null ? 0 : total, safePage, safeSize);
-        }, RedisConstants.SOCIAL_LIST_TTL);
+        String normalizedScope = normalizeActivityScope(scope, currentUserId);
+
+        // 活动的“我发起/我加入”状态在用户刚完成写操作后应立即可见，
+        // 因此这里直接读取数据库，避免一分钟列表缓存造成刚发起的活动短暂缺失。
+        Long total = socialMapper.countActivities(normalizedSport, cityText, levelText, currentUserId, normalizedScope);
+        return new PageResult<>(
+                socialMapper.selectActivities(normalizedSport, cityText, levelText, currentUserId, normalizedScope,
+                        safeSize, (safePage - 1) * safeSize),
+                total == null ? 0 : total,
+                safePage,
+                safeSize);
     }
 
     @Override
@@ -148,6 +158,17 @@ public class SocialService implements ISocialService {
         return isAllSport(sportCode) ? null : sportCatalogService.require(sportCode).getCode();
     }
 
+    private String normalizeActivityScope(String scope, Long currentUserId) {
+        String normalized = scope == null ? "others" : scope.trim().toLowerCase(Locale.ROOT);
+        if (!"created".equals(normalized) && !"joined".equals(normalized) && !"others".equals(normalized)) {
+            throw new BusinessException("活动筛选类型无效");
+        }
+        if (("created".equals(normalized) || "joined".equals(normalized)) && currentUserId == null) {
+            throw new BusinessException(401, "请先登录后查看我的约球活动");
+        }
+        return normalized;
+    }
+
     private String resolveVenueName(ActivityRequest request) {
         if (request.getVenueName() != null && !request.getVenueName().isBlank()) {
             return request.getVenueName().trim();
@@ -172,8 +193,8 @@ public class SocialService implements ISocialService {
         if (!request.getEndTime().isAfter(request.getStartTime())) {
             throw new BusinessException("结束时间必须晚于开始时间");
         }
-        if (request.getMaxPlayers() == null || request.getMaxPlayers() < 2) {
-            throw new BusinessException("活动人数至少为 2 人");
+        if (request.getMaxPlayers() == null || request.getMaxPlayers() < 2 || request.getMaxPlayers() > 20) {
+            throw new BusinessException("活动人数需为 2 至 20 人");
         }
     }
 

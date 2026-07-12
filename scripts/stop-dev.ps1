@@ -49,6 +49,26 @@ function Convert-ToWslPath {
     return "/mnt/$drive/$rest"
 }
 
+function Stop-WslKeepAlive {
+    $command = @'
+pid_file=/tmp/hm-badminton-wsl-keepalive.pid
+if [ -r "$pid_file" ]; then
+  pid=$(cat "$pid_file")
+  kill "$pid" 2>/dev/null || true
+  rm -f "$pid_file"
+fi
+'@
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($command))
+    $bashCommand = "echo $encodedCommand | base64 -d | bash"
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        & wsl -e bash -lc $bashCommand 2>$null
+    } finally {
+        $ErrorActionPreference = $previousErrorPreference
+    }
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 $DeployDir = Join-Path $ProjectRoot "deploy"
@@ -67,6 +87,7 @@ if ($StopDocker) {
     if ($LASTEXITCODE -ne 0) {
         throw "Docker services failed to stop. Check Docker inside WSL."
     }
+    Stop-WslKeepAlive
 }
 
 Write-Step "Done"

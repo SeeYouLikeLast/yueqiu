@@ -148,9 +148,22 @@ public interface SocialMapper {
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
             <if test="city != null and city != ''">and a.city = #{city}</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
+            <if test="scope == 'created'">and a.creator_id = #{userId}</if>
+            <if test="scope == 'joined'">
+              and a.creator_id &lt;&gt; #{userId}
+              and exists (select 1 from sport_activity_members m where m.activity_id = a.id and m.user_id = #{userId})
+            </if>
+            <if test="scope == 'others' and userId != null">
+              and a.creator_id &lt;&gt; #{userId}
+              and not exists (select 1 from sport_activity_members m where m.activity_id = a.id and m.user_id = #{userId})
+            </if>
             </script>
             """)
-    Long countActivities(@Param("sportCode") String sportCode, @Param("city") String city, @Param("level") String level);
+    Long countActivities(@Param("sportCode") String sportCode,
+                         @Param("city") String city,
+                         @Param("level") String level,
+                         @Param("userId") Long userId,
+                         @Param("scope") String scope);
 
     @Select("""
             <script>
@@ -165,6 +178,15 @@ public interface SocialMapper {
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
             <if test="city != null and city != ''">and a.city = #{city}</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
+            <if test="scope == 'created'">and a.creator_id = #{userId}</if>
+            <if test="scope == 'joined'">
+              and a.creator_id &lt;&gt; #{userId}
+              and exists (select 1 from sport_activity_members m where m.activity_id = a.id and m.user_id = #{userId})
+            </if>
+            <if test="scope == 'others' and userId != null">
+              and a.creator_id &lt;&gt; #{userId}
+              and not exists (select 1 from sport_activity_members m where m.activity_id = a.id and m.user_id = #{userId})
+            </if>
             order by a.start_time asc
             limit #{size} offset #{offset}
             </script>
@@ -192,6 +214,8 @@ public interface SocialMapper {
     List<SportActivity> selectActivities(@Param("sportCode") String sportCode,
                                          @Param("city") String city,
                                          @Param("level") String level,
+                                         @Param("userId") Long userId,
+                                         @Param("scope") String scope,
                                          @Param("size") int size,
                                          @Param("offset") int offset);
 

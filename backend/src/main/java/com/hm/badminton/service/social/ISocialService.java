@@ -21,7 +21,17 @@ public interface ISocialService {
 
     void saveProfile(Long userId, ProfileRequest request);
 
-    PageResult<SportActivity> activities(String sportCode, String city, String level, int page, int size);
+    /**
+     * 查询约球活动。scope 将活动按当前用户关系拆成三个互斥视图：
+     * created（我发起）、joined（我加入）、others（尚未加入的他人活动）。
+     */
+    PageResult<SportActivity> activities(String sportCode,
+                                         String city,
+                                         String level,
+                                         Long currentUserId,
+                                         String scope,
+                                         int page,
+                                         int size);
 
     Long createActivity(Long userId, ActivityRequest request);
 

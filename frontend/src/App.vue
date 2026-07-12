@@ -175,6 +175,7 @@ type Player = {
 
 type SportActivity = {
   id: number
+  creatorId: number
   creatorName: string
   sportCode: string
   venueName: string
@@ -249,6 +250,7 @@ type RegeoLocation = {
 
 type BlogChannel = 'follow' | 'recommend' | 'sport'
 type ProfileMode = 'me' | 'public'
+type ActivityScope = 'created' | 'others' | 'joined'
 
 type ProfileOrderCard = {
   key: string
@@ -347,6 +349,15 @@ type AgentPlaceBundle = {
   deal?: AgentCard
 }
 
+type AgentVenueBooking = {
+  product: AgentCard
+  place?: AgentCard
+  inventories: VenueInventory[]
+  inventoryId: number
+  maxPlayers: number
+  levelRequired: string
+}
+
 type ScrollResult<T> = {
   list: T[]
   minTime?: number
@@ -372,11 +383,11 @@ const VENUE_TEMPLATE_COUNT = 2
 const FALLBACK_IMAGE = '/api/files/31/download'
 const FALLBACK_AVATAR = '/api/files/1/download'
 const HEADER_SCROLL_DELTA = 8
-const HEADER_HIDE_AFTER = 80
+const HEADER_HIDE_AFTER = 190
 const HEADER_SHOW_ACCUMULATE = 10
-const HEADER_HIDE_ACCUMULATE = 14
+const HEADER_HIDE_ACCUMULATE = 20
+const PLAYER_COUNT_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20]
 const AGENT_WELCOME_MESSAGE = '你好，我是约个球助手。可以帮你找附近场所、可加入的约球活动，也能按预算推荐装备。'
-const AGENT_LOCAL_STORAGE_KEY = 'hm-badminton-agent-chat'
 const INITIAL_AGENT_QUICK_REPLIES = ['今晚附近能打球吗', '帮我找能加入的局', '推荐新手装备', '50 元以内的场地']
 const FALLBACK_AGENT_FOLLOW_UPS = ['再给我 3 个选择', '帮我按距离筛选', '帮我按预算筛选', '这些哪个更适合新手']
 const activeTab = ref<Tab>('home')
@@ -413,6 +424,7 @@ const blogSport = ref('')
 const blogKeyword = ref('')
 const players = ref<Player[]>([])
 const activities = ref<SportActivity[]>([])
+const activityScope = ref<ActivityScope>('others')
 const venueOrders = ref<ProfileOrderCard[]>([])
 const equipmentOrders = ref<ProfileOrderCard[]>([])
 const cartItems = ref<CartItem[]>([])
@@ -421,6 +433,7 @@ const socialProfile = ref<Player | null>(null)
 const viewedUserProfile = ref<UserPublicProfile | null>(null)
 const profileBlogs = ref<BlogPost[]>([])
 const selectedBlog = ref<BlogPost | null>(null)
+const relatedBlogReturn = ref<BlogPost | null>(null)
 const agentMessages = ref<AgentMessage[]>(defaultAgentMessages())
 const agentInput = ref('')
 const agentInputPlaceholder = ref('问问附近场地、约球活动、装备推荐')
@@ -436,6 +449,8 @@ const agentHistoryLoaded = ref(false)
 const agentHistoryVisible = ref(false)
 const deletingAgentConversation = ref<AgentConversation | null>(null)
 const loadingAgentHistory = ref(false)
+const agentVenueBooking = ref<AgentVenueBooking | null>(null)
+const agentVenueBookingSubmitting = ref(false)
 const blogComposerVisible = ref(false)
 const blogComposerReturnTab = ref<Tab>('seckill')
 const cartCount = ref(0)
@@ -471,7 +486,6 @@ const headerVisible = ref(true)
 let lastHeaderScrollTop = 0
 let headerScrollUpDistance = 0
 let headerScrollDownDistance = 0
-let lastTouchClientY: number | null = null
 
 const loggedIn = computed(() => Boolean(authToken.value))
 const activeSport = computed(() => sports.value.find((sport) => sport.code === selectedSport.value) || ALL_SPORT)
@@ -502,6 +516,8 @@ const assistantFabPrompt = computed(() => {
   return '帮我看看附近有什么适合的场地或约球活动'
 })
 const hasAgentConversation = computed(() => agentMessages.value.some((item) => item.role === 'user'))
+const agentBookingInventory = computed(() => agentVenueBooking.value?.inventories
+  .find((item) => item.id === agentVenueBooking.value?.inventoryId) || null)
 const visibleAgentQuickReplies = computed(() => agentThinking.value || agentSportPickerVisible.value ? [] : agentQuickReplies.value.slice(0, 4))
 const hasMorePlaces = computed(() => places.value.length < placesTotal.value)
 const hasMoreVenueSales = computed(() => venueSaleItems.value.length < venueSalesTotal.value)
@@ -827,6 +843,8 @@ function handleRequestError(error: unknown) {
 }
 
 function defaultAgentMessages(): AgentMessage[] {
+  // Guest conversations are intentionally in-memory only. A refresh starts with a clean assistant.
+  if (!authToken.value) return []
   return [
     {
       id: 'welcome',
@@ -855,33 +873,6 @@ function resetAgentChat() {
   loadingAgentHistory.value = false
 }
 
-function saveGuestAgentChat() {
-  if (loggedIn.value) return
-  localStorage.setItem(AGENT_LOCAL_STORAGE_KEY, JSON.stringify({
-    conversationId: agentConversationId.value,
-    messages: agentMessages.value,
-    quickReplies: agentQuickReplies.value
-  }))
-}
-
-function restoreGuestAgentChat() {
-  try {
-    const raw = localStorage.getItem(AGENT_LOCAL_STORAGE_KEY)
-    if (!raw) return
-    const parsed = JSON.parse(raw) as { conversationId?: number; messages?: AgentMessage[] }
-    if (Array.isArray(parsed.messages) && parsed.messages.length) {
-      agentMessages.value = parsed.messages
-      agentConversationId.value = parsed.conversationId || null
-      agentQuickReplies.value = normalizeQuickReplies((parsed as { quickReplies?: string[] }).quickReplies)
-      if (!agentQuickReplies.value.length) {
-        syncAgentQuickRepliesFromMessages()
-      }
-    }
-  } catch {
-    localStorage.removeItem(AGENT_LOCAL_STORAGE_KEY)
-  }
-}
-
 function toAgentMessage(record: AgentMessageRecord): AgentMessage | null {
   const role = record.role === 'user' ? 'user' : record.role === 'assistant' ? 'assistant' : null
   if (!role || !record.content) return null
@@ -896,7 +887,10 @@ function toAgentMessage(record: AgentMessageRecord): AgentMessage | null {
 async function loadLatestAgentHistory() {
   if (agentHistoryLoaded.value) return
   if (!loggedIn.value) {
-    restoreGuestAgentChat()
+    // Do not restore guest messages after a refresh. Login is required for persistent history.
+    agentMessages.value = []
+    agentConversationId.value = null
+    agentQuickReplies.value = initialAgentQuickReplies()
     agentHistoryLoaded.value = true
     return
   }
@@ -992,9 +986,6 @@ function startNewAgentConversation() {
   agentSelectedSportCodes.value = []
   agentThinking.value = false
   agentInput.value = ''
-  if (!loggedIn.value) {
-    localStorage.removeItem(AGENT_LOCAL_STORAGE_KEY)
-  }
   void nextTick(() => {
     document.getElementById('agent-input')?.focus()
   })
@@ -1138,7 +1129,7 @@ async function login() {
     })
     setToken(result.token)
     authToken.value = result.token
-    agentHistoryLoaded.value = false
+    resetAgentChat()
     activeTab.value = authReturnTab.value
     authPageVisible.value = false
     const located = await refreshCurrentLocation({ reload: false, showMessage: false })
@@ -1366,29 +1357,41 @@ async function loadSeckillCategories() {
   seckillCategorySport.value = selectedSport.value
 }
 
-async function loadSocial(page = 1, append = false) {
+async function loadPlayers(page = 1, append = false) {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
-  const activityParams = new URLSearchParams()
-  if (selectedSport.value) activityParams.set('sport', selectedSport.value)
   if (!loggedIn.value) {
     params.set('lng', String(placeQuery.lng))
     params.set('lat', String(placeQuery.lat))
   }
   if (!loggedIn.value && placeQuery.city.trim()) {
     params.set('city', placeQuery.city.trim())
-    activityParams.set('city', placeQuery.city.trim())
   }
   setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
-  setPagingParams(activityParams, page, SOCIAL_PAGE_SIZE, 12)
   const playersResult = await api<PageResult<Player>>(`/api/social/players?${params}`)
-  const activitiesResult = await api<PageResult<SportActivity>>(`/api/social/activities?${activityParams}`)
   players.value = append ? appendByKey(players.value, playersResult.records, (player) => player.userId) : playersResult.records
-  activities.value = append ? appendById(activities.value, activitiesResult.records) : activitiesResult.records
   playersPage.value = playersResult.page
   playersTotal.value = playersResult.total
+}
+
+async function loadActivities(page = 1, append = false) {
+  const params = new URLSearchParams({ scope: activityScope.value })
+  if (selectedSport.value) params.set('sport', selectedSport.value)
+  if (!loggedIn.value && placeQuery.city.trim()) {
+    params.set('city', placeQuery.city.trim())
+  }
+  setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
+  const activitiesResult = await api<PageResult<SportActivity>>(`/api/social/activities?${params}`)
+  activities.value = append ? appendById(activities.value, activitiesResult.records) : activitiesResult.records
   activitiesPage.value = activitiesResult.page
   activitiesTotal.value = activitiesResult.total
+}
+
+async function loadSocial(page = 1, append = false) {
+  await Promise.all([
+    loadPlayers(page, append),
+    loadActivities(page, append)
+  ])
 }
 
 async function loadCartItems(force = false) {
@@ -1587,51 +1590,6 @@ function handleWindowScroll() {
   }
 }
 
-function applyHeaderScrollIntent(deltaY: number) {
-  if (!showPhoneHeader.value || Math.abs(deltaY) < 2) return
-  const current = currentScrollTop()
-  if (current <= 12) {
-    resetHeaderVisibility()
-    return
-  }
-  if (deltaY < 0) {
-    headerVisible.value = true
-    headerScrollUpDistance = 0
-    headerScrollDownDistance = 0
-    lastHeaderScrollTop = current
-    return
-  }
-  if (current > HEADER_HIDE_AFTER) {
-    headerScrollDownDistance += deltaY
-    headerScrollUpDistance = 0
-    if (headerScrollDownDistance >= HEADER_HIDE_ACCUMULATE) {
-      headerVisible.value = false
-      headerScrollDownDistance = 0
-      lastHeaderScrollTop = current
-    }
-  }
-}
-
-function handleHeaderWheel(event: WheelEvent) {
-  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
-  applyHeaderScrollIntent(event.deltaY)
-}
-
-function handleHeaderTouchStart(event: TouchEvent) {
-  lastTouchClientY = event.touches[0]?.clientY ?? null
-}
-
-function handleHeaderTouchMove(event: TouchEvent) {
-  const currentY = event.touches[0]?.clientY
-  if (currentY == null || lastTouchClientY == null) return
-  applyHeaderScrollIntent(lastTouchClientY - currentY)
-  lastTouchClientY = currentY
-}
-
-function handleHeaderTouchEnd() {
-  lastTouchClientY = null
-}
-
 function updateHeaderVisibility() {
   if (!showPhoneHeader.value) return
   const current = currentScrollTop()
@@ -1669,6 +1627,11 @@ function resetHeaderVisibility() {
   lastHeaderScrollTop = currentScrollTop()
 }
 
+function scrollToPageTop() {
+  window.scrollTo({ top: 0, behavior: 'auto' })
+  resetHeaderVisibility()
+}
+
 function refreshActivityWindowIfExpired(force = false) {
   const currentStart = activityForm.startTime ? new Date(activityForm.startTime) : null
   if (!force && currentStart && currentStart > new Date()) return
@@ -1683,6 +1646,7 @@ async function switchTab(tab: Tab) {
     homeReturnTab.value = null
   }
   selectedBlog.value = null
+  relatedBlogReturn.value = null
   blogComposerVisible.value = false
   profileEditorVisible.value = false
   if (tab === 'social') {
@@ -1741,6 +1705,16 @@ function updateActivityTitle(sportCode = activityForm.sportCode) {
 
 function changeActivitySport() {
   updateActivityTitle()
+}
+
+async function changeActivityScope(scope: ActivityScope) {
+  if ((scope === 'created' || scope === 'joined') && !requireLogin('请先登录后查看我的约球活动')) return
+  if (activityScope.value === scope) return
+  activityScope.value = scope
+  activities.value = []
+  activitiesPage.value = 1
+  activitiesTotal.value = 0
+  await wrap(() => loadActivities())
 }
 
 function applyActivityPlace(place: Place) {
@@ -1903,6 +1877,7 @@ async function toggleBlogFollow(blog: BlogPost) {
 async function openBlogDetail(blog: BlogPost) {
   await wrap(async () => {
     await ensureUserProfile()
+    relatedBlogReturn.value = null
     selectedBlog.value = await api<BlogPost>(`/api/blogs/${blog.id}`)
   })
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1910,6 +1885,31 @@ async function openBlogDetail(blog: BlogPost) {
 
 function closeBlogDetail() {
   selectedBlog.value = null
+  relatedBlogReturn.value = null
+}
+
+function rememberBlogReturn(blog: BlogPost) {
+  relatedBlogReturn.value = {
+    ...blog,
+    images: [...blog.images]
+  }
+}
+
+async function returnToBlogDetail() {
+  const blog = relatedBlogReturn.value
+  relatedBlogReturn.value = null
+  selectedPlace.value = null
+  venueReviews.value = []
+  venueSaleView.value = null
+  venueSaleItems.value = []
+  activeTab.value = 'seckill'
+  if (!blog) {
+    await wrap(loadBlogs)
+    return
+  }
+  selectedBlog.value = blog
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function selectedBlogRelatedOption() {
@@ -2075,6 +2075,7 @@ async function toggleProfileFollow() {
 }
 
 async function openBlogRelated(blog: BlogPost) {
+  rememberBlogReturn(selectedBlog.value || blog)
   selectedBlog.value = null
   if (blog.relatedType === 'EQUIPMENT') {
     activeTab.value = 'equipment'
@@ -2358,6 +2359,7 @@ async function showNearbyPlaces() {
 }
 
 async function openVenueSalePage(productType: VenueSaleType, title: string, subtitle: string) {
+  scrollToPageTop()
   activeTab.value = 'home'
   selectedPlace.value = null
   venueReviews.value = []
@@ -2372,10 +2374,14 @@ async function openVenueSalePage(productType: VenueSaleType, title: string, subt
     await loadVenueSaleItems()
   })
   await nextTick()
-  document.getElementById('venue-sale-page')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  scrollToPageTop()
 }
 
 async function closeVenueSalePage() {
+  if (relatedBlogReturn.value) {
+    await returnToBlogDetail()
+    return
+  }
   const returnTab = homeReturnTab.value
   venueSaleView.value = null
   venueSaleItems.value = []
@@ -2485,7 +2491,6 @@ async function sendAgentMessage(text = agentInput.value, requestedSportCodes: st
     { id: userMessageId, role: 'user', content }
   ]
   agentQuickReplies.value = []
-  saveGuestAgentChat()
   agentThinking.value = true
   await nextTick()
   scrollAgentMessageIntoView(userMessageId)
@@ -2514,7 +2519,6 @@ async function sendAgentMessage(text = agentInput.value, requestedSportCodes: st
         cards: result.cards || []
       }
     ]
-    saveGuestAgentChat()
     agentThinking.value = false
     await nextTick()
     scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
@@ -2610,6 +2614,100 @@ function agentStandaloneCards(cards: AgentCard[] = []) {
     if (card.type !== 'venue_product') return true
     const key = agentPlaceKey(card)
     return !key || !placeKeys.has(key)
+  })
+}
+
+function agentVenueProductId(card: AgentCard) {
+  const value = Number(card.action?.id || card.meta?.id)
+  return Number.isFinite(value) ? value : null
+}
+
+function agentBookingVenueName(booking: AgentVenueBooking) {
+  return booking.place?.title || String(booking.product.meta?.placeTitle || booking.product.meta?.venueName || '')
+}
+
+function agentBookingPlaceId(booking: AgentVenueBooking) {
+  return booking.place?.action?.id || String(booking.product.meta?.placeId || '')
+}
+
+function agentBookingCity(booking: AgentVenueBooking) {
+  return String(booking.place?.meta?.city || booking.product.meta?.city || placeQuery.city || '西安市')
+}
+
+function agentInventoryText(inventory: VenueInventory) {
+  return `${inventory.serviceDate} ${inventory.startTime.slice(0, 5)}-${inventory.endTime.slice(0, 5)}`
+}
+
+async function prepareAgentVenueBooking(product: AgentCard, place?: AgentCard) {
+  if (!requireLogin('请先登录后确认购买并发起约球')) return
+  const productId = agentVenueProductId(product)
+  if (productId == null) {
+    message.value = '该团购缺少商品信息，暂时无法约球'
+    return
+  }
+  await wrap(async () => {
+    const inventories = await api<VenueInventory[]>(`/api/items/1/${productId}/inventories`)
+    const available = inventories.filter((item) => item.purchasable)
+    if (!available.length) {
+      message.value = '该团购当前没有可购买的时段'
+      return
+    }
+    agentVenueBooking.value = {
+      product,
+      place,
+      inventories: available,
+      inventoryId: available[0].id,
+      maxPlayers: 4,
+      levelRequired: userProfile.value?.level || '不限'
+    }
+  })
+}
+
+function closeAgentVenueBooking() {
+  if (agentVenueBookingSubmitting.value) return
+  agentVenueBooking.value = null
+}
+
+async function confirmAgentVenueBooking() {
+  const booking = agentVenueBooking.value
+  const inventory = agentBookingInventory.value
+  const productId = booking ? agentVenueProductId(booking.product) : null
+  if (!booking || !inventory || productId == null) return
+  const maxPlayers = Number(booking.maxPlayers)
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 20) {
+    message.value = '计划人数请选择 2 至 20 人（含自己）'
+    return
+  }
+  const placeId = agentBookingPlaceId(booking)
+  const venueName = agentBookingVenueName(booking)
+  if (!placeId || !venueName) {
+    message.value = '该团购尚未关联具体场所，无法自动发起约球'
+    return
+  }
+  await wrap(async () => {
+    agentVenueBookingSubmitting.value = true
+    const result = await api<{ venueOrderId: number; verifyCode: string; activityId: number }>('/api/social/activities/book-and-create', {
+      method: 'POST',
+      body: JSON.stringify({
+        productId,
+        inventoryId: inventory.id,
+        placeId,
+        placeSource: String(booking.product.meta?.placeSource || 'amap'),
+        venueName,
+        city: agentBookingCity(booking),
+        maxPlayers,
+        levelRequired: booking.levelRequired
+      })
+    })
+    ordersLoaded.value = false
+    activityScope.value = 'created'
+    activities.value = []
+    activitiesPage.value = 1
+    activitiesTotal.value = 0
+    agentVenueBooking.value = null
+    message.value = `已购买 ${agentInventoryText(inventory)}，并发起约球活动 #${result.activityId}`
+  }).finally(() => {
+    agentVenueBookingSubmitting.value = false
   })
 }
 
@@ -2716,11 +2814,12 @@ async function openAgentEquipment(card: AgentCard) {
 }
 
 async function showSocial() {
+  scrollToPageTop()
   refreshActivityWindowIfExpired()
   await switchTab('social')
   await wrap(ensureActivityPlaceOptions)
   await nextTick()
-  document.getElementById('activity-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  scrollToPageTop()
 }
 
 async function selectPlace(place: Place) {
@@ -2735,6 +2834,10 @@ async function selectPlace(place: Place) {
 }
 
 async function closePlaceDetail() {
+  if (relatedBlogReturn.value) {
+    await returnToBlogDetail()
+    return
+  }
   const returnTab = homeReturnTab.value
   selectedPlace.value = null
   venueReviews.value = []
@@ -2910,6 +3013,11 @@ async function createActivity() {
     message.value = '请先从附近场所下拉列表选择一个场所'
     return
   }
+  const maxPlayers = Number(activityForm.maxPlayers)
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 20) {
+    message.value = '计划人数请选择 2 至 20 人（含自己）'
+    return
+  }
   await wrap(async () => {
     await api('/api/social/activities', {
       method: 'POST',
@@ -2918,11 +3026,17 @@ async function createActivity() {
         sportCode: activityForm.sportCode,
         city: activityForm.city || locationLabel.value,
         venueId: null,
+        maxPlayers,
         startTime: `${activityForm.startTime}:00`,
         endTime: `${activityForm.endTime}:00`
       })
     })
-    await loadSocial()
+    // 发起成功后切到“自己发起”，让新活动无需等待列表刷新即可出现。
+    activityScope.value = 'created'
+    activities.value = []
+    activitiesPage.value = 1
+    activitiesTotal.value = 0
+    await loadActivities()
   }, '约球活动已发布')
 }
 
@@ -2930,7 +3044,7 @@ async function joinActivity(id: number) {
   if (!requireLogin('请先登录后加入活动')) return
   await wrap(async () => {
     await api(`/api/social/activities/${id}/join`, { method: 'POST' })
-    await loadSocial()
+    await loadActivities()
   }, '已加入活动')
 }
 
@@ -3031,13 +3145,12 @@ function typeClass(productType: string) {
 }
 
 onMounted(async () => {
+  if ('scrollRestoration' in history) {
+    history.scrollRestoration = 'manual'
+  }
+  scrollToPageTop()
   resetHeaderVisibility()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
-  window.addEventListener('wheel', handleHeaderWheel, { passive: true })
-  window.addEventListener('touchstart', handleHeaderTouchStart, { passive: true })
-  window.addEventListener('touchmove', handleHeaderTouchMove, { passive: true })
-  window.addEventListener('touchend', handleHeaderTouchEnd, { passive: true })
-  window.addEventListener('touchcancel', handleHeaderTouchEnd, { passive: true })
   refreshActivityWindowIfExpired(true)
   try {
     await loadSports()
@@ -3052,11 +3165,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleWindowScroll)
-  window.removeEventListener('wheel', handleHeaderWheel)
-  window.removeEventListener('touchstart', handleHeaderTouchStart)
-  window.removeEventListener('touchmove', handleHeaderTouchMove)
-  window.removeEventListener('touchend', handleHeaderTouchEnd)
-  window.removeEventListener('touchcancel', handleHeaderTouchEnd)
 })
 </script>
 
@@ -3216,14 +3324,20 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div v-if="message" class="toast" role="status">
-      <span>{{ message }}</span>
-      <button class="toast-close" type="button" aria-label="关闭提示" @click="closeMessage">
-        <X :size="14" />
-      </button>
-    </div>
-
-    <main class="phone-main">
+    <main
+      class="phone-main"
+      :class="{
+        'header-full': showPhoneHeader && showDiscoveryHeader,
+        'header-agent': showPhoneHeader && activeTab === 'assistant',
+        'header-compact': showPhoneHeader && !showDiscoveryHeader && activeTab !== 'assistant'
+      }"
+    >
+      <div v-if="message" class="toast" role="status">
+        <span>{{ message }}</span>
+        <button class="toast-close" type="button" aria-label="关闭提示" @click="closeMessage">
+          <X :size="14" />
+        </button>
+      </div>
       <section v-if="blogComposerVisible" class="page-stack blog-publish-page">
         <div class="section-title publish-title">
           <div>
@@ -3259,12 +3373,18 @@ onBeforeUnmount(() => {
 
           <label class="form-field">
             <span>标题</span>
-            <input v-model="blogPublishForm.title" maxlength="48" placeholder="比如：黄金单场适合下班后一小时强度局" />
+            <div class="publish-message-input">
+              <PenLine :size="17" />
+              <input v-model="blogPublishForm.title" maxlength="48" placeholder="给这次体验起一个吸引人的标题" />
+            </div>
           </label>
 
           <label class="form-field">
             <span>正文</span>
-            <textarea v-model="blogPublishForm.content" maxlength="500" placeholder="写写体验、适合人群、场地或装备感受" />
+            <div class="publish-message-input publish-message-textarea">
+              <MessageCircle :size="17" />
+              <textarea v-model="blogPublishForm.content" maxlength="500" placeholder="分享你的真实感受、适合的人群，以及值得注意的细节" />
+            </div>
           </label>
 
           <div class="form-field">
@@ -3688,23 +3808,66 @@ onBeforeUnmount(() => {
               <input v-model="activityForm.endTime" type="datetime-local" />
             </label>
           </div>
+          <div class="activity-inline-row">
+            <label class="form-field">
+              <span>计划人数（含自己）</span>
+              <select v-model.number="activityForm.maxPlayers">
+                <option v-for="count in PLAYER_COUNT_OPTIONS" :key="count" :value="count">{{ count }} 人</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>水平要求</span>
+              <select v-model="activityForm.levelRequired">
+                <option>不限</option>
+                <option>新手友好</option>
+                <option>初级以上</option>
+                <option>中级对抗</option>
+              </select>
+            </label>
+          </div>
           <button class="primary" @click="createActivity">发起约球</button>
         </div>
-        <article v-for="item in activities" :key="item.id" class="activity-row">
-          <div>
-            <h3>{{ item.title }}</h3>
-            <p>{{ item.venueName }} · {{ item.currentPlayers }}/{{ item.maxPlayers }} 人 · {{ item.feeType }}</p>
-            <small>{{ item.startTime.replace('T', ' ') }}</small>
+        <section class="social-activity-section">
+          <div class="section-title compact-title">
+            <div>
+              <span>约球活动</span>
+              <strong>{{ activityScope === 'created' ? '我发起的' : activityScope === 'joined' ? '我加入的' : '他人发起的' }}</strong>
+            </div>
           </div>
-          <button @click="joinActivity(item.id)">加入</button>
-        </article>
-        <article v-for="player in players" :key="player.userId" class="player-row clickable-card" @click="openUserProfile(player.userId)">
-          <img :src="player.avatar || FALLBACK_AVATAR" :alt="player.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
-          <div>
-            <h3>{{ player.nickname }} <span>{{ player.level }}</span></h3>
-            <p>{{ player.area }} · {{ player.playStyle }} · {{ player.availableTime }}</p>
+          <div class="activity-scope-tabs" aria-label="约球活动筛选">
+            <button type="button" :class="{ active: activityScope === 'created' }" @click="changeActivityScope('created')">自己发起</button>
+            <button type="button" :class="{ active: activityScope === 'others' }" @click="changeActivityScope('others')">他人发起</button>
+            <button type="button" :class="{ active: activityScope === 'joined' }" @click="changeActivityScope('joined')">自己加入</button>
           </div>
-        </article>
+          <div v-if="!activities.length" class="empty-box compact-empty">
+            {{ activityScope === 'created' ? '还没有发起约球，选好场所后发起第一场吧' : activityScope === 'joined' ? '还没有加入约球活动' : '当前筛选下暂无可加入的约球活动' }}
+          </div>
+          <article v-for="item in activities" :key="item.id" class="activity-row">
+            <div>
+              <h3>{{ item.title }}</h3>
+              <p>{{ item.venueName }} · {{ item.currentPlayers }}/{{ item.maxPlayers }} 人 · {{ item.feeType }}</p>
+              <small>{{ item.startTime.replace('T', ' ') }} · {{ item.levelRequired }}</small>
+            </div>
+            <button v-if="activityScope === 'created' || item.creatorId === userProfile?.id" type="button" disabled>我发起的</button>
+            <button v-else-if="activityScope === 'joined'" type="button" disabled>已加入</button>
+            <button v-else type="button" @click="joinActivity(item.id)">加入</button>
+          </article>
+        </section>
+        <section class="social-player-section">
+          <div class="section-title compact-title">
+            <div>
+              <span>附近球友</span>
+              <strong>找搭子</strong>
+            </div>
+          </div>
+          <article v-for="player in players" :key="player.userId" class="player-row clickable-card" @click="openUserProfile(player.userId)">
+            <img :src="player.avatar || FALLBACK_AVATAR" :alt="player.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
+            <div>
+              <h3>{{ player.nickname }} <span>{{ player.level }}</span></h3>
+              <p>{{ player.area }} · {{ player.playStyle }} · {{ player.availableTime }}</p>
+            </div>
+          </article>
+        </section>
         <div v-if="loadingMore" class="load-more-state">正在加载更多约球内容</div>
         <div v-else-if="(players.length || activities.length) && !hasMoreSocial" class="load-more-state muted-state">已经到底了</div>
       </section>
@@ -3715,10 +3878,15 @@ onBeforeUnmount(() => {
             <span>{{ activeSport.name }}</span>
             <strong>装备商城</strong>
           </div>
-          <button class="cart-chip cart-button" @click="showProfileCart" aria-label="查看购物车">
-            <ShoppingCart :size="15" />
-            <span v-if="cartCount">{{ cartCount }}</span>
-          </button>
+          <div class="title-actions">
+            <button v-if="relatedBlogReturn" class="ghost" type="button" @click="returnToBlogDetail">
+              <ChevronLeft :size="16" /> 返回动态
+            </button>
+            <button class="cart-chip cart-button" @click="showProfileCart" aria-label="查看购物车">
+              <ShoppingCart :size="15" />
+              <span v-if="cartCount">{{ cartCount }}</span>
+            </button>
+          </div>
         </div>
         <section v-if="filteredSeckillActivities.length" class="equipment-flash">
           <div class="flash-head">
@@ -3823,14 +3991,20 @@ onBeforeUnmount(() => {
                     <div class="agent-place-action-row">
                       <button type="button" @click="handleAgentCardAction(bundle.place)">看场所</button>
                     </div>
-                    <button v-if="bundle.deal" class="agent-attached-deal" type="button" @click="handleAgentCardAction(bundle.deal)">
+                    <div v-if="bundle.deal" class="agent-attached-deal">
+                      <button class="agent-attached-deal-main" type="button" @click="handleAgentCardAction(bundle.deal)">
                       <div>
                         <span>可买团购</span>
                         <strong>{{ bundle.deal.title }}</strong>
                         <p>{{ bundle.deal.subtitle }}</p>
                       </div>
                       <em v-if="bundle.deal.price">{{ bundle.deal.price }}</em>
-                    </button>
+                      </button>
+                      <div class="agent-deal-actions">
+                        <button type="button" @click="handleAgentCardAction(bundle.deal)">看团购</button>
+                        <button class="primary" type="button" @click="prepareAgentVenueBooking(bundle.deal, bundle.place)">约球</button>
+                      </div>
+                    </div>
                     <div v-else class="agent-attached-empty">暂无在线团购，先看看场所详情</div>
                   </article>
                 </div>
@@ -3854,6 +4028,7 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="agent-card-side">
                       <strong v-if="card.price">{{ card.price }}</strong>
+                      <button v-if="card.type === 'venue_product'" class="agent-book-button" type="button" @click="prepareAgentVenueBooking(card)">约球</button>
                       <button type="button" @click="handleAgentCardAction(card)">
                         {{ agentCardActionLabel(card) }}
                       </button>
@@ -3926,6 +4101,54 @@ onBeforeUnmount(() => {
             <Send :size="17" />
           </button>
         </div>
+
+        <div v-if="agentVenueBooking" class="agent-booking-backdrop" @click="closeAgentVenueBooking"></div>
+        <section v-if="agentVenueBooking" class="agent-booking-sheet" aria-label="确认购买并发起约球">
+          <div class="agent-booking-head">
+            <div>
+              <span>确认约球</span>
+              <strong>购买场地后发起活动</strong>
+            </div>
+            <button type="button" aria-label="关闭确认面板" @click="closeAgentVenueBooking"><X :size="17" /></button>
+          </div>
+          <div class="agent-booking-summary">
+            <span>{{ agentBookingVenueName(agentVenueBooking) }}</span>
+            <strong>{{ agentVenueBooking.product.title }}</strong>
+            <em>{{ agentBookingInventory?.price ? yuan(agentBookingInventory.price) : agentVenueBooking.product.price }}</em>
+          </div>
+          <label class="form-field">
+            <span>可预约时段</span>
+            <select v-model.number="agentVenueBooking.inventoryId">
+              <option v-for="inventory in agentVenueBooking.inventories" :key="inventory.id" :value="inventory.id">
+                {{ agentInventoryText(inventory) }}
+              </option>
+            </select>
+          </label>
+          <div class="agent-booking-form-row">
+            <label class="form-field">
+              <span>计划人数（含自己）</span>
+              <select v-model.number="agentVenueBooking.maxPlayers">
+                <option v-for="count in PLAYER_COUNT_OPTIONS" :key="count" :value="count">{{ count }} 人</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>水平要求</span>
+              <select v-model="agentVenueBooking.levelRequired">
+                <option>不限</option>
+                <option>新手友好</option>
+                <option>初级以上</option>
+                <option>中级对抗</option>
+              </select>
+            </label>
+          </div>
+          <p class="agent-booking-tip">确认后将支付该时段团购，并在相同场所、日期和时间发起约球活动。</p>
+          <div class="agent-booking-actions">
+            <button type="button" @click="closeAgentVenueBooking">取消</button>
+            <button class="primary" type="button" :disabled="agentVenueBookingSubmitting" @click="confirmAgentVenueBooking">
+              {{ agentVenueBookingSubmitting ? '处理中' : '确认购买并发起' }}
+            </button>
+          </div>
+        </section>
 
         <div v-if="agentHistoryVisible" class="agent-history-backdrop" @click="closeAgentHistory"></div>
         <section v-if="agentHistoryVisible" class="agent-history-sheet" aria-label="AI 助手聊天历史">

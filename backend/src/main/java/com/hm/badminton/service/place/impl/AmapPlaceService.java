@@ -55,6 +55,7 @@ public class AmapPlaceService implements IAmapPlaceService {
                                         Integer radius,
                                         int page,
                                         int size) {
+        // 1. 高德附近搜索必须有 Web 服务 key 和经纬度；城市/IP 定位只能作为兜底，不适合精确附近查询。
         if (amapProperties.getKey() == null || amapProperties.getKey().isBlank()) {
             throw new BusinessException(400, "请先配置高德 Web 服务 API Key: 环境变量 AMAP_KEY 或 hm.amap.key");
         }
@@ -67,9 +68,11 @@ public class AmapPlaceService implements IAmapPlaceService {
         int safeRadius = Math.min(Math.max(radius == null ? amapProperties.getRadius() : radius, 100), 50000);
         LinkedHashMap<String, AmapPlace> merged = new LinkedHashMap<>();
         long total = 0;
+        // 2. 后端自动扩大半径，直到凑够一页或达到最大半径，避免前端循环请求。
         for (Integer currentRadius : autoRadiusSteps(safeRadius)) {
             PageResult<AmapPlace> result = requestNearby(sport, keyword, city, lng, lat, currentRadius, safePage, safeSize);
             total = Math.max(total, result.getTotal());
+            // 3. 用 POI id 去重，保证 5km、10km、20km 的结果合并后不会重复展示。
             for (AmapPlace place : result.getRecords()) {
                 merged.putIfAbsent(place.getId(), place);
             }
@@ -77,6 +80,7 @@ public class AmapPlaceService implements IAmapPlaceService {
                 break;
             }
         }
+        // 4. 返回仍按前端请求的 size 截断，total 取高德 total 和合并数量中的较大值。
         return new PageResult<>(merged.values().stream().limit(safeSize).toList(), Math.max(total, merged.size()), safePage, safeSize);
     }
 

@@ -29,6 +29,68 @@ function Test-ListeningPort {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
+function Invoke-WslQuiet {
+    param([string]$Command)
+
+    # WSL may emit a localhost proxy/NAT warning on stderr. It is unrelated to
+    # the invoked command, but PowerShell treats it as an error when ErrorAction is Stop.
+    # Base64 avoids Windows argument parsing from stripping Bash quotes and substitutions.
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Command))
+    $bashCommand = "echo $encodedCommand | base64 -d | bash"
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        return & wsl -e bash -lc $bashCommand 2>$null
+    } finally {
+        $ErrorActionPreference = $previousErrorPreference
+    }
+}
+
+function Start-WslKeepAlive {
+    $command = @'
+pid_file=/tmp/hm-badminton-wsl-keepalive.pid
+if [ -r "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+  cat "$pid_file"
+else
+  nohup sleep infinity >/tmp/hm-badminton-wsl-keepalive.log 2>&1 &
+  echo $! > "$pid_file"
+  cat "$pid_file"
+fi
+'@
+    $keepAlivePidText = (Invoke-WslQuiet -Command $command) | Select-Object -First 1
+    $keepAlivePid = if ($null -eq $keepAlivePidText) { "" } else { ([string]$keepAlivePidText).Trim() }
+    if (-not $keepAlivePid) {
+        throw "Unable to create the WSL keep-alive process."
+    }
+    Write-Host "WSL keep-alive PID: $keepAlivePid" -ForegroundColor DarkGray
+}
+
+function Wait-WslContainerReady {
+    param(
+        [string]$ContainerName,
+        [int]$TimeoutSeconds = 60,
+        [switch]$RequireHealth
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $format = "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
+        $command = "docker inspect --format '$format' '$ContainerName' 2>/dev/null"
+        $output = Invoke-WslQuiet -Command $command
+        $state = (($output | Select-Object -First 1) -as [string]).Trim()
+
+        if (($RequireHealth -and $state -eq "healthy") -or (-not $RequireHealth -and $state -eq "running")) {
+            Write-Host "  $ContainerName is ready ($state)" -ForegroundColor DarkGray
+            return
+        }
+        if ($state -in @("exited", "dead")) {
+            throw "$ContainerName exited before becoming ready. Run: wsl -e bash -lc 'docker logs $ContainerName'"
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw "$ContainerName did not become ready within $TimeoutSeconds seconds."
+}
+
 function Import-ConfiguredEnvironment {
     param([string[]]$Names)
     foreach ($name in $Names) {
@@ -129,12 +191,18 @@ if ($env:AI_DASHSCOPE_ENABLED -eq "true") {
 
 if (-not $SkipDocker) {
     Write-Step "Starting WSL Docker services: MySQL / Redis / RocketMQ / MinIO"
+    Start-WslKeepAlive
     $deployWslPath = Convert-ToWslPath $DeployDir
     $dockerCommand = "cd '$deployWslPath' && docker compose up -d"
     & wsl -e bash -lc $dockerCommand
     if ($LASTEXITCODE -ne 0) {
         throw "Docker services failed to start. Check Docker inside WSL."
     }
+    Write-Host "Waiting for dependent services to become ready..." -ForegroundColor DarkGray
+    Wait-WslContainerReady -ContainerName "hm-badminton-mysql" -RequireHealth -TimeoutSeconds 90
+    Wait-WslContainerReady -ContainerName "hm-badminton-redis" -RequireHealth -TimeoutSeconds 60
+    Wait-WslContainerReady -ContainerName "hm-badminton-rocketmq-namesrv" -TimeoutSeconds 45
+    Wait-WslContainerReady -ContainerName "hm-badminton-rocketmq-broker" -TimeoutSeconds 60
 }
 
 if (-not $SkipBackend) {

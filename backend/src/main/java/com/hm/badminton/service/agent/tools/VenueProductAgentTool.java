@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,12 +29,23 @@ public class VenueProductAgentTool {
                                                Integer placeRank,
                                                String productType,
                                                Integer maxPrice) {
+        return searchVenueProducts(sportCode, placeRank, productType, maxPrice, null);
+    }
+
+    public List<AgentCard> searchVenueProducts(String sportCode,
+                                               Integer placeRank,
+                                               String productType,
+                                               Integer maxPrice,
+                                               String timePreference) {
         List<VenueItem> items = placeRank == null
                 ? venueItemService.saleItems(blankToNull(sportCode), blankToNull(productType), null, 1, 6).getRecords()
                 : venueItemService.items(blankToNull(sportCode), null, null, placeRank, 6);
         List<AgentCard> cards = new ArrayList<>();
-        for (VenueItem item : items) {
-            if (maxPrice != null && item.getPrice() != null
+        List<VenueItem> candidates = candidateItems(items, maxPrice, timePreference);
+        boolean hasTimedMatch = hasTimePreference(timePreference)
+                && items.stream().anyMatch(item -> timeScore(item, timePreference) > 0);
+        for (VenueItem item : candidates) {
+            if (!hasTimedMatch && maxPrice != null && item.getPrice() != null
                     && item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) > 0) {
                 continue;
             }
@@ -60,16 +72,44 @@ public class VenueProductAgentTool {
             meta.put("venueName", item.getVenueName());
             meta.put("available", item.getAvailableStock() == null || item.getAvailableStock() > 0);
             meta.put("stock", item.getAvailableStock());
+            meta.put("timePreference", blankToNull(timePreference));
+            meta.put("timeMatch", timeMatchText(item, timePreference));
             meta.put("suitableLevel", suitableLevel(item));
             meta.put("sceneTags", sceneTags(item, tags));
             meta.put("pros", pros(item, maxPrice));
             meta.put("cons", cons(item));
-            meta.put("recommendScore", productScore(item, maxPrice));
+            meta.put("recommendScore", productScore(item, maxPrice, timePreference));
             meta.put("recommendReasons", pros(item, maxPrice).stream().limit(3).toList());
             card.setMeta(meta);
             cards.add(card);
         }
         return cards;
+    }
+
+    private List<VenueItem> candidateItems(List<VenueItem> items, Integer maxPrice, String timePreference) {
+        List<VenueItem> sorted = sortByTimeAndScore(items, maxPrice, timePreference);
+        if (!hasTimePreference(timePreference)) {
+            return sorted;
+        }
+        List<VenueItem> matched = sorted.stream()
+                .filter(item -> timeScore(item, timePreference) > 0)
+                .toList();
+        if (matched.isEmpty()) {
+            return sorted;
+        }
+        List<VenueItem> matchedWithinBudget = matched.stream()
+                .filter(item -> maxPrice == null || item.getPrice() == null
+                        || item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) <= 0)
+                .toList();
+        return matchedWithinBudget.isEmpty() ? matched : matchedWithinBudget;
+    }
+
+    private List<VenueItem> sortByTimeAndScore(List<VenueItem> items, Integer maxPrice, String timePreference) {
+        return items.stream()
+                .sorted(Comparator.comparingInt((VenueItem item) -> productScore(item, maxPrice, timePreference)).reversed()
+                        .thenComparing(VenueItem::getPrice, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(VenueItem::getId))
+                .toList();
     }
 
     private List<String> sceneTags(VenueItem item, List<String> tags) {
@@ -126,7 +166,7 @@ public class VenueProductAgentTool {
         return cons;
     }
 
-    private int productScore(VenueItem item, Integer maxPrice) {
+    private int productScore(VenueItem item, Integer maxPrice, String timePreference) {
         int score = 50;
         if (item.getPrice() != null) {
             if (maxPrice != null && item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) <= 0) {
@@ -145,7 +185,79 @@ public class VenueProductAgentTool {
         if (item.getOriginalPrice() != null && item.getOriginalPrice().compareTo(item.getPrice()) > 0) {
             score += 10;
         }
+        score += timeScore(item, timePreference);
         return Math.min(100, score);
+    }
+
+    private int timeScore(VenueItem item, String timePreference) {
+        String type = item.getProductType() == null ? "" : item.getProductType();
+        String text = ((item.getTitle() == null ? "" : item.getTitle()) + " "
+                + (item.getDescription() == null ? "" : item.getDescription()) + " "
+                + (item.getUseRule() == null ? "" : item.getUseRule()));
+        if ("EVENING".equals(timePreference)) {
+            if (containsAny(text, "晚间", "晚上", "夜场", "18:00", "19:00", "20:00", "21:00", "黄金")) {
+                return 35;
+            }
+            if ("COURT_SLOT".equals(type)) {
+                return 25;
+            }
+            if (containsAny(text, "08:00-12:00", "上午", "早场", "低峰")) {
+                return -35;
+            }
+        }
+        if ("MORNING".equals(timePreference)) {
+            if (containsAny(text, "08:00-12:00", "上午", "早场")) {
+                return 35;
+            }
+            if ("COURT_SLOT".equals(type)) {
+                return 15;
+            }
+        }
+        if ("AFTERNOON".equals(timePreference)) {
+            if (containsAny(text, "下午", "14:00", "15:00", "16:00", "17:00")) {
+                return 35;
+            }
+            if ("COURT_SLOT".equals(type)) {
+                return 25;
+            }
+            if (containsAny(text, "08:00-12:00", "上午", "早场")) {
+                return -20;
+            }
+        }
+        return 0;
+    }
+
+    private String timeMatchText(VenueItem item, String timePreference) {
+        if ("EVENING".equals(timePreference)) {
+            return timeScore(item, timePreference) > 0
+                    ? "更接近晚间需求"
+                    : "不是晚间券，优先看可预约单场";
+        }
+        if ("MORNING".equals(timePreference)) {
+            return timeScore(item, timePreference) > 0
+                    ? "更接近上午需求"
+                    : "未明确覆盖上午，需看库存时段";
+        }
+        if ("AFTERNOON".equals(timePreference)) {
+            return timeScore(item, timePreference) > 0
+                    ? "更接近下午需求"
+                    : "未明确覆盖下午，优先看单场";
+        }
+        return null;
+    }
+
+    private boolean hasTimePreference(String timePreference) {
+        return timePreference != null && !timePreference.isBlank();
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        String value = text == null ? "" : text;
+        for (String keyword : keywords) {
+            if (value.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String yuan(BigDecimal value) {

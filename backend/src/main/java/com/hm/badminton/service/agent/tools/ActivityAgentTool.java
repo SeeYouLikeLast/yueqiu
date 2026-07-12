@@ -27,7 +27,14 @@ public class ActivityAgentTool {
 
     @Tool(name = "searchJoinableActivities", description = "Search joinable city sport activities that are not full.")
     public List<AgentCard> searchJoinableActivities(String sportCode, String city, String level, Long excludeUserId) {
-        PageResult<SportActivity> page = socialService.activities(blankToNull(sportCode), blankToNull(city), blankToNull(level), 1, 8);
+        PageResult<SportActivity> page = socialService.activities(
+                blankToNull(sportCode),
+                blankToNull(city),
+                blankToNull(level),
+                null,
+                "others",
+                1,
+                8);
         List<AgentCard> cards = new ArrayList<>();
         for (SportActivity activity : page.getRecords()) {
             if (excludeUserId != null && excludeUserId.equals(activity.getCreatorId())) {

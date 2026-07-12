@@ -821,41 +821,7 @@ insert into blogs(id, user_id, sport_code, title, content, image_urls, related_t
 (35, 30, 'volleyball', '排球：训练中最容易忽略的细节', '热身、补水和节奏控制会直接影响体验，新手先稳定动作，进阶球友再增加对抗强度。', '/api/files/97/download', 'EQUIPMENT', 18, '沙排耐候排球', '/api/files/73/download', 399.00, 67, 1, date_sub(now(), interval 105 hour)),
 (36, 41, 'volleyball', '排球：本周约球复盘', '本周组局整体顺利，场地灯光和队友沟通都不错；下次会避开晚高峰并提前确认人数。', '/api/files/98/download', 'VENUE_PRODUCT', 36, '排球 私教体验 60 分钟', '/api/files/42/download', 214.00, 84, 1, date_sub(now(), interval 108 hour));
 
--- 普通订单：少量覆盖待支付、已支付和已完成状态
-insert into order_venue(id, user_id, product_id, inventory_id, venue_id, amap_place_id, venue_name, product_title, product_type, service_date, start_time, end_time, amount, status, verify_code, paid_at) values
-(1, 1, 1, 1, null, 'DEMO_PLACE_1', '附近场所快照 1', '羽毛球 08:00-12:00 单人畅打', 'TIME_PACKAGE', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 25.00, '已完成', '520001', date_sub(now(), interval 1 hour)),
-(2, 1, 2, 5, null, 'DEMO_PLACE_1', '附近场所快照 1', '羽毛球 晚间黄金单场 1 小时', 'COURT_SLOT', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 58.00, '待支付', '520002', null),
-(3, 1, 3, 9, null, 'DEMO_PLACE_1', '附近场所快照 1', '羽毛球 私教体验 60 分钟', 'COACH_LESSON', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 89.00, '已支付', '520003', date_sub(now(), interval 3 hour)),
-(4, 1, 4, 13, null, 'DEMO_PLACE_2', '附近场所快照 2', '羽毛球 08:00-12:00 单人畅打', 'TIME_PACKAGE', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 41.00, '已完成', '520004', date_sub(now(), interval 4 hour)),
-(5, 16, 5, 17, null, 'DEMO_PLACE_2', '附近场所快照 2', '羽毛球 晚间黄金单场 1 小时', 'COURT_SLOT', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 74.00, '待支付', '520005', null),
-(6, 19, 6, 21, null, 'DEMO_PLACE_2', '附近场所快照 2', '羽毛球 私教体验 60 分钟', 'COACH_LESSON', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 139.00, '已支付', '520006', date_sub(now(), interval 6 hour)),
-(7, 22, 7, 25, null, 'DEMO_PLACE_1', '附近场所快照 1', '乒乓球 08:00-12:00 单人畅打', 'TIME_PACKAGE', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 29.00, '已完成', '520007', date_sub(now(), interval 7 hour)),
-(8, 25, 8, 29, null, 'DEMO_PLACE_1', '附近场所快照 1', '乒乓球 晚间黄金单场 1 小时', 'COURT_SLOT', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 70.00, '待支付', '520008', null),
-(9, 28, 9, 33, null, 'DEMO_PLACE_1', '附近场所快照 1', '乒乓球 私教体验 60 分钟', 'COACH_LESSON', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 104.00, '已支付', '520009', date_sub(now(), interval 9 hour)),
-(10, 31, 10, 37, null, 'DEMO_PLACE_2', '附近场所快照 2', '乒乓球 08:00-12:00 单人畅打', 'TIME_PACKAGE', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 45.00, '已完成', '520010', date_sub(now(), interval 10 hour)),
-(11, 34, 11, 41, null, 'DEMO_PLACE_2', '附近场所快照 2', '乒乓球 晚间黄金单场 1 小时', 'COURT_SLOT', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 86.00, '待支付', '520011', null),
-(12, 37, 12, 45, null, 'DEMO_PLACE_2', '附近场所快照 2', '乒乓球 私教体验 60 分钟', 'COACH_LESSON', date_add(current_date, interval 1 day), '19:00:00', '20:00:00', 154.00, '已支付', '520012', date_sub(now(), interval 12 hour));
-
-insert into order_equipment(id, user_id, total_amount, status, address, paid_at) values
-(1, 1, 89.00, '已支付', '演示收货地址 1 号', date_sub(now(), interval 3 hour)),
-(2, 1, 329.00, '已支付', '演示收货地址 2 号', date_sub(now(), interval 4 hour)),
-(3, 1, 699.00, '已支付', '演示收货地址 3 号', date_sub(now(), interval 5 hour)),
-(4, 21, 138.00, '待支付', '演示收货地址 4 号', null),
-(5, 26, 259.00, '已支付', '演示收货地址 5 号', date_sub(now(), interval 7 hour)),
-(6, 31, 599.00, '已支付', '演示收货地址 6 号', date_sub(now(), interval 8 hour)),
-(7, 36, 79.00, '已支付', '演示收货地址 7 号', date_sub(now(), interval 9 hour)),
-(8, 41, 578.00, '待支付', '演示收货地址 8 号', null);
-
-insert into order_equipment_item(id, order_id, product_id, product_name, cover_url, price, quantity) values
-(1, 1, 1, '轻羽 5U 新手羽毛球拍', '/api/files/56/download', 89.00, 1),
-(2, 2, 2, '疾风缓震羽毛球鞋', '/api/files/57/download', 329.00, 1),
-(3, 3, 3, '破风 7 Pro 进攻羽毛球拍', '/api/files/58/download', 699.00, 1),
-(4, 4, 4, '控旋入门乒乓球拍', '/api/files/59/download', 69.00, 2),
-(5, 5, 5, '弧圈均衡底板套装', '/api/files/60/download', 259.00, 1),
-(6, 6, 6, '极速进攻碳素乒乓球拍', '/api/files/61/download', 599.00, 1),
-(7, 7, 7, '耐磨训练足球 5 号', '/api/files/62/download', 79.00, 1),
-(8, 8, 8, '疾速 TF 人草足球鞋', '/api/files/63/download', 289.00, 2);
-
+-- 订单初始化为空：登录后的首次购买从正常下单或秒杀链路产生
 -- 秒杀：每种运动各 1 个装备和场馆商品，秒杀价始终低于原商品价
 insert into seckill_equipment(id, equipment_id, seckill_price, stock, start_at, end_at, status) values
 (1, 1, 64.00, 18, date_sub(now(), interval 1 day), date_add(now(), interval 90 day), 1),
@@ -872,17 +838,6 @@ insert into seckill_venue(id, venue_id, seckill_price, stock, start_at, end_at, 
 (4, 19, 25.00, 18, date_sub(now(), interval 1 day), date_add(now(), interval 90 day), 1),
 (5, 25, 28.00, 20, date_sub(now(), interval 1 day), date_add(now(), interval 90 day), 1),
 (6, 31, 31.00, 22, date_sub(now(), interval 1 day), date_add(now(), interval 90 day), 1);
-
-insert into order_seckill_equipment(id, seckill_id, equipment_id, user_id, amount, status) values
-(1001, 1, 1, 1, 64.00, '已抢到'),
-(1002, 2, 4, 2, 49.00, '已抢到'),
-(1003, 3, 7, 3, 56.00, '已抢到'),
-(1004, 4, 10, 4, 71.00, '已抢到');
-
-insert into order_seckill_venue(id, seckill_id, venue_id, user_id, amount, status) values
-(2001, 1, 1, 2, 17.00, '已抢到'),
-(2002, 2, 7, 3, 20.00, '已抢到'),
-(2003, 3, 13, 4, 23.00, '已抢到');
 
 -- 约球活动：每个城市、每种运动 1 场，时间、水平、费用和余位有差异
 insert into sport_activities(id, sport_code, creator_id, venue_id, place_source, place_id, venue_name, title, city, start_time, end_time, max_players, current_players, level_required, fee_type, status) values
@@ -967,11 +922,4 @@ insert into sport_activity_members(id, activity_id, user_id, role, status) value
 (53, 24, 53, 'OWNER', '已加入'),
 (54, 24, 54, 'MEMBER', '已加入');
 
--- 购物车：仅给演示账号准备少量待结算项目
-insert into cart_equipment(id, user_id, product_id, quantity) values
-(1, 1, 1, 1),
-(2, 1, 2, 2);
-
-insert into cart_venue(id, user_id, product_id, inventory_id, quantity) values
-(1, 1, 1, 1, 1);
-
+-- 购物车初始化为空：用户主动加购后才写入

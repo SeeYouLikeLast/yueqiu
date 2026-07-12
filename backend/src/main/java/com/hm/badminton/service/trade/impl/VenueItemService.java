@@ -56,6 +56,7 @@ public class VenueItemService implements IVenueItemService {
 
     @Override
     public PageResult<VenueItem> saleItems(String sportCode, String productType, String keyword, int page, int size) {
+        // 1. 正常按运动、商品类型、关键词分页查询。
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 30);
         String normalizedSport = null;
@@ -70,6 +71,7 @@ public class VenueItemService implements IVenueItemService {
                 .map(this::toItem)
                 .toList();
         long safeTotal = total == null ? 0 : total;
+        // 2. 演示数据较少时，第一页自动补齐其它类型/运动商品，避免列表只有一两条。
         if (safePage == 1 && text == null && records.size() < safeSize) {
             records = fillSaleItemPage(records, normalizedSport, type, safeSize);
             safeTotal = Math.max(safeTotal, records.size());
@@ -133,16 +135,20 @@ public class VenueItemService implements IVenueItemService {
     @Override
     @Transactional
     public VenueOrder createOrder(Long userId, VenueOrderCreateRequest request) {
+        // 1. 锁定一个“商品 + 库存时段”组合。场所订单必须绑定具体日期和时间。
         VenueItemMapper.VenueItemSale sale = loadSale(request.getProductId(), request.getInventoryId());
         if (sale.getAvailableStock() <= 0) {
             throw new BusinessException("该时段已售罄");
         }
+        // 2. 条件扣库存，SQL 中要求 available_stock > 0，防止并发超卖。
         int updated = venueItemMapper.deductInventory(request.getProductId(), request.getInventoryId());
         if (updated == 0) {
             throw new BusinessException("该时段已售罄");
         }
+        // 3. 库存变化后删除商品详情缓存，让下一次详情重新读取可售状态。
         cacheClient.delete(RedisConstants.VENUE_ITEM_DETAIL_KEY + request.getProductId());
 
+        // 4. 保存订单快照，避免高德场所顺序或商品信息变化影响历史订单展示。
         VenueItemMapper.InsertVenueOrderRow row = new VenueItemMapper.InsertVenueOrderRow();
         row.setUserId(userId);
         row.setProductId(sale.getProductId());

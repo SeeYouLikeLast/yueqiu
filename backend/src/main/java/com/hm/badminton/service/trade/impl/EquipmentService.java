@@ -144,11 +144,13 @@ public class EquipmentService implements IEquipmentService {
     // 从其他地方单独调用 createOrder()：自己有事务保护。
     @Transactional
     public Long createOrder(Long userId, EquipmentOrderCreateRequest request) {
+        // 1. request.items 有值表示立即购买；为空表示从当前用户购物车结算。
         boolean fromCart = request.getItems() == null || request.getItems().isEmpty();
         List<OrderEquipment> equipment = loadOrderEquipments(userId, request.getItems());
         if (equipment.isEmpty()) {
             throw new BusinessException("购物车为空");
         }
+        // 2. 在应用层计算订单总价，落库前仍会逐项扣减数据库库存。
         BigDecimal total = equipment.stream()
                 .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -159,14 +161,17 @@ public class EquipmentService implements IEquipmentService {
         equipmentMapper.insertOrder(row);
         long orderId = row.getId();
         for (OrderEquipment item : equipment) {
+            // 3. 条件扣库存，SQL 中要求 stock >= quantity，避免并发超卖。
             int updated = equipmentMapper.deductEquipmentStock(item.getProductId(), item.getQuantity());
             if (updated == 0) {
                 throw new BusinessException(item.getName() + " 库存不足");
             }
+            // 4. 商品库存变化后清理详情缓存，再写入订单明细快照。
             cacheClient.delete(RedisConstants.EQUIPMENT_DETAIL_KEY + item.getProductId());
             equipmentMapper.insertOrderItem(orderId, item.getProductId(), item.getName(), item.getCoverUrl(),
                     item.getPrice(), item.getQuantity());
         }
+        // 5. 购物车结算成功后清空购物车；立即购买不影响购物车里原有商品。
         if (fromCart) {
             equipmentMapper.deleteCartByUser(userId);
         }

@@ -1,6 +1,7 @@
 package com.hm.badminton.dto.social;
 
 import jakarta.validation.constraints.Future;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -32,6 +33,7 @@ public class ActivityRequest {
     private LocalDateTime endTime;
 
     @Min(2)
+    @Max(20)
     private Integer maxPlayers;
 
     @NotBlank

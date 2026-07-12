@@ -33,6 +33,7 @@ public final class RedisConstants {
     public static final String FEED_KEY = "feed:";
     public static final String BLOG_OUTBOX_KEY = "blog:outbox:";
     public static final String AGENT_MEMORY_KEY = "agent:memory:";
+    public static final String AGENT_CONVERSATION_CONTEXT_KEY = "agent:conversation:context:";
     public static final String AGENT_RATE_USER_KEY = "agent:rate:user:";
     public static final String AGENT_RATE_IP_KEY = "agent:rate:ip:";
     public static final String CACHE_NULL_VALUE = "__NULL__";

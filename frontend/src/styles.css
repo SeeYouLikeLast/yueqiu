@@ -265,15 +265,17 @@ textarea {
 }
 
 .phone-header {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 50%;
   z-index: 20;
+  width: min(100%, 480px);
   padding: 14px 14px 12px;
   background:
     linear-gradient(180deg, #ffd45c 0%, #fff7d8 52%, rgba(245, 247, 242, 0.96) 100%);
   border-bottom: 1px solid rgba(217, 226, 214, 0.7);
   backdrop-filter: blur(12px);
-  transform: translateY(0);
+  transform: translateX(-50%);
   transition:
     transform 0.22s ease,
     opacity 0.18s ease;
@@ -282,8 +284,9 @@ textarea {
 
 .phone-header.hidden {
   pointer-events: none;
+  visibility: hidden;
   opacity: 0;
-  transform: translateY(calc(-100% - 8px));
+  transform: translate(-50%, -110%);
 }
 
 .phone-header.compact {
@@ -517,6 +520,19 @@ textarea {
   padding: 12px 12px 0;
   min-width: 0;
   overflow-x: hidden;
+}
+
+/* The fixed header overlays the page. Its spacing lives at document start, so hiding it never shifts a scrolled page. */
+.phone-main.header-full {
+  padding-top: 181px;
+}
+
+.phone-main.header-agent {
+  padding-top: 154px;
+}
+
+.phone-main.header-compact {
+  padding-top: 82px;
 }
 
 .page-stack {
@@ -1369,6 +1385,60 @@ p {
   grid-column: 1 / -1;
 }
 
+.social-activity-section,
+.social-player-section {
+  display: grid;
+  gap: 8px;
+}
+
+.social-player-section {
+  margin-top: 4px;
+}
+
+.activity-scope-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e2e9df;
+  border-radius: 8px;
+  background: #f7faf5;
+}
+
+.activity-scope-tabs button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #667168;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.activity-scope-tabs button.active {
+  color: #ffffff;
+  background: #15845f;
+}
+
+.compact-empty {
+  min-height: 68px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  color: #7a847c;
+  font-size: 13px;
+  text-align: center;
+}
+
+.activity-row small {
+  display: block;
+  margin-top: 5px;
+  color: #78837b;
+  font-size: 12px;
+}
+
 .activity-row,
 .order-card {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1635,6 +1705,53 @@ p {
 
 .publish-panel textarea {
   min-height: 118px;
+}
+
+/* 发布输入沿用助手对话框的轻量边框与淡色占位，写内容时更像在分享而不是填表。 */
+.publish-message-input {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid #d9e2d6;
+  border-radius: 8px;
+  background: #fbfdf9;
+  color: #728077;
+}
+
+.publish-message-input:focus-within {
+  border-color: #15845f;
+  box-shadow: 0 0 0 3px rgba(21, 132, 95, 0.12);
+}
+
+.publish-message-input input,
+.publish-message-input textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.publish-message-input input::placeholder,
+.publish-message-input textarea::placeholder {
+  color: #8a958e;
+  opacity: 1;
+}
+
+.publish-message-textarea {
+  align-items: start;
+  padding-top: 11px;
+}
+
+.publish-message-textarea textarea {
+  min-height: 116px;
+  padding: 0 0 9px;
+  resize: vertical;
 }
 
 .publish-panel .image-url-input {
@@ -2844,12 +2961,26 @@ p {
 .agent-attached-deal {
   min-height: 66px;
   display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d9eadf;
+  border-radius: 8px;
+  border-color: #d9eadf;
+  background: #f6fbf7;
+  text-align: left;
+}
+
+.agent-attached-deal-main {
+  width: 100%;
+  min-height: 0;
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  padding: 8px;
-  border-color: #d9eadf;
-  background: #f6fbf7;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   text-align: left;
 }
 
@@ -2880,6 +3011,19 @@ p {
   color: #e34b1f;
   font-style: normal;
   font-weight: 900;
+}
+
+.agent-deal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.agent-deal-actions button,
+.agent-card-side .agent-book-button {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 12px;
 }
 
 .agent-attached-empty {
@@ -2930,6 +3074,105 @@ p {
   border-color: #15845f;
   background: #15845f;
   white-space: nowrap;
+}
+
+.agent-card-side .agent-book-button {
+  color: #15845f;
+  border-color: #b9d8c5;
+  background: #f6fbf7;
+}
+
+.agent-booking-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  background: rgba(23, 33, 27, 0.28);
+}
+
+.agent-booking-sheet {
+  position: fixed;
+  left: 50%;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  z-index: 37;
+  width: min(calc(100% - 24px), 456px);
+  max-height: min(calc(100dvh - 88px), 620px);
+  overflow-y: auto;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dfe8dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(20, 36, 27, 0.2);
+}
+
+.agent-booking-head,
+.agent-booking-summary,
+.agent-booking-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-booking-head span,
+.agent-booking-summary span {
+  display: block;
+  color: #6d786f;
+  font-size: 12px;
+}
+
+.agent-booking-head strong,
+.agent-booking-summary strong {
+  display: block;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.agent-booking-head button {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.agent-booking-summary {
+  align-items: end;
+  padding: 10px;
+  border: 1px solid #d9eadf;
+  border-radius: 8px;
+  background: #f7fbf6;
+}
+
+.agent-booking-summary em {
+  flex: 0 0 auto;
+  color: #e34b1f;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.agent-booking-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.agent-booking-tip {
+  margin: 0;
+  color: #68756b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-booking-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.45fr;
+}
+
+.agent-booking-actions button {
+  min-height: 42px;
 }
 
 .agent-input-bar {

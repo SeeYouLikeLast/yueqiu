@@ -501,43 +501,11 @@ for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
 }
 Add-Insert $sb "blogs" @("id", "user_id", "sport_code", "title", "content", "image_urls", "related_type", "related_id", "related_title", "related_cover_url", "related_price", "liked", "status", "created_at") $blogRows
 
-Add-Section $sb "普通订单：少量覆盖待支付、已支付和已完成状态"
-$venueOrderRows = @()
-for ($i = 1; $i -le 12; $i++) {
-    $productId = (($i - 1) % $venueMetaById.Count) + 1
-    $meta = $venueMetaById[$productId]
-    $inventory = (($productId - 1) * 4) + 1
-    $status = @("已支付", "已完成", "待支付")[$i % 3]
-    $paidAt = if ($status -eq "待支付") { "null" } else { "date_sub(now(), interval $i hour)" }
-    $orderUserId = if ($i -le 4) { 1 } else { (($i * 3) % ($userId - 1)) + 1 }
-    $venueOrderRows += ,@($i, $orderUserId, $productId, $inventory,
-        "null", (Sql "DEMO_PLACE_$($meta.Rank)"), (Sql "附近场所快照 $($meta.Rank)"), (Sql $meta.Title),
-        (Sql $productTypes[($productId - 1) % 3]), "date_add(current_date, interval 1 day)", (Sql "19:00:00"), (Sql "20:00:00"),
-        (Money $meta.Price), (Sql $status), (Sql ("{0:D6}" -f (520000 + $i))), $paidAt)
-}
-Add-Insert $sb "order_venue" @("id", "user_id", "product_id", "inventory_id", "venue_id", "amap_place_id", "venue_name", "product_title", "product_type", "service_date", "start_time", "end_time", "amount", "status", "verify_code", "paid_at") $venueOrderRows
-
-$equipmentOrderRows = @()
-$equipmentOrderItemRows = @()
-for ($i = 1; $i -le 8; $i++) {
-    $productId = (($i - 1) % $equipmentMetaById.Count) + 1
-    $meta = $equipmentMetaById[$productId]
-    $quantity = if ($i % 4 -eq 0) { 2 } else { 1 }
-    $status = if ($i % 4 -eq 0) { "待支付" } else { "已支付" }
-    $paidAt = if ($status -eq "待支付") { "null" } else { "date_sub(now(), interval $($i + 2) hour)" }
-    $orderUserId = if ($i -le 3) { 1 } else { (($i * 5) % ($userId - 1)) + 1 }
-    $equipmentOrderRows += ,@($i, $orderUserId,
-        (Money ($meta.Price * $quantity)), (Sql $status), (Sql "演示收货地址 $i 号"), $paidAt)
-    $equipmentOrderItemRows += ,@($i, $i, $productId, (Sql $meta.Title), (Sql $meta.Cover), (Money $meta.Price), $quantity)
-}
-Add-Insert $sb "order_equipment" @("id", "user_id", "total_amount", "status", "address", "paid_at") $equipmentOrderRows
-Add-Insert $sb "order_equipment_item" @("id", "order_id", "product_id", "product_name", "cover_url", "price", "quantity") $equipmentOrderItemRows
+Add-Section $sb "订单初始化为空：登录后的首次购买从正常下单或秒杀链路产生"
 
 Add-Section $sb "秒杀：每种运动各 1 个装备和场馆商品，秒杀价始终低于原商品价"
 $seckillEquipmentRows = @()
-$seckillEquipmentOrderRows = @()
 $seckillVenueRows = @()
-$seckillVenueOrderRows = @()
 for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
     $seckillId = $sportIndex + 1
     $equipmentIdForSeckill = $equipmentIdsBySport[$sports[$sportIndex].Code][0]
@@ -545,25 +513,14 @@ for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
     $equipmentSeckillPrice = [Math]::Max(1, [Math]::Floor($equipmentMeta.Price * 0.72))
     $seckillEquipmentRows += ,@($seckillId, $equipmentIdForSeckill, (Money $equipmentSeckillPrice), (18 + $sportIndex * 3),
         "date_sub(now(), interval 1 day)", "date_add(now(), interval 90 day)", 1)
-    if ($sportIndex -lt 4) {
-        $seckillEquipmentOrderRows += ,@((1000 + $seckillId), $seckillId, $equipmentIdForSeckill, ($sportIndex + 1),
-            (Money $equipmentSeckillPrice), (Sql "已抢到"))
-    }
-
     $venueIdForSeckill = $venueIdsBySport[$sports[$sportIndex].Code][0]
     $venueMeta = $venueMetaById[$venueIdForSeckill]
     $venueSeckillPrice = [Math]::Max(1, [Math]::Floor($venueMeta.Price * 0.70))
     $seckillVenueRows += ,@($seckillId, $venueIdForSeckill, (Money $venueSeckillPrice), (12 + $sportIndex * 2),
         "date_sub(now(), interval 1 day)", "date_add(now(), interval 90 day)", 1)
-    if ($sportIndex -lt 3) {
-        $seckillVenueOrderRows += ,@((2000 + $seckillId), $seckillId, $venueIdForSeckill, ($sportIndex + 2),
-            (Money $venueSeckillPrice), (Sql "已抢到"))
-    }
 }
 Add-Insert $sb "seckill_equipment" @("id", "equipment_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillEquipmentRows
 Add-Insert $sb "seckill_venue" @("id", "venue_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillVenueRows
-Add-Insert $sb "order_seckill_equipment" @("id", "seckill_id", "equipment_id", "user_id", "amount", "status") $seckillEquipmentOrderRows
-Add-Insert $sb "order_seckill_venue" @("id", "seckill_id", "venue_id", "user_id", "amount", "status") $seckillVenueOrderRows
 
 Add-Section $sb "约球活动：每个城市、每种运动 1 场，时间、水平、费用和余位有差异"
 $activityRows = @()
@@ -599,15 +556,7 @@ for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
 Add-Insert $sb "sport_activities" @("id", "sport_code", "creator_id", "venue_id", "place_source", "place_id", "venue_name", "title", "city", "start_time", "end_time", "max_players", "current_players", "level_required", "fee_type", "status") $activityRows
 Add-Insert $sb "sport_activity_members" @("id", "activity_id", "user_id", "role", "status") $memberRows
 
-Add-Section $sb "购物车：仅给演示账号准备少量待结算项目"
-$cartEquipmentRows = @(
-    @(1, 1, 1, 1),
-    @(2, 1, 2, 2)
-)
-$cartVenueRows = @()
-$cartVenueRows += ,@(1, 1, 1, 1, 1)
-Add-Insert $sb "cart_equipment" @("id", "user_id", "product_id", "quantity") $cartEquipmentRows
-Add-Insert $sb "cart_venue" @("id", "user_id", "product_id", "inventory_id", "quantity") $cartVenueRows
+Add-Section $sb "购物车初始化为空：用户主动加购后才写入"
 
 Set-Utf8NoBomContent $DataSqlPath $sb.ToString()
 Upload-DemoAssets

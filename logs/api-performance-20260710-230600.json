@@ -1,0 +1,86 @@
+﻿[
+    {
+        "name":  "sports",
+        "method":  "GET",
+        "path":  "/sports",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  15.2,
+        "avgMs":  33.19,
+        "p95Ms":  58.25,
+        "maxMs":  134.36
+    },
+    {
+        "name":  "equipment_list",
+        "method":  "GET",
+        "path":  "/items/2?sport=badminton\u0026page=1\u0026size=12",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  16.13,
+        "avgMs":  31.46,
+        "p95Ms":  55.51,
+        "maxMs":  93.54
+    },
+    {
+        "name":  "venue_rank_items",
+        "method":  "GET",
+        "path":  "/items/1?sport=badminton\u0026placeRank=1\u0026limit=6",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  15.61,
+        "avgMs":  28.89,
+        "p95Ms":  79.03,
+        "maxMs":  112.06
+    },
+    {
+        "name":  "venue_inventory",
+        "method":  "GET",
+        "path":  "/items/1/1/inventories",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  13.12,
+        "avgMs":  22.88,
+        "p95Ms":  45.34,
+        "maxMs":  47.05
+    },
+    {
+        "name":  "blogs_recommend",
+        "method":  "GET",
+        "path":  "/blogs?channel=recommend\u0026page=1\u0026size=10",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  19.12,
+        "avgMs":  38.03,
+        "p95Ms":  73.57,
+        "maxMs":  167.17
+    },
+    {
+        "name":  "social_activities",
+        "method":  "GET",
+        "path":  "/social/activities?sport=badminton\u0026city=%E8%A5%BF%E5%AE%89\u0026page=1\u0026size=12",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  12.51,
+        "avgMs":  20.24,
+        "p95Ms":  24.57,
+        "maxMs":  31.44
+    },
+    {
+        "name":  "agent_status",
+        "method":  "GET",
+        "path":  "/agent/status",
+        "auth":  false,
+        "iterations":  20,
+        "errors":  20,
+        "minMs":  13.34,
+        "avgMs":  42.03,
+        "p95Ms":  96.24,
+        "maxMs":  164.32
+    }
+]

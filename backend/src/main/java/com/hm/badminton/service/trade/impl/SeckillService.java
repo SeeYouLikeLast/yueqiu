@@ -76,6 +76,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
 
     @Override
     public Long submit(Long userId, Integer type, Long activityId) {
+        // 1. 校验业务类型、加载活动详情，并判断秒杀是否处于可购买时间窗口。
         int tradeType = TradeType.require(type);
         SeckillActivity activity = getActivity(tradeType, activityId);
         validateActivityTime(activity);
@@ -87,7 +88,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             throw new BusinessException(409, "不能重复抢购");
         }
 
-        // 提前生成订单号并序列化消息，序列化失败不触发库存回滚
+        // 2. 提前生成订单号并序列化消息。序列化失败发生在 Redis 预扣前，不需要回滚库存。
         long orderId = idGenerator.nextId();
         String payload = serializeSeckillMessage(new SeckillOrderMessage(
                 orderId,
@@ -112,9 +113,11 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             }
             preDeducted = true;
 
+            // 4. Redis 预扣成功后投递 MQ，真正的订单落库由消费者异步完成。
             sendSeckillOrderMessage(payload);
             return orderId;
         } catch (RuntimeException e) {
+            // 5. 如果 MQ 发送失败，回滚 Redis 预扣，避免库存和已购集合长期不一致。
             if (preDeducted) {
                 rollbackRedisPreDeduct(userId, tradeType, activityId);
             }
@@ -135,6 +138,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
+            // 应用启动时把数据库里的秒杀库存和已下单用户预热到 Redis，Lua 才能全内存判断。
             for (SeckillActivity activity : list(TradeType.EQUIPMENT, null, null)) {
                 deleteLegacyActivityKeys(activity.getId());
                 preloadActivity(activity, seckillMapper.selectEquipmentUserIdsByActivity(activity.getId()));
@@ -245,14 +249,16 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         String userKey = userKey(activity.getType(), activity.getId());
         Duration ttl = seckillCacheTtl(activity);
 
+        // 1. 库存 key 保存剩余可抢数量，TTL 覆盖活动结束后一段时间，便于查订单和防重复。
         redisTemplate.opsForValue().set(stockKey, String.valueOf(activity.getStock()), ttl);
+        // 2. 用户集合保存已经抢到的人，用于 Lua 一人一单判断。
         redisTemplate.delete(userKey);
         if (!userIds.isEmpty()) {
             redisTemplate.opsForSet().add(userKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
         }
         redisTemplate.expire(userKey, ttl);
 
-        // 预热活动元数据，让 submit 不再查数据库
+        // 3. 预热活动元数据，让 submit 优先读逻辑过期缓存，降低热点活动打到数据库的概率。
         cacheActivityMeta(activity);
     }
 
