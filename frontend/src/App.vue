@@ -664,7 +664,7 @@ const activityForm = reactive({
   startTime: defaultActivityWindow.startTime,
   endTime: defaultActivityWindow.endTime,
   maxPlayers: 4,
-  levelRequired: '中级',
+  levelRequired: '不限',
   feeType: 'AA'
 })
 
@@ -2475,13 +2475,21 @@ function confirmAgentQuickReply() {
     .filter(Boolean)
   const content = sportNames.length ? `${prompt}（${sportNames.join('、')}）` : `${prompt}（不限球类）`
   closeAgentSportPicker()
-  void sendAgentMessage(content, sportCodes)
+  // 用户在选择器中点了“不限”时，必须保留“全运动”的语义，
+  // 不能再回退为首页当前选中的单一运动。
+  void sendAgentMessage(content, sportCodes, true)
 }
 
-async function sendAgentMessage(text = agentInput.value, requestedSportCodes: string[] = []) {
+async function sendAgentMessage(
+  text = agentInput.value,
+  requestedSportCodes: string[] = [],
+  allSportsRequested = false
+) {
   const content = text.trim()
   if (!content || loading.value) return
-  const effectiveSportCodes = requestedSportCodes.length
+  const effectiveSportCodes = allSportsRequested
+    ? []
+    : requestedSportCodes.length
     ? requestedSportCodes
     : selectedSport.value ? [selectedSport.value] : []
   agentInput.value = ''
@@ -2658,7 +2666,7 @@ async function prepareAgentVenueBooking(product: AgentCard, place?: AgentCard) {
       inventories: available,
       inventoryId: available[0].id,
       maxPlayers: 4,
-      levelRequired: userProfile.value?.level || '不限'
+      levelRequired: '不限'
     }
   })
 }
@@ -3327,7 +3335,9 @@ onBeforeUnmount(() => {
     <main
       class="phone-main"
       :class="{
-        'header-full': showPhoneHeader && showDiscoveryHeader,
+        'header-full': showPhoneHeader && showDiscoveryHeader && activeTab !== 'seckill' && !showCategoryHeader,
+        'header-search-only': showPhoneHeader && activeTab === 'seckill',
+        'header-with-categories': showPhoneHeader && showCategoryHeader,
         'header-agent': showPhoneHeader && activeTab === 'assistant',
         'header-compact': showPhoneHeader && !showDiscoveryHeader && activeTab !== 'assistant'
       }"
@@ -3650,55 +3660,63 @@ onBeforeUnmount(() => {
         <section v-else id="venue-sale-page" class="venue-sale-page">
           <div class="section-title">
             <div>
-              <span>{{ activeSport.name }} · {{ venueSaleView.subtitle }}</span>
+              <span>{{ activeSport.name }}</span>
               <strong>{{ venueSaleView.title }}</strong>
             </div>
             <button class="ghost" @click="closeVenueSalePage"><ChevronLeft :size="16" /> 返回</button>
           </div>
 
           <div v-if="!venueSaleItems.length" class="empty-box">暂无可购买项目</div>
-          <article
-            v-for="item in venueSaleItems"
-            :id="itemDomId('VENUE_PRODUCT', item.id)"
-            :key="item.id"
-            class="venue-sale-row"
-            :class="{ highlighted: isHighlighted('VENUE_PRODUCT', item.id) }"
-          >
-            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" @error="imageFallback" />
-            <div>
-              <div class="sale-row-head">
-                <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
-                <small>{{ item.purchasable ? '可购买' : '已售罄' }}</small>
-              </div>
-              <h3>{{ item.title }}</h3>
-              <button class="venue-link" type="button" @click="openVenueSaleItemPlace(item)">
-                {{ item.venueName }}
-              </button>
-              <small>{{ item.description }}</small>
-              <div class="tag-row">
-                <span v-for="tag in item.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
-              </div>
-              <div class="sale-row-bottom">
-                <div>
-                  <strong>{{ yuan(item.price) }}</strong>
-                  <span v-if="hasDiscountPrice(item)">{{ yuan(item.originalPrice || 0) }}</span>
-                </div>
-                <div class="dual-action compact-actions">
-                  <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
-                  <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
-                    {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+          <template v-else>
+            <div class="venue-sale-list">
+              <article
+                v-for="(item, index) in venueSaleItems"
+                :id="itemDomId('VENUE_PRODUCT', item.id)"
+                :key="item.id"
+                class="venue-sale-row"
+                :class="{
+                  highlighted: isHighlighted('VENUE_PRODUCT', item.id),
+                  'sale-spotlight': index === 0
+                }"
+              >
+                <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" @error="imageFallback" />
+                <div class="venue-sale-content">
+                  <div class="sale-row-head">
+                    <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
+                    <small>{{ index === 0 ? '优先推荐' : item.purchasable ? '可购买' : '已售罄' }}</small>
+                  </div>
+                  <h3>{{ item.title }}</h3>
+                  <button class="venue-link" type="button" @click="openVenueSaleItemPlace(item)">
+                    {{ item.venueName }}
                   </button>
+                  <small>{{ item.description }}</small>
+                  <div class="tag-row">
+                    <span v-for="tag in item.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
+                  </div>
+                  <div class="sale-row-bottom">
+                    <div class="sale-price-block">
+                      <strong>{{ yuan(item.price) }}</strong>
+                      <span v-if="hasDiscountPrice(item)">{{ yuan(item.originalPrice || 0) }}</span>
+                      <small>{{ index === 0 ? '当前优先为你展示' : '下单后按规则使用' }}</small>
+                    </div>
+                    <div class="dual-action compact-actions">
+                      <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
+                      <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
+                        {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </article>
             </div>
-          </article>
+          </template>
           <div v-if="loadingMore" class="load-more-state">正在加载更多可订项目</div>
           <div v-else-if="venueSaleItems.length && !hasMoreVenueSales" class="load-more-state muted-state">已经到底了</div>
         </section>
       </section>
 
       <section v-else-if="activeTab === 'seckill'" class="page-stack blog-page">
-        <div class="blog-channel-row">
+        <div class="blog-channel-row sport-scroll">
           <button type="button" :class="{ active: blogChannel === 'follow' }" @click="selectBlogChannel('follow')">关注</button>
           <button type="button" :class="{ active: blogChannel === 'recommend' }" @click="selectBlogChannel('recommend')">推荐</button>
           <button

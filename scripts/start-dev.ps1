@@ -170,6 +170,11 @@ $FrontendLog = Join-Path $LogsDir "frontend.log"
 
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 
+# 每一次通过本脚本启动都只保留本次运行日志，避免旧异常和当前输出混在一起。
+# 不处理 backend\ 下历史手动启动生成的日志，防止误删用户需要保留的排障记录。
+Set-Content -LiteralPath $BackendLog -Value "" -Encoding utf8
+Set-Content -LiteralPath $FrontendLog -Value "" -Encoding utf8
+
 Write-Host "HM Badminton dev startup" -ForegroundColor Green
 Write-Host "Project root: $ProjectRoot"
 Write-Host "Logs dir:     $LogsDir"

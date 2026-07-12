@@ -462,38 +462,9 @@ textarea {
   border-color: #15845f;
 }
 
-.blog-channel-row {
-  display: flex;
-  gap: 10px;
-  margin: -2px -12px 0;
-  padding: 10px 12px 12px;
-  overflow-x: auto;
-  border-bottom: 1px solid #e2dfc9;
-  scrollbar-width: none;
-}
-
-.blog-channel-row::-webkit-scrollbar {
-  display: none;
-}
-
-.blog-channel-row button {
-  flex: 0 0 auto;
-  min-height: 34px;
-  padding: 0 14px;
-  border-color: transparent;
-  background: #ffffff;
-  white-space: nowrap;
-}
-
-.blog-channel-row button.active {
-  color: #ffffff;
-  background: #17211b;
-}
-
 .sport-scroll,
 .deal-scroll,
-.category-scroll,
-.blog-channel-row {
+.category-scroll {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x;
   scrollbar-width: thin;
@@ -502,16 +473,14 @@ textarea {
 
 .sport-scroll::-webkit-scrollbar,
 .deal-scroll::-webkit-scrollbar,
-.category-scroll::-webkit-scrollbar,
-.blog-channel-row::-webkit-scrollbar {
+.category-scroll::-webkit-scrollbar {
   display: block;
   height: 4px;
 }
 
 .sport-scroll::-webkit-scrollbar-thumb,
 .deal-scroll::-webkit-scrollbar-thumb,
-.category-scroll::-webkit-scrollbar-thumb,
-.blog-channel-row::-webkit-scrollbar-thumb {
+.category-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(21, 132, 95, 0.32);
 }
@@ -525,6 +494,14 @@ textarea {
 /* The fixed header overlays the page. Its spacing lives at document start, so hiding it never shifts a scrolled page. */
 .phone-main.header-full {
   padding-top: 181px;
+}
+
+.phone-main.header-search-only {
+  padding-top: 106px;
+}
+
+.phone-main.header-with-categories {
+  padding-top: 230px;
 }
 
 .phone-main.header-agent {
@@ -1572,7 +1549,32 @@ p {
 }
 
 .venue-sale-row {
-  grid-template-columns: 104px minmax(0, 1fr);
+  grid-template-columns: 86px minmax(0, 1fr);
+  padding: 12px;
+  border: 1px solid #dfe8dc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.venue-sale-page {
+  display: grid;
+  gap: 12px;
+}
+
+.venue-sale-list {
+  display: grid;
+  gap: 10px;
+}
+
+.venue-sale-content {
+  min-width: 0;
+}
+
+.venue-sale-row.sale-spotlight {
+  grid-template-columns: 116px minmax(0, 1fr);
+  border-color: #f1d89b;
+  background: linear-gradient(135deg, #fffaf0, #ffffff 58%);
+  box-shadow: 0 8px 18px rgba(128, 91, 23, 0.08);
 }
 
 .product-row.highlighted,
@@ -1588,10 +1590,14 @@ p {
 
 .venue-sale-row img {
   width: 100%;
-  height: 104px;
+  height: 86px;
   object-fit: cover;
   border-radius: 8px;
   background: #eef3ef;
+}
+
+.venue-sale-row.sale-spotlight img {
+  height: 116px;
 }
 
 .venue-sale-row h3 {
@@ -1651,6 +1657,7 @@ p {
 
 .sale-row-bottom {
   margin-top: 9px;
+  align-items: end;
 }
 
 .sale-row-bottom strong {
@@ -1663,6 +1670,24 @@ p {
   color: #858f87;
   font-size: 12px;
   text-decoration: line-through;
+}
+
+.sale-price-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+}
+
+.sale-price-block small {
+  flex-basis: 100%;
+  margin-top: 2px;
+  color: #718078;
+  font-size: 11px;
+}
+
+.sale-spotlight .sale-price-block strong {
+  font-size: 21px;
 }
 
 .sale-row-bottom button {
@@ -1869,6 +1894,11 @@ p {
 
 .blog-page {
   gap: 12px;
+}
+
+/* The community channel bar lives below the fixed search header, so reclaim the body padding it does not need. */
+.blog-page > .blog-channel-row {
+  margin-top: -10px;
 }
 
 .blog-masonry {

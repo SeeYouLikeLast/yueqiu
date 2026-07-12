@@ -23,17 +23,17 @@ spring:
     virtual:
       enabled: true
   datasource:
-    url: jdbc:mysql://localhost:3307/hm_badminton?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3307/hm_badminton?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 30
       minimum-idle: 5
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       timeout: 3s
       lettuce:
         pool:
@@ -75,17 +75,17 @@ hm:
     token-expire-minutes: 120
     token-expire-jitter-minutes: 10
   jwt:
-    secret: "change-this-secret-in-prod-hm-badminton-2026"
+    secret: ${JWT_SECRET:change-this-secret-in-prod-hm-badminton-2026}
     expire-minutes: 120
   bloom:
     bit-size: 33554432
     hash-count: 7
   minio:
-    endpoint: http://localhost:9000
-    public-endpoint: http://localhost:9000
-    access-key: minioadmin
-    secret-key: minioadmin123
-    bucket: hm-badminton
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin123}
+    bucket: ${MINIO_BUCKET:hm-badminton}
   amap:
     key: ${AMAP_KEY:0b3dedfd34e183c63be3e7206dc5560c}
     endpoint: https://restapi.amap.com/v5/place/around
@@ -108,7 +108,7 @@ logging:
     com.hm.badminton: INFO
 
 rocketmq:
-  name-server: localhost:9876
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
   producer:
     group: hm-seckill-order-producer
     send-message-timeout: 3000

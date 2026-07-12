@@ -798,7 +798,8 @@ public class AgentServiceImpl implements IAgentService {
             return null;
         }
         String text = message
-                .replaceAll("(推荐|帮我|找|购买|买|装备|以内|以下|左右|元|块|附近|有没有|可以|适合|新手)", " ")
+                // “不限球类”是筛选条件而不是装备名称；保留它会变成 SQL like 关键词，导致全量查询为空。
+                .replaceAll("(推荐|帮我|找|购买|买|装备|不限球类|不限|球类|以内|以下|左右|元|块|附近|有没有|可以|适合|新手)", " ")
                 .replaceAll("(羽毛球|羽毛|乒乓球|乒乓|足球|篮球|网球|排球)", " ")
                 .replaceAll("[（）()，,。.!！?？、]", " ")
                 .replaceAll("\\d+", " ")

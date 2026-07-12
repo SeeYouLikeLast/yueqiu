@@ -1,0 +1,9 @@
+# 生产环境不能在每次进程重启时执行 schema.sql 和 data.sql。
+# 演示数据仅应在首次部署时人工初始化一次。
+server:
+  address: 127.0.0.1
+
+spring:
+  sql:
+    init:
+      mode: never
