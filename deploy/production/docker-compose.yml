@@ -15,7 +15,9 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
-    mem_limit: 350m
+    # MySQL 8.4 needs extra memory while initializing its data dictionary.
+    # A lower limit can cause an OOM/restart loop even with a small buffer pool.
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
