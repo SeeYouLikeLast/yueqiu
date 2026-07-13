@@ -18,6 +18,16 @@ Internet -> Nginx :80/:443 -> Vue dist + /api -> Spring Boot :8088 (127.0.0.1)
 3. 安装 Docker Compose、JDK 21、Maven、Node.js、Nginx、Git。
 4. 将整个项目上传或克隆到 `/opt/hm-badminton`。
 
+Alibaba Linux 3 / CentOS Stream 可先执行：
+
+```bash
+dnf install -y git docker java-21-openjdk-devel maven nodejs nginx rsync
+systemctl enable --now docker nginx
+docker compose version
+```
+
+若最后一条提示没有 Compose V2，请先安装 Docker Compose 插件后再继续。
+
 ## 启动基础设施
 
 ```bash
@@ -30,6 +40,18 @@ docker compose ps
 ```
 
 不要执行 `docker compose down -v`，它会删除 MySQL、Redis、MinIO、RocketMQ 的持久化卷。
+
+## 首次初始化演示数据
+
+仅新服务器、尚未产生真实业务数据时执行一次：
+
+```bash
+cd /opt/hm-badminton/deploy/production
+bash initialize-demo-data.sh
+bash upload-demo-assets.sh
+```
+
+第一个脚本会要求输入 `YES`，因为它会重建数据库表。后续部署、升级、重启都不要再运行这两个脚本。
 
 ## 打包并部署后端
 
@@ -65,8 +87,7 @@ sudo rsync -a --delete dist/ /var/www/hm-badminton/
 ## 配置 Nginx 与 HTTPS
 
 ```bash
-sudo cp /opt/hm-badminton/deploy/production/nginx/hm-badminton.conf /etc/nginx/sites-available/hm-badminton
-sudo ln -sf /etc/nginx/sites-available/hm-badminton /etc/nginx/sites-enabled/hm-badminton
+sudo cp /opt/hm-badminton/deploy/production/nginx/hm-badminton.conf /etc/nginx/conf.d/hm-badminton.conf
 # 编辑 server_name 为你的真实域名
 sudo nginx -t && sudo systemctl reload nginx
 ```
