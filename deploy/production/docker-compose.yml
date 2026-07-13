@@ -15,6 +15,7 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+    mem_limit: 350m
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
@@ -31,6 +32,7 @@ services:
       - redis-data:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    mem_limit: 128m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -41,6 +43,7 @@ services:
     image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
     container_name: hm-badminton-rocketmq-namesrv
     restart: unless-stopped
+    profiles: ["mq"]
     user: root
     ports:
       - "${DOCKER_BIND_ADDRESS:-127.0.0.1}:9876:9876"
@@ -54,6 +57,7 @@ services:
     image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
     container_name: hm-badminton-rocketmq-broker
     restart: unless-stopped
+    profiles: ["mq"]
     user: root
     depends_on:
       - rocketmq-namesrv
@@ -74,6 +78,7 @@ services:
   rocketmq-init:
     image: ${ROCKETMQ_IMAGE:-apache/rocketmq:5.3.2}
     container_name: hm-badminton-rocketmq-init
+    profiles: ["mq"]
     depends_on:
       - rocketmq-broker
     environment:
@@ -99,6 +104,7 @@ services:
     volumes:
       - minio-data:/data
     command: server /data --console-address ":9001"
+    mem_limit: 192m
 
   minio-init:
     image: ${MINIO_CLIENT_IMAGE:-quay.io/minio/mc:latest}

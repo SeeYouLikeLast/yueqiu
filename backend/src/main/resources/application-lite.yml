@@ -1,0 +1,20 @@
+# 2GB ECS 演示模式：不启动 RocketMQ，秒杀保留 Redis Lua / Redisson / 数据库兜底，改为同步落库。
+server:
+  address: 127.0.0.1
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration
+  sql:
+    init:
+      mode: never
+  datasource:
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+
+hm:
+  seckill:
+    mq-enabled: false
+    sync-fallback-enabled: true

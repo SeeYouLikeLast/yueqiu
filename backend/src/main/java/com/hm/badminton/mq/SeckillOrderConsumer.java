@@ -9,6 +9,7 @@ import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.MessageModel;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -16,6 +17,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(prefix = "hm.seckill", name = "mq-enabled", havingValue = "true", matchIfMissing = true)
 @RocketMQMessageListener(
         topic = MqConstants.SECKILL_ORDER_TOPIC,
         consumerGroup = MqConstants.SECKILL_ORDER_CONSUMER_GROUP,

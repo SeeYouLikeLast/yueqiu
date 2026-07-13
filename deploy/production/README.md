@@ -6,10 +6,28 @@
 
 ```text
 Internet -> Nginx :80/:443 -> Vue dist + /api -> Spring Boot :8088 (127.0.0.1)
-                                                -> Docker: MySQL / Redis / RocketMQ / MinIO
+                                                -> Docker: MySQL / Redis / MinIO
+                                                -> RocketMQ（仅完整模式启用）
 ```
 
 除 Nginx 的 `80/443` 外，所有服务端口均绑定为 `127.0.0.1`，不会被公网直接访问。MinIO 文件通过 Nginx 的 `/objects/` 输出，管理端 `9001` 仅可通过 SSH 隧道访问。
+
+## 2GB 轻量演示模式
+
+默认 `docker compose up -d` 不启动 RocketMQ，配合 `SPRING_PROFILES_ACTIVE=prod,lite` 可在 2GB ECS 展示定位、场所、团购、装备、购物车、约球、社区、AI 和 Redis 秒杀。
+
+- 秒杀默认优先使用 MQ 异步落库；轻量模式因未部署 MQ 自动降级为同步落库。MQ 投递失败时也会使用相同订单号同步补偿，消费者可幂等忽略后续重复消息。
+- MySQL、Redis、MinIO 已降低缓存和容器内存上限。
+- 不要在 2GB ECS 上运行 `npm run build` 或长期保持 VS Code Remote；请在本机构建前端后上传 `dist`。
+- 演示图片约 11MB，影响主要是磁盘和网络，不是本次 OOM 的核心原因。
+
+升级到至少 4 核 8GB 后，需要完整异步链路时使用：
+
+```bash
+docker compose --profile mq --env-file .env up -d
+```
+
+并把 `/etc/hm-badminton/app.env` 中的 `SPRING_PROFILES_ACTIVE` 改回 `prod`，然后重启后端。
 
 ## 首次准备
 

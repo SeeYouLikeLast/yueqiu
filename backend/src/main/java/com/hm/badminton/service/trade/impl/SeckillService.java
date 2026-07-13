@@ -10,6 +10,7 @@ import com.hm.badminton.dto.SeckillOrderMessage;
 import com.hm.badminton.entity.SeckillActivity;
 import com.hm.badminton.entity.SeckillOrder;
 import com.hm.badminton.mapper.trade.SeckillMapper;
+import com.hm.badminton.mq.SeckillOrderMessageService;
 import com.hm.badminton.service.trade.ISeckillService;
 import com.hm.badminton.utils.CacheClient;
 import com.hm.badminton.utils.IdGenerator;
@@ -21,6 +22,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -40,28 +43,37 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
     private final SeckillMapper seckillMapper;
     private final StringRedisTemplate redisTemplate;
     private final RedissonClient redissonClient;
-    private final RocketMQTemplate rocketMQTemplate;
+    private final ObjectProvider<RocketMQTemplate> rocketMQTemplateProvider;
+    private final SeckillOrderMessageService orderMessageService;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final DefaultRedisScript<Long> seckillScript;
     private final CacheClient cacheClient;
+    private final boolean mqEnabled;
+    private final boolean syncFallbackEnabled;
 
     public SeckillService(SeckillMapper seckillMapper,
                           StringRedisTemplate redisTemplate,
                           RedissonClient redissonClient,
-                          RocketMQTemplate rocketMQTemplate,
+                           ObjectProvider<RocketMQTemplate> rocketMQTemplateProvider,
+                           SeckillOrderMessageService orderMessageService,
                           ObjectMapper objectMapper,
                           IdGenerator idGenerator,
                           DefaultRedisScript<Long> seckillScript,
-                          CacheClient cacheClient) {
+                           CacheClient cacheClient,
+                           @Value("${hm.seckill.mq-enabled:true}") boolean mqEnabled,
+                           @Value("${hm.seckill.sync-fallback-enabled:true}") boolean syncFallbackEnabled) {
         this.seckillMapper = seckillMapper;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
-        this.rocketMQTemplate = rocketMQTemplate;
+        this.rocketMQTemplateProvider = rocketMQTemplateProvider;
+        this.orderMessageService = orderMessageService;
         this.objectMapper = objectMapper;
         this.idGenerator = idGenerator;
         this.seckillScript = seckillScript;
         this.cacheClient = cacheClient;
+        this.mqEnabled = mqEnabled;
+        this.syncFallbackEnabled = syncFallbackEnabled;
     }
 
     @Override
@@ -88,19 +100,19 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             throw new BusinessException(409, "不能重复抢购");
         }
 
-        // 2. 提前生成订单号并序列化消息。序列化失败发生在 Redis 预扣前，不需要回滚库存。
+        // 2. 提前生成订单号。优先投递 RocketMQ；MQ 不可用时可降级到同一套事务落库服务。
         long orderId = idGenerator.nextId();
-        String payload = serializeSeckillMessage(new SeckillOrderMessage(
+        SeckillOrderMessage orderMessage = new SeckillOrderMessage(
                 orderId,
                 tradeType,
                 activity.getId(),
                 activity.getProductId(),
                 userId,
-                activity.getSeckillPrice()));
+                activity.getSeckillPrice());
 
         boolean preDeducted = false;
         try {
-            // Lua 在 Redis 内原子完成库存预扣和一人一单标记，成功后再投递 RocketMQ 异步落库。
+            // Lua 在 Redis 内原子完成库存预扣和一人一单标记。
             Long code = tryRedisPreDeduct(userId, tradeType, activityId);
             if (code == null) {
                 throw new BusinessException(503, "秒杀服务繁忙，请稍后再试");
@@ -113,11 +125,11 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             }
             preDeducted = true;
 
-            // 4. Redis 预扣成功后投递 MQ，真正的订单落库由消费者异步完成。
-            sendSeckillOrderMessage(payload);
+            // 4. 优先异步落库；轻量部署或 MQ 故障时同步落库，保证秒杀请求仍可完成。
+            createSeckillOrder(orderMessage);
             return orderId;
         } catch (RuntimeException e) {
-            // 5. 如果 MQ 发送失败，回滚 Redis 预扣，避免库存和已购集合长期不一致。
+            // 5. 异步投递或同步落库失败时回滚 Redis 预扣，避免库存和已购集合长期不一致。
             if (preDeducted) {
                 rollbackRedisPreDeduct(userId, tradeType, activityId);
             }
@@ -194,7 +206,31 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
         }
     }
 
-    private void sendSeckillOrderMessage(String payload) {
+    private void createSeckillOrder(SeckillOrderMessage message) {
+        if (mqEnabled) {
+            RocketMQTemplate rocketMQTemplate = rocketMQTemplateProvider.getIfAvailable();
+            if (rocketMQTemplate != null) {
+                try {
+                    sendSeckillOrderMessage(rocketMQTemplate, serializeSeckillMessage(message));
+                    return;
+                } catch (BusinessException e) {
+                    if (!syncFallbackEnabled) {
+                        throw e;
+                    }
+                    // Broker 可能已收到但客户端未拿到确认。同步落库使用同一订单号，后续消费者会幂等忽略重复消息。
+                    log.warn("RocketMQ 投递失败，降级同步落库, orderId={}, reason={}", message.getOrderId(), e.getMessage());
+                }
+            } else if (!syncFallbackEnabled) {
+                throw new BusinessException(503, "RocketMQ 未启用，无法异步创建秒杀订单");
+            } else {
+                log.info("RocketMQ 未部署，使用同步秒杀落库, orderId={}", message.getOrderId());
+            }
+        }
+        orderMessageService.createOrder(message);
+        log.info("秒杀订单已同步落库, orderId={}", message.getOrderId());
+    }
+
+    private void sendSeckillOrderMessage(RocketMQTemplate rocketMQTemplate, String payload) {
         try {
             rocketMQTemplate.syncSend(MqConstants.SECKILL_ORDER_TOPIC, payload, 3000);
         } catch (Exception e) {

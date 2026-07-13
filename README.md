@@ -22,7 +22,7 @@
 - **HMDP 风格认证**：邮件验证码登录/自动注册、密码登录、Redis Token、Token 刷新拦截器、登录拦截器。
 - **唯一性与防穿透**：邮箱、用户名等使用布隆过滤器预判，MySQL 唯一索引最终兜底。
 - **缓存治理**：缓存空值防穿透、TTL 随机值防雪崩、热点秒杀活动逻辑过期防击穿；高德逆地理编码短缓存。
-- **高并发秒杀**：Redis Lua 原子校验与预扣、Redisson 分布式锁、一人一单、数据库唯一索引、RocketMQ 异步落库。
+- **高并发秒杀**：Redis Lua 原子校验与预扣、Redisson 分布式锁、一人一单、数据库唯一索引、RocketMQ 异步落库；MQ 未部署或投递失败时自动降级为同步事务落库。
 - **文件存储**：MySQL `file_metadata` 保存元数据，MinIO 保存文件本体；上传校验类型和大小，删除校验所有者。
 - **Feed 流**：普通用户采用推模式写入关注者收件箱；大 V 使用拉模式，降低写扩散成本。
 - **AI Grounding**：后端工具先查询真实候选数据并结构化排序，模型只负责解释与推荐，避免凭空编造商品或场所。
@@ -199,6 +199,8 @@ $env:MAIL_PASSWORD="你的QQ邮箱SMTP授权码"
 - `systemd/`：后端守护服务。
 - `initialize-demo-data.sh`：仅首次初始化演示数据库。
 - `upload-demo-assets.sh`：仅首次上传 MinIO 演示图片。
+
+2GB ECS 使用 `prod,lite` Profile，默认不启动 RocketMQ；完整异步消息链路见 [生产部署说明](deploy/production/README.md)。
 
 详细步骤见 [生产部署说明](deploy/production/README.md)。部署到中国大陆 ECS 前，请准备域名与 ICP 备案；生产安全组仅开放 `80/443`，SSH `22` 仅允许自己的公网 IP，禁止开放 MySQL、Redis、RocketMQ、MinIO、后端端口。
 
