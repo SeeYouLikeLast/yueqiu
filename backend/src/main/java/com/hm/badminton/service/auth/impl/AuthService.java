@@ -296,35 +296,49 @@ public class AuthService implements IAuthService {
     }
 
     @Override
-    public void updateLocation(String token, Long userId, LocationRequest request) {
+    public Map<String, Object> updateLocation(String token, Long userId, LocationRequest request) {
         if (token == null || token.isBlank() || request == null) {
-            return;
+            throw new BusinessException(401, "登录状态已失效");
+        }
+        if (request.getLng() == null || request.getLat() == null
+                || !Double.isFinite(request.getLng()) || !Double.isFinite(request.getLat())
+                || request.getLng() < 73 || request.getLng() > 136
+                || request.getLat() < 3 || request.getLat() > 54) {
+            throw new BusinessException(422, "请提供有效的中国境内经纬度");
         }
         Map<String, String> values = new HashMap<>();
         putIfText(values, "city", request.getCity());
-        if (request.getLng() != null) values.put("lng", String.valueOf(request.getLng()));
-        if (request.getLat() != null) values.put("lat", String.valueOf(request.getLat()));
-        if (values.isEmpty()) {
-            return;
-        }
+        putIfText(values, "preciseAddress", request.getPreciseAddress());
+        values.put("lng", String.valueOf(request.getLng()));
+        values.put("lat", String.valueOf(request.getLat()));
         String key = RedisConstants.LOGIN_USER_KEY + token;
         redisTemplate.opsForHash().putAll(key, values);
         redisTemplate.expire(key, RedisTtl.withJitter(tokenTtl, tokenTtlJitterMaxSeconds));
 
+        PlayerProfileEntity profile = playerProfileMapper.selectById(userId);
+        String effectiveCity = request.getCity() == null || request.getCity().isBlank()
+                ? (profile == null ? "西安" : profile.getCity())
+                : request.getCity().trim();
         if (request.getCity() != null && !request.getCity().isBlank()) {
             UserAccount user = new UserAccount();
             user.setId(userId);
-            user.setCity(request.getCity().trim());
+            user.setCity(effectiveCity);
             userMapper.updateById(user);
         }
-        if (request.getCity() != null && !request.getCity().isBlank() && request.getLng() != null && request.getLat() != null) {
-            PlayerProfileEntity profile = new PlayerProfileEntity();
-            profile.setUserId(userId);
-            profile.setCity(request.getCity().trim());
-            profile.setLongitude(request.getLng());
-            profile.setLatitude(request.getLat());
-            playerProfileMapper.updateById(profile);
+        PlayerProfileEntity update = new PlayerProfileEntity();
+        update.setUserId(userId);
+        update.setCity(effectiveCity);
+        update.setLongitude(request.getLng());
+        update.setLatitude(request.getLat());
+        if (request.getPreciseAddress() != null && !request.getPreciseAddress().isBlank()) {
+            update.setPreciseAddress(request.getPreciseAddress().trim());
         }
+        playerProfileMapper.updateById(update);
+        return Map.of(
+                "city", effectiveCity,
+                "preciseAddress", request.getPreciseAddress() == null ? "" : request.getPreciseAddress().trim(),
+                "lng", request.getLng(),
+                "lat", request.getLat());
     }
 
     private LoginUser findByPhone(String phone) {

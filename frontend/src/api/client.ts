@@ -35,7 +35,14 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
     headers.set('Authorization', `Bearer ${token}`)
   }
   const response = await fetch(`${API_BASE}${url}`, { ...options, headers })
-  const body = (await response.json()) as ApiResponse<T>
+  const raw = await response.text()
+  let body: ApiResponse<T>
+  try {
+    body = JSON.parse(raw) as ApiResponse<T>
+  } catch {
+    // 反向代理、网关或 CORS 拒绝有时返回纯文本，避免把底层错误伪装成 JSON 解析异常。
+    throw new Error(raw || `请求失败（HTTP ${response.status}）`)
+  }
   if (body.code !== 0) {
     throw new Error(body.message || '请求失败')
   }

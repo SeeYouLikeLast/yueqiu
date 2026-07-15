@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,6 +67,25 @@ public class AmapPlaceService implements IAmapPlaceService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), Math.min(Math.max(1, amapProperties.getPageSize()), 25));
         int safeRadius = Math.min(Math.max(radius == null ? amapProperties.getRadius() : radius, 100), 50000);
+        // 经纬度按 4 位小数归并到约 10 米网格。相邻滚动、刷新和多个页面组件可复用同一份高德结果。
+        String cacheKey = nearbyCacheKey(sport.getCode(), keyword, city, lng, lat, safeRadius, safePage, safeSize);
+        return cacheClient.querySimple(cacheKey, new TypeReference<>() {
+                }, () -> queryNearbyFromAmap(sport, keyword, city, lng, lat, safeRadius, safePage, safeSize),
+                RedisConstants.AMAP_NEARBY_TTL, RedisConstants.AMAP_NEARBY_TTL_JITTER_SECONDS);
+    }
+
+    /**
+     * 单次附近搜索的真实高德回源逻辑。
+     * 结果不足一页时才逐级扩大半径，外层 Redis 短缓存避免相同位置重复触发这段多次回源。
+     */
+    private PageResult<AmapPlace> queryNearbyFromAmap(SportType sport,
+                                                      String keyword,
+                                                      String city,
+                                                      Double lng,
+                                                      Double lat,
+                                                      int safeRadius,
+                                                      int safePage,
+                                                      int safeSize) {
         LinkedHashMap<String, AmapPlace> merged = new LinkedHashMap<>();
         long total = 0;
         // 2. 后端自动扩大半径，直到凑够一页或达到最大半径，避免前端循环请求。
@@ -139,7 +159,102 @@ public class AmapPlaceService implements IAmapPlaceService {
         }
         String cacheKey = RedisConstants.AMAP_REGEOCODE_KEY + roundedLocation(lng, lat);
         return cacheClient.querySimple(cacheKey, new TypeReference<>() {
-        }, () -> requestReverseGeocode(lng, lat), RedisConstants.AMAP_REGEOCODE_TTL);
+                }, () -> requestReverseGeocode(lng, lat), RedisConstants.AMAP_REGEOCODE_TTL);
+    }
+
+    /**
+     * IP 定位只用于精确浏览器定位失败时的兜底：
+     * 1. IP 归一化并过滤内网地址，避免把 Nginx/本机地址错误传给第三方；
+     * 2. 将第三方结果按 IP 短缓存，减少重复调用高德；
+     * 3. 高德基础 IP 定位返回的是城市范围，不把它当作用户 GPS，而是取范围中心作为附近搜索中心；
+     * 4. 无法识别时才退回默认城市西安。
+     */
+    @Override
+    public Map<String, Object> locateByIp(String clientIp) {
+        if (amapProperties.getKey() == null || amapProperties.getKey().isBlank()) {
+            return defaultIpLocation();
+        }
+        String ip = clientIp == null ? "" : clientIp.trim();
+        if (ip.isBlank() || isPrivateAddress(ip)) {
+            return defaultIpLocation();
+        }
+        return cacheClient.querySimple(
+                RedisConstants.AMAP_IP_LOCATION_KEY + ip,
+                new TypeReference<>() {
+                },
+                () -> requestIpLocation(ip),
+                RedisConstants.AMAP_IP_LOCATION_TTL);
+    }
+
+    private Map<String, Object> requestIpLocation(String clientIp) {
+        URI uri = UriComponentsBuilder.fromUriString(amapProperties.getIpLocationEndpoint())
+                .queryParam("key", amapProperties.getKey())
+                .queryParam("ip", clientIp)
+                .queryParam("output", "JSON")
+                .encode()
+                .build()
+                .toUri();
+        try {
+            JsonNode root = callAmap(uri);
+            if (!"1".equals(root.path("status").asText())) {
+                return defaultIpLocation();
+            }
+            String province = text(root, "province");
+            String city = firstNonBlank(text(root, "city"), province, amapProperties.getDefaultCity());
+            Double[] center = rectangleCenter(text(root, "rectangle"));
+            double lng = center[0] == null ? amapProperties.getDefaultLongitude() : center[0];
+            double lat = center[1] == null ? amapProperties.getDefaultLatitude() : center[1];
+            return Map.of(
+                    "city", city,
+                    "district", "",
+                    "formattedAddress", city,
+                    "shortAddress", city,
+                    "lng", lng,
+                    "lat", lat,
+                    "accuracy", 50000,
+                    "source", "ip");
+        } catch (RuntimeException ignored) {
+            // IP 定位是兜底，第三方异常不影响默认城市场所浏览。
+            return defaultIpLocation();
+        }
+    }
+
+    private Map<String, Object> defaultIpLocation() {
+        String city = amapProperties.getDefaultCity();
+        return Map.of(
+                "city", city,
+                "district", "",
+                "formattedAddress", city,
+                "shortAddress", city,
+                "lng", amapProperties.getDefaultLongitude(),
+                "lat", amapProperties.getDefaultLatitude(),
+                "accuracy", 100000,
+                "source", "default");
+    }
+
+    private boolean isPrivateAddress(String ip) {
+        try {
+            InetAddress address = InetAddress.getByName(ip);
+            return address.isAnyLocalAddress()
+                    || address.isLoopbackAddress()
+                    || address.isSiteLocalAddress()
+                    || address.isLinkLocalAddress();
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private Double[] rectangleCenter(String rectangle) {
+        if (rectangle == null || rectangle.isBlank() || !rectangle.contains(";")) {
+            return new Double[]{null, null};
+        }
+        String[] bounds = rectangle.split(";", 2);
+        Double[] southwest = parseLocation(bounds[0]);
+        Double[] northeast = parseLocation(bounds[1]);
+        if (southwest[0] == null || southwest[1] == null || northeast[0] == null || northeast[1] == null) {
+            return new Double[]{null, null};
+        }
+        return new Double[]{(southwest[0] + northeast[0]) / 2, (southwest[1] + northeast[1]) / 2};
     }
 
     private Map<String, Object> requestReverseGeocode(Double lng, Double lat) {
@@ -177,6 +292,28 @@ public class AmapPlaceService implements IAmapPlaceService {
 
     private String roundedLocation(Double lng, Double lat) {
         return String.format(Locale.ROOT, "%.4f,%.4f", lng, lat);
+    }
+
+    private String nearbyCacheKey(String sportCode,
+                                  String keyword,
+                                  String city,
+                                  Double lng,
+                                  Double lat,
+                                  int radius,
+                                  int page,
+                                  int size) {
+        return RedisConstants.AMAP_NEARBY_KEY
+                + roundedLocation(lng, lat)
+                + ":sport=" + cachePart(sportCode)
+                + ":keyword=" + cachePart(keyword)
+                + ":city=" + cachePart(city)
+                + ":radius=" + radius
+                + ":page=" + page
+                + ":size=" + size;
+    }
+
+    private String cachePart(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace(':', '_');
     }
 
     private JsonNode callAmap(URI uri) {
@@ -277,7 +414,7 @@ public class AmapPlaceService implements IAmapPlaceService {
 
     private String localPlaceCoverUrl(int rank) {
         int fileId = 31 + Math.floorMod(rank - 1, 25);
-        return "/api/files/" + fileId + "/download";
+        return "/objects/hm-badminton/demo/places/cover/place-%03d.png".formatted(fileId);
     }
 
     private String amapPhotoUrl(JsonNode poi) {

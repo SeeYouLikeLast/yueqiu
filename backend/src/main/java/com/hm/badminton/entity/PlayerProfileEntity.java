@@ -26,6 +26,7 @@ public class PlayerProfileEntity implements Serializable {
     private String sportCode;
     private String city;
     private String area;
+    private String preciseAddress;
     private Double longitude;
     private Double latitude;
     private String level;

@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 public class MinioProperties {
 
     private String endpoint = "http://localhost:9000";
-    private String publicEndpoint = "http://localhost:9000";
     private String accessKey = "minioadmin";
     private String secretKey = "minioadmin123";
     private String bucket = "hm-badminton";

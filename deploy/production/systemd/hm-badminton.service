@@ -8,8 +8,9 @@ Type=simple
 User=hmapp
 Group=hmapp
 WorkingDirectory=/opt/hm-badminton/backend
+LogsDirectory=hm-badminton
 EnvironmentFile=/etc/hm-badminton/app.env
-ExecStart=/usr/bin/java -jar /opt/hm-badminton/backend/app.jar
+ExecStart=/usr/bin/java -Drocketmq.log.root=/var/log/hm-badminton/rocketmqlogs -jar /opt/hm-badminton/backend/app.jar
 SuccessExitStatus=143
 Restart=always
 RestartSec=8

@@ -145,6 +145,7 @@ public interface SocialMapper {
             select count(*)
             from sport_activities a
             where a.status in ('招募中', '已满员')
+              and a.end_time &gt; #{currentTime}
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
             <if test="city != null and city != ''">and a.city = #{city}</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
@@ -163,7 +164,8 @@ public interface SocialMapper {
                          @Param("city") String city,
                          @Param("level") String level,
                          @Param("userId") Long userId,
-                         @Param("scope") String scope);
+                         @Param("scope") String scope,
+                         @Param("currentTime") LocalDateTime currentTime);
 
     @Select("""
             <script>
@@ -175,6 +177,7 @@ public interface SocialMapper {
             join users u on u.id = a.creator_id
             left join place v on v.id = a.venue_id
             where a.status in ('招募中', '已满员')
+              and a.end_time &gt; #{currentTime}
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
             <if test="city != null and city != ''">and a.city = #{city}</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
@@ -216,8 +219,38 @@ public interface SocialMapper {
                                          @Param("level") String level,
                                          @Param("userId") Long userId,
                                          @Param("scope") String scope,
+                                         @Param("currentTime") LocalDateTime currentTime,
                                          @Param("size") int size,
                                          @Param("offset") int offset);
+
+    /**
+     * 演示活动按周循环。任务即使停机多天，也会一次顺延足够的整周，
+     * 保证结束时间重新落到 currentTime 之后，而不是每天无限向后推尚未发生的活动。
+     */
+    @Update("""
+            update sport_activities
+            set start_time = timestampadd(
+                    day,
+                    7 * (floor(greatest(timestampdiff(day, end_time, #{currentTime}), 0) / 7) + 1),
+                    start_time),
+                end_time = timestampadd(
+                    day,
+                    7 * (floor(greatest(timestampdiff(day, end_time, #{currentTime}), 0) / 7) + 1),
+                    end_time),
+                status = case when current_players >= max_players then '已满员' else '招募中' end
+            where left(place_id, 5) = 'DEMO_'
+              and end_time <= #{currentTime}
+            """)
+    int refreshExpiredDemoActivities(@Param("currentTime") LocalDateTime currentTime);
+
+    @Update("""
+            update sport_activities
+            set status = '已结束'
+            where status in ('招募中', '已满员')
+              and end_time <= #{currentTime}
+              and (place_id is null or left(place_id, 5) <> 'DEMO_')
+            """)
+    int finishExpiredUserActivities(@Param("currentTime") LocalDateTime currentTime);
 
     @Insert("""
             insert into sport_activities(sport_code, creator_id, venue_id, place_source, place_id, venue_name,

@@ -51,7 +51,12 @@ services:
       - "${DOCKER_BIND_ADDRESS:-127.0.0.1}:9876:9876"
     environment:
       TZ: Asia/Shanghai
+      JAVA_OPT_EXT: >-
+        -server -Xms32m -Xmx48m -Xmn16m -Xss256k
+        -XX:MaxDirectMemorySize=16m -XX:MaxMetaspaceSize=48m
+        -XX:ReservedCodeCacheSize=24m
     command: sh mqnamesrv
+    mem_limit: 128m
     volumes:
       - rocketmq-namesrv-logs:/home/rocketmq/logs
 
@@ -70,8 +75,12 @@ services:
     environment:
       NAMESRV_ADDR: rocketmq-namesrv:9876
       TZ: Asia/Shanghai
-      JAVA_OPT_EXT: "-server -Xms256m -Xmx256m -Xmn128m"
+      JAVA_OPT_EXT: >-
+        -server -Xms64m -Xmx96m -Xmn32m -Xss256k
+        -XX:MaxDirectMemorySize=24m -XX:MaxMetaspaceSize=64m
+        -XX:ReservedCodeCacheSize=32m -XX:-AlwaysPreTouch
     command: sh mqbroker -c /home/rocketmq/conf/broker.conf
+    mem_limit: 256m
     volumes:
       - ./rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
       - rocketmq-broker-logs:/home/rocketmq/logs
@@ -85,11 +94,22 @@ services:
       - rocketmq-broker
     environment:
       NAMESRV_ADDR: rocketmq-namesrv:9876
+    mem_limit: 192m
     entrypoint: >
-      /bin/sh -c "
-      sleep 15;
-      sh mqadmin updateTopic -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -t hm-seckill-order || true;
-      sh mqadmin updateSubGroup -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -g hm-seckill-order-consumer || true
+      /bin/sh -ec "
+      sleep 5;
+      /opt/java/openjdk/bin/java
+      -Xms16m -Xmx48m -Xmn16m -Xss256k
+      -XX:MaxDirectMemorySize=16m -XX:MaxMetaspaceSize=48m -XX:ReservedCodeCacheSize=24m
+      -cp '.:/home/rocketmq/rocketmq-5.3.2/conf:/home/rocketmq/rocketmq-5.3.2/lib/*'
+      org.apache.rocketmq.tools.command.MQAdminStartup
+      updateTopic -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -t hm-seckill-order -r 1 -w 1;
+      /opt/java/openjdk/bin/java
+      -Xms16m -Xmx48m -Xmn16m -Xss256k
+      -XX:MaxDirectMemorySize=16m -XX:MaxMetaspaceSize=48m -XX:ReservedCodeCacheSize=24m
+      -cp '.:/home/rocketmq/rocketmq-5.3.2/conf:/home/rocketmq/rocketmq-5.3.2/lib/*'
+      org.apache.rocketmq.tools.command.MQAdminStartup
+      updateSubGroup -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 -g hm-seckill-order-consumer
       "
 
   minio:

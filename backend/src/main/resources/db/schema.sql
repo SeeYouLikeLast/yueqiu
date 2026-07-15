@@ -459,6 +459,7 @@ create table player_profiles (
   sport_code varchar(32) not null default 'badminton',
   city varchar(64) not null,
   area varchar(64) not null,
+  precise_address varchar(255) null,
   longitude decimal(10, 6) not null,
   latitude decimal(10, 6) not null,
   level varchar(32) not null,

@@ -67,10 +67,9 @@ public class AuthController {
     }
 
     @PutMapping("/location")
-    public ApiResponse<Void> updateLocation(@RequestBody LocationRequest body,
-                                            HttpServletRequest request) {
-        authService.updateLocation(bearerToken(request), userContext.requireUserId(), body);
-        return ApiResponse.ok();
+    public ApiResponse<Map<String, Object>> updateLocation(@Valid @RequestBody LocationRequest body,
+                                                           HttpServletRequest request) {
+        return ApiResponse.ok(authService.updateLocation(bearerToken(request), userContext.requireUserId(), body));
     }
 
     private String bearerToken(HttpServletRequest request) {
@@ -81,4 +80,3 @@ public class AuthController {
         return null;
     }
 }
-

@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the short-lived HTTPS certificate for hm-badminton
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hm-badminton/certbot/bin/certbot renew --quiet --deploy-hook /usr/bin/systemctl\ reload\ nginx

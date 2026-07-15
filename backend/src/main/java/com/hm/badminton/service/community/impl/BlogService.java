@@ -16,10 +16,10 @@ import com.hm.badminton.mapper.community.BlogMapper;
 import com.hm.badminton.mapper.community.FollowMapper;
 import com.hm.badminton.mapper.auth.UserMapper;
 import com.hm.badminton.service.community.IBlogService;
-import com.hm.badminton.service.community.IFollowService;
 import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.utils.CacheClient;
 
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -48,18 +48,15 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     private final StringRedisTemplate redisTemplate;
     private final UserMapper userMapper;
     private final FollowMapper followMapper;
-    private final IFollowService followService;
     private final CacheClient cacheClient;
 
     public BlogService(StringRedisTemplate redisTemplate,
                        UserMapper userMapper,
                        FollowMapper followMapper,
-                       IFollowService followService,
                        CacheClient cacheClient) {
         this.redisTemplate = redisTemplate;
         this.userMapper = userMapper;
         this.followMapper = followMapper;
-        this.followService = followService;
         this.cacheClient = cacheClient;
     }
 
@@ -423,16 +420,61 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         Map<Long, UserAccount> users = userMapper.selectByIds(blogs.stream().map(Blog::getUserId).collect(Collectors.toSet()))
                 .stream()
                 .collect(Collectors.toMap(UserAccount::getId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        Long currentUserId = currentUser == null ? null : currentUser.getId();
+        Set<Long> likedBlogIds = loadLikedBlogIds(blogs, currentUserId);
+        Set<Long> followedAuthorIds = loadFollowedAuthorIds(blogs, currentUserId);
         return blogs.stream()
-                .map(blog -> toView(blog, users.get(blog.getUserId()), currentUser))
+                .map(blog -> toView(
+                        blog,
+                        users.get(blog.getUserId()),
+                        likedBlogIds.contains(blog.getId()),
+                        followedAuthorIds.contains(blog.getUserId())))
                 .toList();
     }
 
-    private BlogView toView(Blog blog, UserAccount author, LoginUser currentUser) {
-        Long currentUserId = currentUser == null ? null : currentUser.getId();
-        boolean liked = currentUserId != null && redisTemplate.opsForZSet()
-                .score(RedisConstants.BLOG_LIKED_KEY + blog.getId(), String.valueOf(currentUserId)) != null;
-        boolean followed = currentUserId != null && followService.isFollowed(currentUserId, blog.getUserId());
+    /**
+     * 使用 Redis pipeline 批量读取当前页的点赞状态，避免每篇博客各产生一次网络往返。
+     */
+    private Set<Long> loadLikedBlogIds(List<Blog> blogs, Long currentUserId) {
+        if (currentUserId == null) {
+            return Collections.emptySet();
+        }
+        byte[] member = redisTemplate.getStringSerializer().serialize(String.valueOf(currentUserId));
+        List<Object> scores = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            for (Blog blog : blogs) {
+                byte[] key = redisTemplate.getStringSerializer()
+                        .serialize(RedisConstants.BLOG_LIKED_KEY + blog.getId());
+                connection.zSetCommands().zScore(key, member);
+            }
+            return null;
+        });
+        Set<Long> likedBlogIds = new java.util.HashSet<>();
+        for (int i = 0; i < blogs.size() && i < scores.size(); i++) {
+            if (scores.get(i) != null) {
+                likedBlogIds.add(blogs.get(i).getId());
+            }
+        }
+        return likedBlogIds;
+    }
+
+    /**
+     * 一次查询当前用户对本页所有作者的关注关系，避免未关注作者触发逐条数据库 count。
+     */
+    private Set<Long> loadFollowedAuthorIds(List<Blog> blogs, Long currentUserId) {
+        if (currentUserId == null) {
+            return Collections.emptySet();
+        }
+        Set<Long> authorIds = blogs.stream().map(Blog::getUserId).collect(Collectors.toSet());
+        return followMapper.selectList(new LambdaQueryWrapper<Follow>()
+                        .select(Follow::getFollowUserId)
+                        .eq(Follow::getUserId, currentUserId)
+                        .in(Follow::getFollowUserId, authorIds))
+                .stream()
+                .map(Follow::getFollowUserId)
+                .collect(Collectors.toSet());
+    }
+
+    private BlogView toView(Blog blog, UserAccount author, boolean liked, boolean followed) {
         return new BlogView(
                 blog.getId(),
                 blog.getUserId(),

@@ -98,6 +98,18 @@ public class CacheClient {
      * 普通短缓存：适合第三方 API 结果这类非数据库详情数据。fallback 返回 null 时不写缓存。
      */
     public <T> T querySimple(String key, TypeReference<T> type, Supplier<T> fallback, Duration ttl) {
+        return querySimple(key, type, fallback, ttl, 0);
+    }
+
+    /**
+     * 带随机 TTL 的普通短缓存。
+     * 第三方接口的热门查询会在同一时段大量过期，抖动可以避免缓存同时失效后集中回源。
+     */
+    public <T> T querySimple(String key,
+                             TypeReference<T> type,
+                             Supplier<T> fallback,
+                             Duration ttl,
+                             long jitterSeconds) {
         String cached = getString(key);
         if (cached != null) {
             try {
@@ -108,7 +120,7 @@ public class CacheClient {
         }
         T value = fallback.get();
         if (value != null) {
-            set(key, value, ttl, 0);
+            set(key, value, ttl, jitterSeconds);
         }
         return value;
     }

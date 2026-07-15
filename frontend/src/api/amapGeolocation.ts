@@ -42,6 +42,11 @@ type AMapWindow = Window & {
 let amapLoadPromise: Promise<AMapNamespace> | null = null
 
 export async function locateWithAmapFirst(): Promise<PreciseLocation> {
+  // 浏览器只允许安全上下文读取精确位置；公网 HTTP 会被当作权限拒绝。
+  if (!window.isSecureContext) {
+    throw new Error('当前使用 HTTP 访问，浏览器仅允许 HTTPS 网站获取精确位置')
+  }
+
   try {
     return await locateByAmap()
   } catch (amapError) {

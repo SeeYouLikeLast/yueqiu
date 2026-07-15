@@ -23,7 +23,9 @@ public final class RedisConstants {
     public static final String VENUE_ITEM_DETAIL_KEY = "venue:item:";
     public static final String USER_PROFILE_KEY = "user:profile:";
     public static final String BLOG_DETAIL_KEY = "blog:";
+    public static final String AMAP_NEARBY_KEY = "amap:nearby:";
     public static final String AMAP_REGEOCODE_KEY = "amap:regeo:";
+    public static final String AMAP_IP_LOCATION_KEY = "amap:ip:";
     public static final String SOCIAL_PLAYERS_KEY = "social:players:";
     public static final String SOCIAL_ACTIVITIES_KEY = "social:activities:";
     public static final String SPORT_LIST_KEY = "catalog:sports";
@@ -40,7 +42,9 @@ public final class RedisConstants {
 
     public static final Duration CACHE_NULL_TTL = Duration.ofMinutes(2);
     public static final Duration CACHE_DETAIL_TTL = Duration.ofMinutes(30);
+    public static final Duration AMAP_NEARBY_TTL = Duration.ofMinutes(2);
     public static final Duration AMAP_REGEOCODE_TTL = Duration.ofMinutes(30);
+    public static final Duration AMAP_IP_LOCATION_TTL = Duration.ofMinutes(10);
     public static final Duration SOCIAL_LIST_TTL = Duration.ofMinutes(1);
     public static final Duration SPORT_LIST_TTL = Duration.ofHours(24);
     public static final Duration AGENT_MEMORY_TTL = Duration.ofMinutes(60);
@@ -48,4 +52,5 @@ public final class RedisConstants {
     public static final Duration CACHE_LOGICAL_TTL = Duration.ofMinutes(30);
     public static final Duration CACHE_REBUILD_LOCK_TTL = Duration.ofSeconds(10);
     public static final long CACHE_DETAIL_JITTER_SECONDS = Duration.ofMinutes(5).toSeconds();
+    public static final long AMAP_NEARBY_TTL_JITTER_SECONDS = Duration.ofSeconds(30).toSeconds();
 }

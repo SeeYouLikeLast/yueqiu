@@ -21,6 +21,30 @@ Internet -> Nginx :80/:443 -> Vue dist + /api -> Spring Boot :8088 (127.0.0.1)
 - 不要在 2GB ECS 上运行 `npm run build` 或长期保持 VS Code Remote；请在本机构建前端后上传 `dist`。
 - 演示图片约 11MB，影响主要是磁盘和网络，不是本次 OOM 的核心原因。
 
+### 可选的轻量 RocketMQ
+
+服务器已配置至少 4GB Swap，且空闲内存足够时，可以启动受限资源的单节点 RocketMQ：
+
+```bash
+cd /opt/hm-badminton/deploy/production
+docker compose --profile mq --env-file .env up -d rocketmq-namesrv rocketmq-broker
+docker compose --profile mq --env-file .env run --rm rocketmq-init
+```
+
+该配置只创建 `hm-seckill-order`，读写队列各 1 个；NameServer/Broker 的容器上限分别为 128MB/256MB。该规格只适合低并发功能演示，确认容器稳定后，将 `/etc/hm-badminton/app.env` 的运行环境改为：
+
+```text
+SPRING_PROFILES_ACTIVE=prod,mq-lite
+```
+
+如果 RocketMQ 因资源不足停止，应用仍保留 MQ 发送失败后的同步落库补偿。停止 MQ 并恢复纯轻量模式：
+
+```bash
+docker compose --profile mq --env-file .env stop rocketmq-broker rocketmq-namesrv
+sed -i 's/^SPRING_PROFILES_ACTIVE=.*/SPRING_PROFILES_ACTIVE=prod,lite/' /etc/hm-badminton/app.env
+systemctl restart hm-badminton
+```
+
 升级到至少 4 核 8GB 后，需要完整异步链路时使用：
 
 ```bash
@@ -105,12 +129,47 @@ sudo rsync -a --delete dist/ /var/www/hm-badminton/
 ## 配置 Nginx 与 HTTPS
 
 ```bash
+# 此配置包含 443 证书路径，请在证书已签发后执行；首次签发前保留现有 HTTP 的 Nginx 配置。
 sudo cp /opt/hm-badminton/deploy/production/nginx/hm-badminton.conf /etc/nginx/conf.d/hm-badminton.conf
 # 编辑 server_name 为你的真实域名
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-域名解析到 ECS 公网 IP 后，再使用 Certbot 申请 HTTPS 证书。中国大陆 ECS 对外提供网站服务前需完成域名 ICP 备案；香港节点适合先做无备案演示。
+域名解析到 ECS 公网 IP 后，可以使用 Certbot 申请 HTTPS 证书。中国大陆 ECS 对外提供网站服务前需完成域名 ICP 备案；香港节点适合先做无备案演示。
+
+没有域名时，也可以申请公网 IP 证书。Let’s Encrypt 的 IP 证书有效期约 6 天，必须搭配下面的自动续期服务。需要 Certbot 5.4+；Linux 发行版仓库里的旧版 Certbot 通常不支持此功能。
+
+```bash
+# 先保证安全组已放行 80、443，并将 Nginx 保持在 HTTP 配置状态。
+sudo dnf install -y python3.11 python3.11-pip
+sudo python3.11 -m venv /opt/hm-badminton/certbot
+sudo /opt/hm-badminton/certbot/bin/pip install --upgrade pip 'certbot>=5.4,<6'
+
+# app.env 中的 JAVA_TOOL_OPTIONS 含空格，不能直接 source；只读取邮件配置。
+EMAIL=$(grep -m1 '^CERTBOT_EMAIL=' /etc/hm-badminton/app.env | cut -d= -f2-)
+if [ -z "$EMAIL" ] || [ "$EMAIL" = "replace-with-your-notification-email" ]; then
+  EMAIL=$(grep -m1 '^MAIL_USERNAME=' /etc/hm-badminton/app.env | cut -d= -f2-)
+fi
+test -n "$EMAIL" || { echo '请先在 /etc/hm-badminton/app.env 配置 CERTBOT_EMAIL 或 MAIL_USERNAME'; exit 1; }
+sudo /opt/hm-badminton/certbot/bin/certbot certonly --webroot \
+  --webroot-path /var/www/hm-badminton \
+  --ip-address 你的ECS公网IP \
+  --preferred-profile shortlived \
+  --email "$EMAIL" --agree-tos --non-interactive
+
+# 将 Nginx 配置中的占位主机名替换为公网 IP；证书目录会随之对应到该 IP。
+PUBLIC_HOST=你的ECS公网IP
+sudo sed "s/your-domain.example/$PUBLIC_HOST/g" \
+  /opt/hm-badminton/deploy/production/nginx/hm-badminton.conf \
+  | sudo tee /etc/nginx/conf.d/hm-badminton.conf > /dev/null
+sudo nginx -t && sudo systemctl reload nginx
+
+sudo cp /opt/hm-badminton/deploy/production/systemd/hm-badminton-certbot-renew.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hm-badminton-certbot-renew.timer
+```
+
+浏览器精确位置只有在 HTTPS 下才能工作。HTTP 环境会自动退化为后端高德 IP 定位，再失败才使用默认城市西安。
 
 ## 运维命令
 

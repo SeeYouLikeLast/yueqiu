@@ -88,13 +88,15 @@ public class SocialService implements ISocialService {
         String cityText = blankToNull(city);
         String levelText = blankToNull(level);
         String normalizedScope = normalizeActivityScope(scope, currentUserId);
+        LocalDateTime currentTime = LocalDateTime.now();
 
         // 活动的“我发起/我加入”状态在用户刚完成写操作后应立即可见，
         // 因此这里直接读取数据库，避免一分钟列表缓存造成刚发起的活动短暂缺失。
-        Long total = socialMapper.countActivities(normalizedSport, cityText, levelText, currentUserId, normalizedScope);
+        Long total = socialMapper.countActivities(
+                normalizedSport, cityText, levelText, currentUserId, normalizedScope, currentTime);
         return new PageResult<>(
                 socialMapper.selectActivities(normalizedSport, cityText, levelText, currentUserId, normalizedScope,
-                        safeSize, (safePage - 1) * safeSize),
+                        currentTime, safeSize, (safePage - 1) * safeSize),
                 total == null ? 0 : total,
                 safePage,
                 safeSize);

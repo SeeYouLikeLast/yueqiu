@@ -1,4 +1,7 @@
 :root {
+  --app-max-width: 480px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   color-scheme: light;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -9,14 +12,25 @@
   text-rendering: optimizeLegibility;
 }
 
+html {
+  min-height: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
+  min-height: 100%;
   overflow-x: hidden;
+}
+
+#app {
+  min-height: 100%;
 }
 
 button,
@@ -79,17 +93,19 @@ textarea {
 }
 
 .phone-shell {
-  width: min(100%, 480px);
+  width: min(100%, var(--app-max-width));
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
   background: #f5f7f2;
-  padding-bottom: 78px;
+  padding-bottom: calc(78px + var(--safe-bottom));
   overflow: visible;
 }
 
 .auth-page {
   min-height: 100vh;
-  padding: 14px 16px 28px;
+  min-height: 100dvh;
+  padding: calc(14px + var(--safe-top)) 16px calc(28px + var(--safe-bottom));
   background:
     linear-gradient(180deg, #ffe07a 0%, #fff7db 32%, #f5f7f2 72%);
 }
@@ -269,8 +285,8 @@ textarea {
   top: 0;
   left: 50%;
   z-index: 20;
-  width: min(100%, 480px);
-  padding: 14px 14px 12px;
+  width: min(100%, var(--app-max-width));
+  padding: calc(14px + var(--safe-top)) 14px 12px;
   background:
     linear-gradient(180deg, #ffd45c 0%, #fff7d8 52%, rgba(245, 247, 242, 0.96) 100%);
   border-bottom: 1px solid rgba(217, 226, 214, 0.7);
@@ -340,6 +356,18 @@ textarea {
   border-color: rgba(255, 255, 255, 0.9);
   color: #17211b;
   font-size: 13px;
+}
+
+.location-button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.location-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .login-chip,
@@ -493,23 +521,19 @@ textarea {
 
 /* The fixed header overlays the page. Its spacing lives at document start, so hiding it never shifts a scrolled page. */
 .phone-main.header-full {
-  padding-top: 181px;
-}
-
-.phone-main.header-search-only {
-  padding-top: 106px;
+  padding-top: calc(181px + var(--safe-top));
 }
 
 .phone-main.header-with-categories {
-  padding-top: 230px;
+  padding-top: calc(230px + var(--safe-top));
 }
 
 .phone-main.header-agent {
-  padding-top: 154px;
+  padding-top: calc(154px + var(--safe-top));
 }
 
 .phone-main.header-compact {
-  padding-top: 82px;
+  padding-top: calc(82px + var(--safe-top));
 }
 
 .page-stack {
@@ -550,6 +574,48 @@ textarea {
   border: 0;
   background: rgba(135, 84, 20, 0.08);
   color: #875414;
+}
+
+.toast.floating-toast {
+  position: fixed;
+  top: calc(12px + var(--safe-top));
+  left: 50%;
+  z-index: 29;
+  width: min(calc(100% - 24px), 456px);
+  max-height: min(140px, 35dvh);
+  margin: 0;
+  overflow-y: auto;
+  transform: translateX(-50%);
+  box-shadow: 0 12px 30px rgba(88, 62, 15, 0.16);
+  animation: toast-float-in 0.18s ease-out;
+}
+
+.toast.floating-toast.below-header-full {
+  top: calc(181px + var(--safe-top));
+}
+
+.toast.floating-toast.below-header-categories {
+  top: calc(230px + var(--safe-top));
+}
+
+.toast.floating-toast.below-header-agent {
+  top: calc(154px + var(--safe-top));
+}
+
+.toast.floating-toast.below-header-compact {
+  top: calc(82px + var(--safe-top));
+}
+
+@keyframes toast-float-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .login-card,
@@ -1894,11 +1960,6 @@ p {
 
 .blog-page {
   gap: 12px;
-}
-
-/* The community channel bar lives below the fixed search header, so reclaim the body padding it does not need. */
-.blog-page > .blog-channel-row {
-  margin-top: -10px;
 }
 
 .blog-masonry {
@@ -3404,8 +3465,8 @@ button.danger {
 
 .agent-fab {
   position: fixed;
-  right: max(16px, calc((100vw - 480px) / 2 + 16px));
-  bottom: calc(78px + env(safe-area-inset-bottom));
+  right: max(16px, calc((100vw - var(--app-max-width)) / 2 + 16px));
+  bottom: calc(78px + var(--safe-bottom));
   z-index: 25;
   min-height: 42px;
   padding: 0 14px;
@@ -3420,12 +3481,12 @@ button.danger {
   left: 50%;
   bottom: 0;
   z-index: 30;
-  width: min(100%, 480px);
+  width: min(100%, var(--app-max-width));
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 0;
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 8px calc(8px + var(--safe-bottom));
   background: rgba(255, 255, 255, 0.96);
   border-top: 1px solid #dfe8dc;
   backdrop-filter: blur(14px);
@@ -3463,6 +3524,50 @@ button.danger {
 }
 
 @media (max-width: 380px) {
+  .phone-header {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .phone-main {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .auth-page {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .header-row,
+  .location-cluster {
+    gap: 6px;
+  }
+
+  .location-button,
+  .login-chip,
+  .cart-chip {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .search-bar {
+    gap: 6px;
+    padding-left: 10px;
+  }
+
+  .search-bar button,
+  .sport-scroll button {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .sport-scroll,
+  .deal-scroll,
+  .category-scroll {
+    gap: 6px;
+  }
+
   .login-line,
   .sms-login-line,
   .register-grid,
@@ -3470,7 +3575,6 @@ button.danger {
   .activity-form,
   .activity-inline-row,
   .time-form-row,
-  .place-card,
   .detail-deal-row,
   .deal-row,
   .product-row,
@@ -3491,22 +3595,140 @@ button.danger {
   }
 
   .quick-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .quick-grid button {
+    min-height: 64px;
+    padding: 6px 2px;
+    font-size: 11px;
   }
 
   .agent-hero {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 9px;
   }
 
   .agent-hero-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
+    gap: 4px;
   }
 
-  .place-card img,
+  .agent-hero-actions button {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .agent-hero p {
+    display: none;
+  }
+
+  .agent-hero strong {
+    font-size: 15px;
+  }
+
+  .place-card {
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .place-card img {
+    height: 86px;
+  }
+
   .detail-deal-row img,
   .deal-row img,
   .product-row img {
     height: 150px;
+  }
+}
+
+@media (max-width: 340px) {
+  .phone-header {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .phone-main {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .header-row {
+    margin-bottom: 8px;
+  }
+
+  .location-detail {
+    font-size: 11px;
+  }
+
+  .search-bar {
+    min-height: 42px;
+  }
+
+  .section-title strong {
+    font-size: 18px;
+  }
+
+  .title-actions {
+    gap: 4px;
+  }
+
+  .title-actions button {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .agent-card-carousel {
+    gap: 8px;
+  }
+
+  .agent-place-card,
+  .agent-result-card {
+    flex-basis: calc(100% - 8px);
+  }
+
+  .agent-message.assistant .agent-bubble,
+  .agent-bubble {
+    max-width: 96%;
+  }
+
+  .agent-booking-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cart-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cart-summary button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .agent-fab {
+    right: 10px;
+    width: 42px;
+    min-width: 42px;
+    padding: 0;
+  }
+
+  .agent-fab span {
+    display: none;
+  }
+
+  .bottom-nav {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .bottom-nav button {
+    min-width: 0;
+    padding-right: 2px;
+    padding-left: 2px;
+    font-size: 10px;
   }
 }

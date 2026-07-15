@@ -146,7 +146,7 @@ docker compose down
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | QQ 邮箱与 SMTP 授权码 |
 | `MYSQL_URL` / `MYSQL_USERNAME` / `MYSQL_PASSWORD` | 数据库连接配置 |
 | `REDIS_HOST` / `REDIS_PORT` | Redis 连接配置 |
-| `MINIO_ENDPOINT` / `MINIO_PUBLIC_ENDPOINT` | MinIO 内部地址与公网文件地址 |
+| `MINIO_ENDPOINT` | Java 上传文件时使用的 MinIO 内部地址；公开图片统一由 Nginx 的 `/objects/` 路径直连 MinIO |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 访问凭据 |
 | `JWT_SECRET` | 生产环境 JWT 密钥 |
 

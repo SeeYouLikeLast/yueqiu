@@ -1,687 +1,135 @@
-# 约个球 AI 助手 Agent 实施规划
+# 约个球 AI 助手：当前实现、边界与演进
 
-## 1. 功能定位
+## 1. 目标与入口
 
-本项目计划新增一个面向手机端的 `约个球 AI 助手`。它不是普通闲聊机器人，而是一个可以调用平台业务能力的 Agent，用来帮助用户完成：
+AI 助手帮助用户选择真实附近场所、可购买场所商品、可加入约球活动和可购买装备。
 
-- 选择附近合适的运动场所
-- 查询当前是否有可加入的约球活动
-- 推荐可购买的装备或秒杀装备
-- 根据用户位置、城市、运动类型、预算、时间、水平等条件做综合推荐
-- 返回可点击的业务卡片，例如查看场所、加入活动、加入购物车、查看装备
+前端同时提供两个入口：底部导航“助手”和各页面右下角悬浮“AI 助手”。页面支持会话历史、新对话、快捷追问、球类多选和业务卡片横向浏览。
 
-核心目标是：用户只需要用自然语言表达需求，AI 助手自动调用后端工具查询真实业务数据，再把结果组织成适合手机端展示的推荐结果。
+核心原则：模型不拥有写权限。购买、加购、加入活动、支付和秒杀均由用户点击业务卡片后调用原接口，并进行二次确认。
 
-## 2. 技术选型
+## 2. 当前技术实现
 
-### 2.1 当前项目基础
+| 层 | 当前技术 |
+| --- | --- |
+| 模型接入 | Spring AI Alibaba `spring-ai-alibaba-starter-dashscope` + DashScope `qwen-plus` |
+| 业务编排 | `AgentServiceImpl` 解析意图、读取会话上下文、调用白名单工具、组织卡片与模型提示词 |
+| 工具 | `PlaceAgentTool`、`VenueProductAgentTool`、`ActivityAgentTool`、`EquipmentAgentTool`、`UserPreferenceAgentTool` |
+| 持久化 | MySQL `agent_conversation`、`agent_message` |
+| 短期记忆/限流 | Redis 会话摘要和按用户/IP 限流 |
+| 前端 | Vue 单页聊天区、思考状态、卡片跳转、上下文返回路径 |
 
-项目现有技术栈：
-
-- 后端：Spring Boot 3.5.7、Java 21
-- 数据访问：MyBatis-Plus、MySQL
-- 缓存与高并发：Redis、Redisson、Lua
-- 异步秒杀订单：RocketMQ
-- 文件存储：MinIO
-- 地理位置与真实场所：高德 API
-- 前端：Vue 3、Vite、TypeScript、lucide-vue-next
-
-AI 助手应尽量复用现有业务能力，不重新绕开业务层直接访问数据库。
-
-### 2.2 Agent 框架
-
-采用 `Spring AI Alibaba`。
-
-推荐原因：
-
-- 与 Spring Boot 项目天然适配
-- 支持 DashScope / 通义千问 / 百炼生态
-- 支持 ChatClient、Tool Calling、Agent Framework、Graph、MCP 等能力
-- 后续可以平滑演进为多步骤 Agent 或工作流 Agent
-
-第一阶段建议使用：
-
-- `spring-ai-alibaba-starter-dashscope`
-- `ChatClient`
-- Tool Calling
-
-第二阶段再考虑：
-
-- Agent Framework / ReactAgent
-- Graph 工作流
-- RAG 检索博客、评价、装备心得
-
-### 2.3 模型选择
-
-推荐模型：
-
-- 开发阶段：`qwen-plus`
-- 复杂推理或演示阶段：`qwen-max`
-- 成本敏感阶段：可切换到更便宜的兼容模型
-
-模型调用通过配置项控制，避免写死在代码中。
-
-## 3. Maven 依赖规划
-
-由于当前项目是 Spring Boot 3.5.7，不建议直接使用依赖 Spring Boot 4 的 Spring AI Alibaba 2.x 版本。
-
-建议先尝试：
-
-```xml
-<properties>
-    <spring-ai-alibaba.version>1.1.0.0</spring-ai-alibaba.version>
-</properties>
-
-<dependency>
-    <groupId>com.alibaba.cloud.ai</groupId>
-    <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-    <version>${spring-ai-alibaba.version}</version>
-</dependency>
-```
-
-如果与 Spring Boot 3.5.7 存在兼容问题，则降级到 Spring AI Alibaba `1.0.0.2` 文档线。
-
-注意：
-
-- 不建议第一版引入过多 Agent 依赖
-- 先跑通 ChatClient + Tool Calling
-- 再逐步引入 Agent Framework / Graph
-
-## 4. 配置设计
-
-在 `backend/src/main/resources/application.yml` 中新增：
-
-```yaml
-spring:
-  ai:
-    model:
-      chat: dashscope
-    dashscope:
-      api-key: ${AI_DASHSCOPE_API_KEY:}
-      chat:
-        options:
-          model: ${AI_MODEL:qwen-plus}
-          temperature: 0.3
-          max-tokens: 1200
-
-hm:
-  agent:
-    enabled: true
-    max-history-messages: 10
-    max-tool-calls: 6
-    memory-ttl-minutes: 60
-    rate-limit-per-minute: 10
-```
-
-本地启动前设置环境变量：
-
-```powershell
-$env:AI_DASHSCOPE_ENABLED="true"
-$env:AI_DASHSCOPE_API_KEY="你的百炼或 DashScope API Key"
-$env:AI_MODEL="qwen-plus"
-```
-
-如果希望写入启动脚本，可以在 `scripts/start-dev.ps1` 中读取 `.env.local`，但不要把真实 Key 提交到 Git。
-
-当前代码默认：
-
-- `AI_DASHSCOPE_ENABLED=false`
-- 未配置 Key 时，AI 助手仍可使用本地业务工具模式
-- 配置 `AI_DASHSCOPE_ENABLED=true` 且设置 `AI_DASHSCOPE_API_KEY` 后，才会真正调用 DashScope 模型
-
-开发时推荐先用本地工具模式验证页面和业务卡片，再打开真实模型调用。
-
-## 5. 后端目录结构
-
-建议新增以下结构：
+启用真实模型的环境变量：
 
 ```text
-backend/src/main/java/com/hm/badminton/
-├─ controller/agent/
-│  └─ AgentController.java
-├─ service/agent/
-│  ├─ IAgentService.java
-│  ├─ impl/
-│  │  └─ AgentServiceImpl.java
-│  └─ tools/
-│     ├─ PlaceAgentTool.java
-│     ├─ VenueProductAgentTool.java
-│     ├─ ActivityAgentTool.java
-│     ├─ EquipmentAgentTool.java
-│     └─ UserPreferenceAgentTool.java
-├─ dto/agent/
-│  ├─ AgentChatRequest.java
-│  ├─ AgentChatResponse.java
-│  ├─ AgentCard.java
-│  ├─ AgentAction.java
-│  └─ AgentToolResult.java
-├─ entity/
-│  ├─ AgentConversation.java
-│  └─ AgentMessage.java
-├─ mapper/agent/
-│  ├─ AgentConversationMapper.java
-│  └─ AgentMessageMapper.java
-├─ config/
-│  ├─ AgentProperties.java
-│  └─ AgentConfig.java
-└─ constants/
-   └─ AgentConstants.java
+AI_DASHSCOPE_ENABLED=true
+AI_DASHSCOPE_API_KEY=<仅保存在服务器 app.env 的密钥>
+AI_MODEL=qwen-plus
 ```
 
-目录职责：
+未配置模型或模型调用失败时，系统仍基于真实业务卡片返回本地兜底摘要，避免出现编造商品或场所。
 
-- `controller/agent`：对外提供 AI 助手接口
-- `service/agent`：编排模型调用、上下文、工具调用结果
-- `service/agent/tools`：封装可被模型调用的业务工具
-- `dto/agent`：前后端交互结构
-- `entity`：聊天会话、消息记录实体
-- `mapper/agent`：MyBatis-Plus 数据访问
-- `config`：模型客户端、Agent 配置
-- `constants`：Redis Key、角色、卡片类型、动作类型
-
-## 6. 接口设计
-
-第一阶段接口：
-
-```http
-POST   /agent/chat
-GET    /agent/conversations
-GET    /agent/conversations/{id}/messages
-DELETE /agent/conversations/{id}
-```
-
-后续支持流式输出：
-
-```http
-POST /agent/chat/stream
-```
-
-### 6.1 聊天请求
-
-```json
-{
-  "conversationId": 1,
-  "message": "今晚西安附近有没有能打羽毛球的场？最好 50 元以内",
-  "sportCode": "badminton",
-  "city": "西安市",
-  "lng": 108.94,
-  "lat": 34.34
-}
-```
-
-说明：
-
-- `conversationId` 可以为空，为空时创建新会话
-- `sportCode` 可以为空，Agent 可根据用户语义判断
-- `city/lng/lat` 优先使用前端定位，也可以从登录用户资料兜底
-
-### 6.2 聊天响应
-
-```json
-{
-  "conversationId": 1,
-  "answer": "我帮你筛了附近适合今晚打羽毛球的场所，优先选择距离近、可购买、价格低的。",
-  "cards": [
-    {
-      "type": "place",
-      "title": "创汇乒乓馆",
-      "subtitle": "距离 1.2km，今晚可订",
-      "coverUrl": "/api/files/31/download",
-      "price": "¥39 起",
-      "tags": ["羽毛球", "可核销", "本地演示"],
-      "action": {
-        "type": "open_place",
-        "id": "amap_xxx",
-        "requireConfirm": false
-      }
-    }
-  ],
-  "quickReplies": [
-    "只看 50 元以内",
-    "帮我找能加入的约球",
-    "推荐新手球拍"
-  ]
-}
-```
-
-## 7. Agent 工具设计
-
-大模型不能直接访问数据库，只能调用后端定义好的白名单工具。
-
-### 7.1 场所查询工具
-
-工具名：
+## 3. 当前请求链路
 
 ```text
-searchNearbyPlaces
+用户提问
+  -> POST /api/agent/chat
+  -> 登录态、位置、运动类型、预算、时间偏好、历史上下文
+  -> 查询白名单业务工具
+       场所：高德附近 POI
+       商品：本地 venue / inventory
+       活动：本地 sport_activity
+       装备：本地 equipment / seckill_equipment
+  -> 生成 AgentCard（保留内部 action/meta，不交给模型）
+  -> 仅把可读字段 cardsForModel() 交给 DashScope
+  -> 校验模型输出；不可信则使用 groundedAnswer()
+  -> MySQL 保存问答和卡片，Redis 更新会话摘要
+  -> 前端显示回答、可点击场所/团购/活动/装备卡片
 ```
 
-参数：
+模型可见字段包括距离、评分、评价数、价格、可购买性、适合水平、场景标签、优点、缺点和推荐理由；`id`、`placeRank`、库存内部字段、动作 payload 不进入提示词。
 
-```json
-{
-  "sportCode": "badminton",
-  "city": "西安市",
-  "lng": 108.94,
-  "lat": 34.34,
-  "radius": 5000,
-  "keyword": "羽毛球"
-}
-```
+## 4. 已完成能力
 
-作用：
+| 阶段 | 状态 | 当前实现 |
+| --- | --- | --- |
+| 基础聊天与 DashScope 接入 | 已完成 | 状态检测、同步问答、失败本地兜底 |
+| 业务工具与卡片 | 已完成 | 场所、场所商品、约球、装备、秒杀装备卡片 |
+| 上下文与限流 | 已完成 | MySQL 历史、Redis 60 分钟摘要、用户/IP 每分钟限流 |
+| 安全动作闭环 | 已完成 | 打开详情、加购、加入活动、购买发起约球均需用户确认 |
+| 结构化排序 | 部分完成 | 后端已有差异化字段和推荐理由；尚未抽成统一可配置评分引擎 |
+| Agent Graph/多步骤规划 | 未完成 | 当前由 `AgentServiceImpl` 固定编排，不是 Graph 工作流 |
+| RAG/向量检索 | 未完成 | 尚未接入向量数据库和评论/博客语义检索 |
+| 流式输出 | 未完成 | 当前 `.call().content()` 等待完整回答后一次性返回 |
 
-- 查询高德附近真实场所
-- 复用当前 `PlaceController` 和 `AmapPlaceService`
-- 返回距离、名称、地址、封面、营业信息等
+## 5. 推荐逻辑
 
-### 7.2 场馆商品工具
+后端先筛选真实候选，再让模型解释，避免模型自由编造。
 
-工具名：
+### 场所/团购
+
+- 距离、价格、可预约性、评分/评价数、设施、用户水平和场景共同影响候选排序。
+- 问“今晚/晚上/下班后/19 点”时优先晚间或单场 1 小时；没有匹配时明确说明，而不把上午券说成晚上可用。
+- 团购卡片与对应场所绑定，点击可回到场所详情；从 AI 卡片进入详情再返回会回到助手会话。
+
+### 约球
+
+- 按球类、城市、时间、水平、剩余人数、距离和费用筛选。
+- 排除当前用户自己发起或已加入的活动。
+
+### 装备
+
+- 按球类、预算、适合水平、库存、评分/销量、优缺点筛选。
+- 不限球类意味着查询各球类真实装备，而不是回退到首页当前球类。
+
+## 6. 数据与会话
 
 ```text
-searchVenueProducts
+MySQL
+  agent_conversation：用户会话标题、状态、创建/更新时间
+  agent_message：角色、内容、卡片 JSON、可选工具审计字段
+
+Redis
+  agent:conversation:context:{conversationId}  最近用户需求摘要，60 分钟 + 抖动
+  agent:rate:user:{userId}                     登录用户限流窗口
+  agent:rate:ip:{ip}                           游客限流窗口
 ```
 
-参数：
+登录用户刷新页面后从 MySQL 恢复历史。未登录用户不展示默认历史记录；其请求按 IP 限流，登录后才可以查看和管理会话历史。
 
-```json
-{
-  "sportCode": "badminton",
-  "placeRank": 1,
-  "productType": "TIME_PACKAGE",
-  "maxPrice": 50
-}
-```
+## 7. 性能现状与优化优先级
 
-作用：
+当前是同步模式：候选查询、高德调用、模型完整生成、MySQL 写入全部完成后才返回。因此冷请求可能约 3-5 秒，缓存命中或本地兜底会明显更快。
 
-- 查询场馆团购、单场时段、私教课
-- 复用当前 `VenueItemService`
-- 返回可购买项目卡片
+优先级：
 
-### 7.3 约球活动工具
+1. 为候选查询、DashScope 首字节/完成、持久化分别记录耗时和错误原因；当前模型异常会兜底，需保留可观测日志。
+2. 缩小事务范围：不要让 `@Transactional` 覆盖远程模型调用。
+3. 控制上下文：默认最近 4-6 条用户问题、6-8 张卡片进入模型；完整卡片仅返回前端。
+4. 为高频意图添加短期结果缓存，并复用已有高德附近缓存。
+5. 增加 SSE 流式接口 `/agent/chat/stream`：先显示首字，再逐步显示回答，卡片在工具查询完成后单独推送。
 
-工具名：
+## 8. 后续演进
+
+### Graph 编排
+
+当固定编排难以覆盖复杂问题时，引入 Spring AI Alibaba 的 Agent/Graph 能力：
 
 ```text
-searchJoinableActivities
+解析需求 -> 补齐时间/预算/球类 -> 并行查询场所/商品/活动/装备
+-> 结构化评分 -> 模型解释 -> 卡片与安全动作
 ```
 
-参数：
+每个节点输出 DTO，不让模型直接生成数据库查询或写操作。
 
-```json
-{
-  "sportCode": "badminton",
-  "city": "西安市",
-  "startTime": "2026-07-09T19:00:00",
-  "endTime": "2026-07-09T21:00:00"
-}
-```
+### RAG
 
-作用：
+后续可把博客、平台评价、装备心得分段嵌入向量库，用于“场地环境怎么样”“球拍适合新手吗”等主观问答。RAG 检索结果必须标注来源，订单、价格、库存和活动人数仍以实时业务工具为准。
 
-- 查询可加入活动
-- 过滤已满员活动
-- 过滤自己创建或自己已加入的活动
-- 复用当前 `SocialService`
+## 9. 安全规则
 
-### 7.4 装备推荐工具
-
-工具名：
-
-```text
-searchEquipment
-```
-
-参数：
-
-```json
-{
-  "sportCode": "badminton",
-  "categoryId": 1,
-  "keyword": "新手球拍",
-  "maxPrice": 300
-}
-```
-
-作用：
-
-- 查询普通装备商品
-- 支持运动类型、分类、预算、关键词
-- 返回装备卡片
-
-### 7.5 秒杀装备工具
-
-工具名：
-
-```text
-searchSeckillEquipment
-```
-
-参数：
-
-```json
-{
-  "sportCode": "badminton"
-}
-```
-
-作用：
-
-- 查询当前可抢购装备
-- 只返回展示信息
-- 不直接执行抢购
-
-### 7.6 用户偏好工具
-
-工具名：
-
-```text
-getCurrentUserPreference
-```
-
-作用：
-
-- 获取当前登录用户的城市、水平、常打运动、可约时间、经纬度
-- 用于个性化推荐
-
-## 8. 写操作安全策略
-
-Agent 不允许自动替用户完成敏感操作。
-
-禁止模型直接执行：
-
-- 加入活动
-- 加入购物车
-- 下单
-- 支付
-- 抢购
-
-正确流程：
-
-1. Agent 推荐结果
-2. 前端展示按钮
-3. 用户点击确认
-4. 前端调用原有业务接口
-
-示例：
-
-```json
-{
-  "type": "activity",
-  "title": "今晚 19:00 羽毛球约局",
-  "action": {
-    "type": "join_activity",
-    "id": 12,
-    "requireConfirm": true
-  }
-}
-```
-
-这样可以避免大模型误操作，也能保持原业务接口的权限校验、库存校验和事务逻辑。
-
-## 9. 数据库设计
-
-新增会话表：
-
-```sql
-create table agent_conversation (
-    id bigint primary key,
-    user_id bigint not null,
-    title varchar(128) not null,
-    status tinyint not null default 1,
-    created_at datetime not null,
-    updated_at datetime not null,
-    index idx_agent_conversation_user (user_id, updated_at)
-);
-```
-
-新增消息表：
-
-```sql
-create table agent_message (
-    id bigint primary key,
-    conversation_id bigint not null,
-    user_id bigint not null,
-    role varchar(32) not null,
-    content text,
-    cards_json json,
-    tool_name varchar(64),
-    tool_result_json json,
-    created_at datetime not null,
-    index idx_agent_message_conversation (conversation_id, created_at)
-);
-```
-
-字段说明：
-
-- `role=user`：用户消息
-- `role=assistant`：AI 回复
-- `role=tool`：工具调用结果
-- `cards_json`：前端业务卡片
-- `tool_result_json`：工具原始结果，便于排查 Agent 推荐依据
-
-## 10. Redis 设计
-
-Redis 只保存短期上下文和限流信息：
-
-```text
-agent:memory:{userId}:{conversationId}
-agent:rate:user:{userId}
-agent:rate:ip:{ip}
-```
-
-建议：
-
-- 会话短期上下文 TTL：60 分钟
-- 用户限流：每分钟 10 次
-- IP 限流：每分钟 20 次
-- 历史上下文最多带 10 条消息
-
-Redis Key 后续应统一写入：
-
-```text
-backend/src/main/java/com/hm/badminton/constants/RedisConstants.java
-```
-
-## 11. Prompt 设计
-
-系统提示词建议：
-
-```text
-你是“约个球”平台的 AI 助手。
-你的任务是帮助用户选择运动场所、查找可加入的约球活动、推荐可购买装备。
-你不能编造场所、价格、库存、活动人数。
-涉及场所、活动、装备时，必须优先调用工具查询真实业务数据。
-下单、加入活动、加入购物车、抢购、支付必须由用户点击确认，不能自动替用户完成。
-回答要简洁，适合手机端展示。
-如果用户条件不完整，优先根据用户资料和当前位置推断；仍无法判断时，再向用户追问一个最关键的问题。
-```
-
-## 12. 前端设计
-
-### 12.1 入口
-
-推荐两种方案：
-
-方案一：底部导航新增 `助手`
-
-```text
-首页 / 社区 / 约球 / 装备 / 我的 / 助手
-```
-
-方案二：首页右下角悬浮 AI 按钮
-
-```text
-AI 助手
-```
-
-第一版推荐使用底部导航，入口稳定，展示更完整。
-
-### 12.2 聊天页面
-
-页面结构：
-
-```text
-顶部：约个球助手
-中间：聊天记录
-卡片：场所卡、活动卡、装备卡
-底部：输入框 + 发送按钮
-快捷问题：
-  - 今晚附近能打球吗
-  - 帮我找能加入的局
-  - 推荐新手装备
-  - 50 元以内的场地
-```
-
-### 12.3 卡片动作
-
-Agent 返回的卡片不直接执行业务，而是交给前端路由或原接口：
-
-- `open_place`：打开场所详情
-- `open_equipment`：打开装备详情或装备列表并高亮
-- `open_activity`：打开活动详情
-- `add_cart`：弹确认后加入购物车
-- `join_activity`：弹确认后加入活动
-
-## 13. 实施阶段
-
-### 第一阶段：基础聊天跑通
-
-目标：
-
-- 添加 Spring AI Alibaba 依赖
-- 配置 DashScope Key
-- 新增 `AgentController`
-- 新增 `AgentService`
-- 前端新增 AI 助手页面
-- 能完成普通聊天
-
-不做复杂工具，不做下单动作。
-
-### 第二阶段：接入工具调用
-
-目标：
-
-- 接入场所查询工具
-- 接入场馆商品工具
-- 接入约球活动工具
-- 接入装备推荐工具
-- 返回业务卡片
-
-用户可以问：
-
-```text
-今晚附近有没有能打羽毛球的地方？
-```
-
-Agent 能返回真实场所和可购买项目。
-
-### 第三阶段：会话记忆和限流
-
-目标：
-
-- MySQL 保存会话和消息
-- Redis 保存短期上下文
-- 用户和 IP 限流
-- 登录用户个性化推荐
-
-### 第四阶段：安全动作闭环
-
-目标：
-
-- 支持推荐后点击加入购物车
-- 支持推荐后点击加入活动
-- 支持推荐后跳转场所或装备
-- 所有写操作都由前端二次确认
-
-### 第五阶段：Agent Framework / Graph
-
-目标：
-
-- 支持多步骤规划
-- 支持先分析需求，再查工具，再排序推荐
-- 例如：
-
-```text
-用户：今晚 7 点我想在西安附近打羽毛球，预算 50 左右，有没有场地或者能加入的局？
-
-Agent：
-1. 识别运动类型：羽毛球
-2. 识别时间：今晚 19:00
-3. 识别预算：50 元
-4. 查询附近场所
-5. 查询可购买场馆商品
-6. 查询可加入约球活动
-7. 综合排序返回
-```
-
-### 第六阶段：RAG 检索增强
-
-目标：
-
-- 检索博客内容
-- 检索场馆评价
-- 检索装备心得
-- 回答更主观的问题：
-
-```text
-这个球拍适合新手吗？
-这个场馆环境怎么样？
-周末这个地方人多吗？
-```
-
-此阶段再考虑引入向量数据库。
-
-## 14. 推荐最终效果
-
-用户输入：
-
-```text
-今晚 7 点我想在西安附近打羽毛球，预算 50 左右，有没有场地或者能加入的局？
-```
-
-Agent 返回：
-
-```text
-我建议你优先看这 2 个选择：
-
-1. 创汇羽毛球馆
-距离 1.4km，今晚可订，单人畅打 ¥39。
-
-2. 西安运动公园羽毛球局
-今晚 19:00-21:00，目前 3/4 人，可以加入。
-
-如果你还缺球拍，我也找到了 2 个适合新手的羽毛球拍。
-```
-
-下方展示：
-
-- 场所卡片
-- 团购卡片
-- 活动卡片
-- 装备卡片
-
-用户可以直接点击：
-
-- 查看场所
-- 加入活动
-- 加入购物车
-- 查看装备
-
-## 15. 注意事项
-
-- AI 不能编造业务数据，必须通过工具查询
-- AI 不直接下单、不直接支付、不直接抢购
-- 工具返回字段要精简，避免把无关数据暴露给模型
-- 对模型输出要做结构化解析，前端尽量依赖 `cards`，不要从自然语言里解析业务动作
-- Key 必须走环境变量，不提交到 Git
-- 第一版不要急着做 RAG，先把结构化工具调用做好
-
-## 16. 参考资料
-
-- Spring AI Alibaba GitHub：https://github.com/alibaba/spring-ai-alibaba
-- Spring AI Alibaba 快速开始：https://java2ai.com/en/docs/1.0.0.2/tutorials/starters-and-quick-guide/
-- Spring AI Alibaba DashScope 文档：https://java2ai.com/integration/chatmodels/dashScope
-- Maven Central spring-ai-alibaba-starter-dashscope：https://central.sonatype.com/artifact/com.alibaba.cloud.ai/spring-ai-alibaba-starter-dashscope
+- DashScope API Key 仅存在环境变量，不进入前端、数据库、Git 或日志。
+- 模型没有数据库写权限、支付权限或 MinIO 管理权限。
+- 所有写操作继续经过登录拦截、库存/人数校验、事务和幂等控制。
+- 模型输出不作为业务指令解析；前端只根据结构化 `AgentCard.action` 跳转或弹确认。
+- 用户请求和模型输出应避免写入包含密码、验证码、Token 的日志。

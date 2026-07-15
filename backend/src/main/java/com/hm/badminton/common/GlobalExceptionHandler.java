@@ -1,6 +1,9 @@
 package com.hm.badminton.common;
 
 import jakarta.validation.ConstraintViolationException;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,8 +17,13 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> business(BusinessException e) {
+    public ResponseEntity<ApiResponse<Void>> business(BusinessException e, HttpServletRequest request) {
+        // 业务 4xx 也记录请求路径，线上遇到 AI/登录等偶发拒绝时可直接从 journal 定位原因。
+        log.warn("Business request rejected: method={}, uri={}, code={}, message={}",
+                request.getMethod(), request.getRequestURI(), e.code(), e.getMessage());
         return fail(e.code(), e.getMessage());
     }
 

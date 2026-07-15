@@ -32,7 +32,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { api, clearToken, getToken, PageResult, setToken } from './api/client'
-import { locateWithAmapFirst } from './api/amapGeolocation'
+import { locateWithAmapFirst, type PreciseLocation } from './api/amapGeolocation'
 
 type Tab = 'home' | 'seckill' | 'social' | 'equipment' | 'profile' | 'assistant'
 type VenueSaleType = '' | 'TIME_PACKAGE' | 'COURT_SLOT' | 'COACH_LESSON'
@@ -248,6 +248,13 @@ type RegeoLocation = {
   shortAddress?: string
 }
 
+type IpLocation = RegeoLocation & {
+  lng?: number
+  lat?: number
+  accuracy?: number
+  source?: 'ip' | 'default'
+}
+
 type BlogChannel = 'follow' | 'recommend' | 'sport'
 type ProfileMode = 'me' | 'public'
 type ActivityScope = 'created' | 'others' | 'joined'
@@ -375,13 +382,14 @@ const fallbackSports: SportType[] = [
 
 const ALL_SPORT: SportType = { code: '', name: '全部运动', keywords: [] }
 const DEFAULT_PLACE_RADIUS = 5000
-const PLACE_PAGE_SIZE = 20
+// 首屏只展示手机一屏附近场所，继续上滑再按页加载，避免首次高德搜索和图片渲染过重。
+const PLACE_PAGE_SIZE = 10
 const PRODUCT_PAGE_SIZE = 12
 const SOCIAL_PAGE_SIZE = 12
 const BLOG_PAGE_SIZE = 10
 const VENUE_TEMPLATE_COUNT = 2
-const FALLBACK_IMAGE = '/api/files/31/download'
-const FALLBACK_AVATAR = '/api/files/1/download'
+const FALLBACK_IMAGE = '/objects/hm-badminton/demo/places/cover/place-031.png'
+const FALLBACK_AVATAR = '/objects/hm-badminton/demo/users/avatar/avatar-001.png'
 const HEADER_SCROLL_DELTA = 8
 const HEADER_HIDE_AFTER = 190
 const HEADER_SHOW_ACCUMULATE = 10
@@ -1212,6 +1220,13 @@ function setTrimmedParam(params: URLSearchParams, key: string, value?: string) {
   if (text) params.set(key, text)
 }
 
+// 城市是位置上下文而不是筛选条件，放到请求头可避免中文城市反复出现在 URL 中。
+function locationCityHeader(city = placeQuery.city): HeadersInit {
+  const value = city?.trim()
+  // HTTP 自定义头应保持 ASCII，避免中文头在浏览器、Nginx 与后端之间发生编码歧义。
+  return value ? { 'X-Location-City': encodeURIComponent(value) } : {}
+}
+
 function setPagingParams(params: URLSearchParams, page: number, pageSize: number, defaultPageSize: number) {
   if (page > 1) params.set('page', String(page))
   if (pageSize !== defaultPageSize) params.set('size', String(pageSize))
@@ -1225,7 +1240,9 @@ async function loadPlaces(page = 1, append = false) {
   if (placeQuery.radius !== DEFAULT_PLACE_RADIUS) params.set('radius', String(placeQuery.radius))
   setPagingParams(params, page, PLACE_PAGE_SIZE, 20)
   setTrimmedParam(params, 'keyword', placeQuery.keyword)
-  const result = await api<PageResult<Place>>(`/api/places/nearby?${params}`)
+  const result = await api<PageResult<Place>>(`/api/places/nearby?${params}`, {
+    headers: locationCityHeader()
+  })
   places.value = append ? appendById(places.value, result.records) : result.records
   placesPage.value = result.page
   placesTotal.value = result.total
@@ -1364,11 +1381,10 @@ async function loadPlayers(page = 1, append = false) {
     params.set('lng', String(placeQuery.lng))
     params.set('lat', String(placeQuery.lat))
   }
-  if (!loggedIn.value && placeQuery.city.trim()) {
-    params.set('city', placeQuery.city.trim())
-  }
   setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
-  const playersResult = await api<PageResult<Player>>(`/api/social/players?${params}`)
+  const playersResult = await api<PageResult<Player>>(`/api/social/players?${params}`, {
+    headers: locationCityHeader()
+  })
   players.value = append ? appendByKey(players.value, playersResult.records, (player) => player.userId) : playersResult.records
   playersPage.value = playersResult.page
   playersTotal.value = playersResult.total
@@ -1377,11 +1393,10 @@ async function loadPlayers(page = 1, append = false) {
 async function loadActivities(page = 1, append = false) {
   const params = new URLSearchParams({ scope: activityScope.value })
   if (selectedSport.value) params.set('sport', selectedSport.value)
-  if (!loggedIn.value && placeQuery.city.trim()) {
-    params.set('city', placeQuery.city.trim())
-  }
   setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
-  const activitiesResult = await api<PageResult<SportActivity>>(`/api/social/activities?${params}`)
+  const activitiesResult = await api<PageResult<SportActivity>>(`/api/social/activities?${params}`, {
+    headers: locationCityHeader()
+  })
   activities.value = append ? appendById(activities.value, activitiesResult.records) : activitiesResult.records
   activitiesPage.value = activitiesResult.page
   activitiesTotal.value = activitiesResult.total
@@ -2289,24 +2304,43 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
   const showMessage = options.showMessage ?? true
   locating.value = true
   try {
-    const located = await locateWithAmapFirst()
-    const accuracy = Math.round(located.accuracy)
-    locationAccuracy.value = accuracy
-    placeQuery.lng = located.lng
-    placeQuery.lat = located.lat
-    placeQuery.radius = DEFAULT_PLACE_RADIUS
+    let located: PreciseLocation | IpLocation
     try {
-      const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
-        lng: String(placeQuery.lng),
-        lat: String(placeQuery.lat)
-      })}`)
-      placeQuery.city = location.city || ''
-      placeQuery.preciseAddress = location.shortAddress || location.formattedAddress || ''
-    } catch {
-      placeQuery.city = ''
-      placeQuery.preciseAddress = ''
+      located = await locateWithAmapFirst()
+    } catch (preciseLocationError) {
+      const fallback = await api<IpLocation>('/api/places/ip-location')
+      if (!Number.isFinite(fallback.lng) || !Number.isFinite(fallback.lat)) {
+        throw preciseLocationError
+      }
+      located = fallback
     }
-    if (loggedIn.value) {
+    const lng = Number(located.lng)
+    const lat = Number(located.lat)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      throw new Error('定位结果缺少有效坐标')
+    }
+    const accuracy = Math.round(Number(located.accuracy || 0))
+    locationAccuracy.value = accuracy
+    placeQuery.lng = lng
+    placeQuery.lat = lat
+    placeQuery.radius = DEFAULT_PLACE_RADIUS
+    if (located.source === 'ip' || located.source === 'default') {
+      placeQuery.city = located.city || placeQuery.city
+      placeQuery.preciseAddress = located.shortAddress || located.formattedAddress || ''
+    } else {
+      try {
+        const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
+          lng: String(placeQuery.lng),
+          lat: String(placeQuery.lat)
+        })}`)
+        placeQuery.city = location.city || ''
+        placeQuery.preciseAddress = location.shortAddress || location.formattedAddress || ''
+      } catch {
+        placeQuery.city = ''
+        placeQuery.preciseAddress = ''
+      }
+    }
+    if (loggedIn.value && located.source !== 'ip' && located.source !== 'default') {
       await api('/api/auth/location', {
         method: 'PUT',
         body: JSON.stringify({
@@ -2321,8 +2355,18 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
       await loadCurrentTab()
     }
     if (showMessage) {
-      const sourceLabel = located.source === 'amap' ? '高德高精度定位' : '浏览器定位'
-      message.value = accuracy > 1000
+      const sourceLabel = located.source === 'amap'
+        ? '高德高精度定位'
+        : located.source === 'browser'
+          ? '浏览器定位'
+          : located.source === 'ip'
+            ? 'IP 大致定位'
+            : '默认城市西安'
+      message.value = located.source === 'ip'
+        ? `浏览器精确定位不可用，已使用 IP 大致定位：${placeQuery.city}，精度约 ${accuracy / 1000} 公里`
+        : located.source === 'default'
+          ? '无法获取当前位置，已使用默认城市西安'
+          : accuracy > 1000
         ? `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米；当前可能仍是电脑/Wi-Fi 网络定位`
         : `已使用当前位置（${sourceLabel}），定位精度约 ${accuracy} 米`
     }
@@ -2866,13 +2910,10 @@ async function switchPlaceDetailTab(tab: 'deals' | 'reviews') {
 }
 
 async function loadVenueReviewsForPlace(place: Place) {
-  const query = new URLSearchParams({
-    city: place.city || placeQuery.city,
-    sport: place.sportCode || selectedSport.value,
-    placeRank: String(placeRankFor(place)),
-    size: '5'
+  const sport = place.sportCode || selectedSport.value
+  venueReviews.value = await api<VenueReview[]>(`/api/venues/reviews/${sport}/${placeRankFor(place)}`, {
+    headers: locationCityHeader(place.city || placeQuery.city)
   })
-  venueReviews.value = await api<VenueReview[]>(`/api/venues/reviews?${query.toString()}`)
 }
 
 async function buyVenueItem(product: VenueItem) {
@@ -3305,16 +3346,31 @@ onBeforeUnmount(() => {
         <button @click="searchPlaces">搜索</button>
       </div>
 
-      <div v-if="showDiscoveryHeader && activeTab !== 'seckill'" class="sport-scroll">
-        <button :class="{ active: !selectedSport }" @click="changeSport('')">全部</button>
-        <button
-          v-for="sport in sports"
-          :key="sport.code"
-          :class="{ active: selectedSport === sport.code }"
-          @click="changeSport(sport.code)"
-        >
-          {{ sport.name }}
-        </button>
+      <div v-if="showDiscoveryHeader" class="sport-scroll">
+        <template v-if="activeTab === 'seckill'">
+          <button type="button" :class="{ active: blogChannel === 'follow' }" @click="selectBlogChannel('follow')">关注</button>
+          <button type="button" :class="{ active: blogChannel === 'recommend' }" @click="selectBlogChannel('recommend')">推荐</button>
+          <button
+            v-for="sport in sports"
+            :key="sport.code"
+            type="button"
+            :class="{ active: blogChannel === 'sport' && blogSport === sport.code }"
+            @click="selectBlogChannel('sport', sport.code)"
+          >
+            {{ sport.name }}
+          </button>
+        </template>
+        <template v-else>
+          <button :class="{ active: !selectedSport }" @click="changeSport('')">全部</button>
+          <button
+            v-for="sport in sports"
+            :key="sport.code"
+            :class="{ active: selectedSport === sport.code }"
+            @click="changeSport(sport.code)"
+          >
+            {{ sport.name }}
+          </button>
+        </template>
       </div>
 
       <div v-if="showCategoryHeader" class="category-scroll header-category-row">
@@ -3335,14 +3391,24 @@ onBeforeUnmount(() => {
     <main
       class="phone-main"
       :class="{
-        'header-full': showPhoneHeader && showDiscoveryHeader && activeTab !== 'seckill' && !showCategoryHeader,
-        'header-search-only': showPhoneHeader && activeTab === 'seckill',
+        'header-full': showPhoneHeader && showDiscoveryHeader && !showCategoryHeader,
         'header-with-categories': showPhoneHeader && showCategoryHeader,
         'header-agent': showPhoneHeader && activeTab === 'assistant',
         'header-compact': showPhoneHeader && !showDiscoveryHeader && activeTab !== 'assistant'
       }"
     >
-      <div v-if="message" class="toast" role="status">
+      <div
+        v-if="message"
+        class="toast floating-toast"
+        :class="{
+          'below-header-full': headerVisible && showPhoneHeader && showDiscoveryHeader && !showCategoryHeader,
+          'below-header-categories': headerVisible && showPhoneHeader && showCategoryHeader,
+          'below-header-agent': headerVisible && showPhoneHeader && activeTab === 'assistant',
+          'below-header-compact': headerVisible && showPhoneHeader && !showDiscoveryHeader && activeTab !== 'assistant'
+        }"
+        role="status"
+        aria-live="polite"
+      >
         <span>{{ message }}</span>
         <button class="toast-close" type="button" aria-label="关闭提示" @click="closeMessage">
           <X :size="14" />
@@ -3534,6 +3600,8 @@ onBeforeUnmount(() => {
               <img
                 :src="item.coverUrl || selectedPlace.coverUrl || FALLBACK_IMAGE"
                 :alt="item.title"
+                loading="lazy"
+                decoding="async"
                 @error="imageFallback"
               />
               <div class="detail-deal-main">
@@ -3565,7 +3633,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="!venueReviews.length" class="empty-box">暂无评价</div>
             <article v-for="review in venueReviews" :key="review.id" class="review-row">
-              <img class="review-avatar" :src="review.avatar" :alt="review.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
+              <img class="review-avatar" :src="review.avatar" :alt="review.nickname" loading="lazy" decoding="async" @error="imageFallback($event, FALLBACK_AVATAR)" />
               <div>
                 <div class="review-head">
                   <h3>{{ review.nickname }}</h3>
@@ -3574,7 +3642,7 @@ onBeforeUnmount(() => {
                 <p class="review-stars">{{ '★★★★★'.slice(0, Math.round(review.rating || 5)) }} 超赞</p>
                 <p>{{ review.content }}</p>
                 <div v-if="reviewImages(review).length" class="review-images">
-                  <img v-for="image in reviewImages(review).slice(0, 3)" :key="image" :src="image" :alt="review.nickname" @error="imageFallback" />
+                  <img v-for="image in reviewImages(review).slice(0, 3)" :key="image" :src="image" :alt="review.nickname" loading="lazy" decoding="async" @error="imageFallback" />
                 </div>
               </div>
             </article>
@@ -3600,7 +3668,7 @@ onBeforeUnmount(() => {
 
           <template v-for="place in places" :key="place.id">
           <article :id="placeDomId(place)" class="place-card" @click="selectPlace(place)">
-            <img :src="place.coverUrl || FALLBACK_IMAGE" :alt="place.name" @error="imageFallback" />
+            <img :src="place.coverUrl || FALLBACK_IMAGE" :alt="place.name" loading="lazy" decoding="async" @error="imageFallback" />
             <div class="place-info">
               <div class="place-title">
                 <h3>{{ place.name }}</h3>
@@ -3679,7 +3747,7 @@ onBeforeUnmount(() => {
                   'sale-spotlight': index === 0
                 }"
               >
-                <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" @error="imageFallback" />
+                <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" loading="lazy" decoding="async" @error="imageFallback" />
                 <div class="venue-sale-content">
                   <div class="sale-row-head">
                     <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
@@ -3716,20 +3784,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else-if="activeTab === 'seckill'" class="page-stack blog-page">
-        <div class="blog-channel-row sport-scroll">
-          <button type="button" :class="{ active: blogChannel === 'follow' }" @click="selectBlogChannel('follow')">关注</button>
-          <button type="button" :class="{ active: blogChannel === 'recommend' }" @click="selectBlogChannel('recommend')">推荐</button>
-          <button
-            v-for="sport in sports"
-            :key="sport.code"
-            type="button"
-            :class="{ active: blogChannel === 'sport' && blogSport === sport.code }"
-            @click="selectBlogChannel('sport', sport.code)"
-          >
-            {{ sport.name }}
-          </button>
-        </div>
-
         <div class="section-title">
           <div>
             <span>{{ blogChannel === 'follow' ? '关注动态' : blogChannel === 'sport' ? sportNameByCode(blogSport) : '推荐内容' }}</span>
@@ -3748,6 +3802,8 @@ onBeforeUnmount(() => {
               <img
                 :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
                 :alt="blog.title"
+                loading="lazy"
+                decoding="async"
                 @error="imageFallback"
               />
             </button>
@@ -3761,7 +3817,7 @@ onBeforeUnmount(() => {
               </button>
               <div class="blog-author-row">
                 <button class="blog-author-link" type="button" @click.stop="openUserProfile(blog.userId)">
-                  <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
+                  <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" loading="lazy" decoding="async" @error="imageFallback($event, FALLBACK_AVATAR)" />
                   <span>{{ blog.nickname }}</span>
                 </button>
                 <button
@@ -3879,7 +3935,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <article v-for="player in players" :key="player.userId" class="player-row clickable-card" @click="openUserProfile(player.userId)">
-            <img :src="player.avatar || FALLBACK_AVATAR" :alt="player.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
+            <img :src="player.avatar || FALLBACK_AVATAR" :alt="player.nickname" loading="lazy" decoding="async" @error="imageFallback($event, FALLBACK_AVATAR)" />
             <div>
               <h3>{{ player.nickname }} <span>{{ player.level }}</span></h3>
               <p>{{ player.area }} · {{ player.playStyle }} · {{ player.availableTime }}</p>
@@ -3915,7 +3971,7 @@ onBeforeUnmount(() => {
             <button class="ghost" @click="() => loadSeckill()"><Zap :size="15" /> 刷新</button>
           </div>
           <article v-for="activity in filteredSeckillActivities" :key="activity.id" class="deal-row flash-row">
-            <img :src="activity.coverUrl || FALLBACK_IMAGE" :alt="activity.productName" @error="imageFallback" />
+            <img :src="activity.coverUrl || FALLBACK_IMAGE" :alt="activity.productName" loading="lazy" decoding="async" @error="imageFallback" />
             <div>
               <span>{{ activity.categoryName }}</span>
               <h3>{{ activity.productName }}</h3>
@@ -3933,7 +3989,7 @@ onBeforeUnmount(() => {
           class="product-row"
           :class="{ highlighted: isHighlighted('EQUIPMENT', product.id) }"
         >
-          <img :src="product.coverUrl || FALLBACK_IMAGE" :alt="product.name" @error="imageFallback" />
+          <img :src="product.coverUrl || FALLBACK_IMAGE" :alt="product.name" loading="lazy" decoding="async" @error="imageFallback" />
           <div>
             <span>{{ product.brand }} · {{ product.categoryName }}</span>
             <h3>{{ product.name }}</h3>
@@ -3996,7 +4052,7 @@ onBeforeUnmount(() => {
                     class="agent-place-card"
                   >
                     <button class="agent-place-main" type="button" @click="handleAgentCardAction(bundle.place)">
-                      <img v-if="bundle.place.coverUrl" :src="bundle.place.coverUrl" :alt="bundle.place.title" @error="imageFallback" />
+                      <img v-if="bundle.place.coverUrl" :src="bundle.place.coverUrl" :alt="bundle.place.title" loading="lazy" decoding="async" @error="imageFallback" />
                       <div>
                         <span>场所</span>
                         <h3>{{ bundle.place.title }}</h3>
@@ -4035,7 +4091,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="agent-card-carousel">
                   <article v-for="card in agentStandaloneCards(item.cards)" :key="`${card.type}-${card.action?.id || card.title}`" class="agent-result-card">
-                    <img v-if="card.coverUrl" :src="card.coverUrl" :alt="card.title" @error="imageFallback" />
+                    <img v-if="card.coverUrl" :src="card.coverUrl" :alt="card.title" loading="lazy" decoding="async" @error="imageFallback" />
                     <div>
                       <span>{{ agentCardTypeLabel(card) }}</span>
                       <h3>{{ card.title }}</h3>
@@ -4388,6 +4444,8 @@ onBeforeUnmount(() => {
                 <img
                   :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
                   :alt="blog.title"
+                  loading="lazy"
+                  decoding="async"
                   @error="imageFallback"
                 />
               </button>
@@ -4401,7 +4459,7 @@ onBeforeUnmount(() => {
                 </button>
                 <div class="blog-author-row">
                   <button class="blog-author-link" type="button" @click.stop="openUserProfile(blog.userId)">
-                    <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" @error="imageFallback($event, FALLBACK_AVATAR)" />
+                    <img :src="blog.avatar || FALLBACK_AVATAR" :alt="blog.nickname" loading="lazy" decoding="async" @error="imageFallback($event, FALLBACK_AVATAR)" />
                     <span>{{ blog.nickname }}</span>
                   </button>
                   <button
@@ -4451,7 +4509,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!cartItems.length" class="empty-box">购物车暂无商品</div>
           <article v-for="item in cartItems" :key="item.id" class="cart-item-row">
-            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.productName" @error="imageFallback" />
+            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.productName" loading="lazy" decoding="async" @error="imageFallback" />
             <div>
               <h3>{{ item.productName }}</h3>
               <p>{{ item.brand }}</p>

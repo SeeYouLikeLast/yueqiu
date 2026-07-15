@@ -25,7 +25,7 @@ public interface IAuthService {
 
     UserPublicProfile publicProfile(Long userId, LoginUser currentUser);
 
-    void updateLocation(String token, Long userId, LocationRequest request);
+    Map<String, Object> updateLocation(String token, Long userId, LocationRequest request);
 }
 
 

@@ -275,7 +275,8 @@ public class FileStorageService implements IFileStorageService {
     }
 
     private String buildPublicUrl(String objectName) {
-        return properties.getPublicEndpoint().replaceAll("/+$", "") + "/" + properties.getBucket() + "/" + objectName;
+        // Public media is served by Nginx directly from MinIO; Java only handles upload metadata and authorization.
+        return "/objects/" + properties.getBucket() + "/" + objectName;
     }
 
 }

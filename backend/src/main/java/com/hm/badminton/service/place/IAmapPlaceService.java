@@ -16,6 +16,8 @@ public interface IAmapPlaceService {
                                  int size);
 
     Map<String, Object> reverseGeocode(Double lng, Double lat);
+
+    Map<String, Object> locateByIp(String clientIp);
 }
 
 

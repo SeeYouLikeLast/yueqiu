@@ -16,8 +16,7 @@ public class VenueService implements IVenueService {
         this.venueMapper = venueMapper;
     }
 
-    @Override
-    public List<VenueReview> reviews(Long venueId, int page, int size) {
+    private List<VenueReview> reviews(Long venueId, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 50);
         return venueMapper.selectReviews(venueId, safeSize, (safePage - 1) * safeSize);

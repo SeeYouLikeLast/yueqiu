@@ -1,0 +1,17 @@
+# 2GB ECS 的 RocketMQ 轻量模式：保留小连接池，但启用 MQ 异步秒杀订单。
+server:
+  address: 127.0.0.1
+
+spring:
+  sql:
+    init:
+      mode: never
+  datasource:
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+
+hm:
+  seckill:
+    mq-enabled: true
+    sync-fallback-enabled: true

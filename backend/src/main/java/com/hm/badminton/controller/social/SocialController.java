@@ -12,11 +12,13 @@ import com.hm.badminton.entity.PlayerProfile;
 import com.hm.badminton.entity.SportActivity;
 import com.hm.badminton.service.social.ISocialService;
 import com.hm.badminton.service.social.IVenueActivityBookingService;
+import com.hm.badminton.utils.LocationContextResolver;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,18 +32,21 @@ public class SocialController {
     private final ISocialService socialService;
     private final IVenueActivityBookingService venueActivityBookingService;
     private final UserContext userContext;
+    private final LocationContextResolver locationContextResolver;
 
     public SocialController(ISocialService socialService,
                             IVenueActivityBookingService venueActivityBookingService,
-                            UserContext userContext) {
+                            UserContext userContext,
+                            LocationContextResolver locationContextResolver) {
         this.socialService = socialService;
         this.venueActivityBookingService = venueActivityBookingService;
         this.userContext = userContext;
+        this.locationContextResolver = locationContextResolver;
     }
 
     @GetMapping("/players")
     public ApiResponse<PageResult<PlayerProfile>> players(@RequestParam(required = false) String sport,
-                                                          @RequestParam(required = false) String city,
+                                                          @RequestHeader(value = "X-Location-City", required = false) String locationCity,
                                                           @RequestParam(required = false) String area,
                                                           @RequestParam(required = false) String level,
                                                           @RequestParam(required = false) Double lng,
@@ -51,7 +56,7 @@ public class SocialController {
         LoginUser user = userContext.current().orElse(null);
         return ApiResponse.ok(socialService.players(
                 sport,
-                firstText(city, user == null ? null : user.getCity()),
+                locationContextResolver.resolveCity(locationCity),
                 area,
                 level,
                 lng == null && user != null ? user.getLongitude() : lng,
@@ -74,7 +79,7 @@ public class SocialController {
 
     @GetMapping("/activities")
     public ApiResponse<PageResult<SportActivity>> activities(@RequestParam(required = false) String sport,
-                                                             @RequestParam(required = false) String city,
+                                                             @RequestHeader(value = "X-Location-City", required = false) String locationCity,
                                                              @RequestParam(required = false) String level,
                                                              @RequestParam(defaultValue = "others") String scope,
                                                              @RequestParam(defaultValue = "1") int page,
@@ -82,7 +87,7 @@ public class SocialController {
         LoginUser user = userContext.current().orElse(null);
         return ApiResponse.ok(socialService.activities(
                 sport,
-                firstText(city, user == null ? null : user.getCity()),
+                locationContextResolver.resolveCity(locationCity),
                 level,
                 user == null ? null : user.getId(),
                 scope,
@@ -105,13 +110,6 @@ public class SocialController {
     public ApiResponse<Void> join(@PathVariable Long id) {
         socialService.join(userContext.requireUserId(), id);
         return ApiResponse.ok();
-    }
-
-    private String firstText(String value, String fallback) {
-        if (value != null && !value.isBlank()) {
-            return value;
-        }
-        return fallback;
     }
 }
 

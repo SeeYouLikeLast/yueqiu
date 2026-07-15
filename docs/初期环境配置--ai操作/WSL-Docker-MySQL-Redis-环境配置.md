@@ -246,7 +246,6 @@ spring:
 hm:
   minio:
     endpoint: http://localhost:9000
-    public-endpoint: http://localhost:9000
     access-key: minioadmin
     secret-key: minioadmin123
     bucket: hm-badminton
