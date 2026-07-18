@@ -13,15 +13,25 @@ import com.hm.badminton.mapper.trade.VenueOrderMapper;
 import com.hm.badminton.service.catalog.ISportCatalogService;
 import com.hm.badminton.service.trade.IVenueItemService;
 import com.hm.badminton.utils.CacheClient;
+import com.hm.badminton.vo.AgentVenueProductVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * 场馆商品业务。
+ *
+ * <p>需要特别区分：高德返回的 {@code place} 是真实场所，{@code venue} 是平台自行售卖的
+ * 团购/时段商品。创建订单时必须绑定一条 {@link VenueInventory}，订单会保存场所、商品、
+ * 日期和时段快照，避免场所搜索顺序变化后历史订单失真。</p>
+ */
 @Service
 public class VenueItemService implements IVenueItemService {
 
@@ -94,6 +104,41 @@ public class VenueItemService implements IVenueItemService {
     public List<VenueInventory> inventories(Long productId, LocalDate date) {
         detail(productId);
         return venueItemMapper.selectInventories(productId, date);
+    }
+
+    @Override
+    public List<AgentVenueProductVO> agentCandidates(String sportCode,
+                                                     Integer placeRank,
+                                                     LocalDate targetDate,
+                                                     LocalTime startTime,
+                                                     LocalTime endTime,
+                                                     BigDecimal maxBudget,
+                                                     int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 10);
+        String normalizedSport = sportCatalogService.require(sportCode).getCode();
+        if (targetDate != null && startTime != null) {
+            List<AgentVenueProductVO> exact = venueItemMapper.selectExactAgentCandidates(
+                    normalizedSport, placeRank, targetDate, startTime, endTime, maxBudget, safeLimit);
+            if (!exact.isEmpty()) {
+                exact.forEach(item -> item.setMatchType("EXACT"));
+                return exact;
+            }
+            LocalTime windowEnd = fallbackWindowEnd(startTime, endTime);
+            List<AgentVenueProductVO> fallback = venueItemMapper.selectOneHourAgentCandidates(
+                    normalizedSport, placeRank, targetDate, startTime, windowEnd, maxBudget, safeLimit);
+            fallback.forEach(item -> item.setMatchType("ONE_HOUR_FALLBACK"));
+            return fallback;
+        }
+        List<AgentVenueProductVO> upcoming = venueItemMapper.selectUpcomingAgentCandidates(
+                normalizedSport, placeRank, maxBudget, safeLimit);
+        upcoming.forEach(item -> item.setMatchType("UPCOMING"));
+        return upcoming;
+    }
+
+    private LocalTime fallbackWindowEnd(LocalTime startTime, LocalTime requestedEnd) {
+        LocalTime preferred = requestedEnd != null && requestedEnd.isAfter(startTime)
+                ? requestedEnd : startTime.plusHours(4);
+        return preferred.isAfter(startTime) ? preferred : LocalTime.MAX;
     }
 
     @Override

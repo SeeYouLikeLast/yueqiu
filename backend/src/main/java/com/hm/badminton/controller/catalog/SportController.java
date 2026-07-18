@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/** 平台支持的球类运动目录入口。 */
 @RestController
 @RequestMapping("/sports")
 public class SportController {

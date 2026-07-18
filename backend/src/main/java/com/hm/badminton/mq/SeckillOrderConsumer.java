@@ -16,6 +16,13 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+/**
+ * RocketMQ 秒杀订单消费者。
+ *
+ * <p>只有 {@code hm.seckill.mq-enabled=true} 时才创建。集群消费保证一条消息只由一个实例处理；
+ * 即便 Broker 重投，落库服务和数据库唯一索引也会忽略重复订单。确定无法落库的业务异常会补偿
+ * Redis 预扣，让用户稍后可以重新抢购。</p>
+ */
 @Component
 @ConditionalOnProperty(prefix = "hm.seckill", name = "mq-enabled", havingValue = "true", matchIfMissing = true)
 @RocketMQMessageListener(
@@ -43,7 +50,9 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
 
     @Override
     public void onMessage(String payload) {
+        // 1. 先反序列化消息。格式损坏的消息无法恢复，记录后结束消费。
         SeckillOrderMessage message;
+        // 2. 在独立事务中落库；重复消息视为已经成功处理。
         try {
             message = objectMapper.readValue(payload, SeckillOrderMessage.class);
         } catch (Exception e) {
@@ -57,6 +66,7 @@ public class SeckillOrderConsumer implements RocketMQListener<String> {
         } catch (DuplicateKeyException e) {
             log.info("秒杀订单重复消息已忽略, userId={}, activityId={}", message.getUserId(), message.getActivityId());
         } catch (BusinessException e) {
+            // 3. 业务落库失败时归还 Redis 库存并移除已购标记。
             log.warn("秒杀订单异步创建失败, orderId={}, reason={}", message.getOrderId(), e.getMessage());
             rollbackRedisPreDeduct(message);
         }

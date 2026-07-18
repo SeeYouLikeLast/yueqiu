@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** 立即购买和购物车结算的统一模拟支付入口。 */
 @RestController
 @RequestMapping("/payments")
 public class PaymentController {

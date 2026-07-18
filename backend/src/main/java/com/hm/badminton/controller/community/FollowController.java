@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** 关注、取消关注和关注状态查询入口。 */
 @RestController
 @RequestMapping("/follows")
 public class FollowController {

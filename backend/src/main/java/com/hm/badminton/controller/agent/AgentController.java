@@ -16,10 +16,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
 
+/** AI 状态、对话、历史会话和消息查询的 HTTP 入口。 */
 @RestController
 @RequestMapping("/agent")
 public class AgentController {
@@ -41,6 +44,13 @@ public class AgentController {
     public ApiResponse<AgentChatResponse> chat(@Valid @RequestBody AgentChatRequest request,
                                                HttpServletRequest servletRequest) {
         return ApiResponse.ok(agentService.chat(request, clientIp(servletRequest)));
+    }
+
+    /** Streams progress events immediately while tools and DashScope continue in the background. */
+    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatStream(@Valid @RequestBody AgentChatRequest request,
+                                 HttpServletRequest servletRequest) {
+        return agentService.chatStream(request, clientIp(servletRequest));
     }
 
     @GetMapping("/conversations")

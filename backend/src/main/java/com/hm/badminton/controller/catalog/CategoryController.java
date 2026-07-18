@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
+/** 按交易类型和运动查询商品分类。 */
 @RestController
 @RequestMapping("/categories")
 public class CategoryController {

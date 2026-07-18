@@ -40,6 +40,13 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * 社区动态、点赞与关注流服务。
+ *
+ * <p>普通列表使用 MyBatis-Plus 分页；博客详情使用 Redis 空值缓存防穿透；点赞关系使用
+ * Redis ZSet 保存。关注 Feed 采用推拉结合：普通作者发布时推送到粉丝 inbox，大 V 只写
+ * 自己的 outbox，粉丝读取时再拉取并合并。</p>
+ */
 @Service
 public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
 
@@ -174,6 +181,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     @Override
     @Transactional
     public Long publish(Long userId, BlogCreateRequest request) {
+        // 1. 先把动态正文和关联商品快照保存到 MySQL，MySQL 是博客事实来源。
         Blog blog = new Blog();
         blog.setUserId(userId);
         blog.setSportCode(request.getSportCode());
@@ -189,8 +197,10 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         blog.setStatus(1);
         save(blog);
 
+        // 2. 每位作者都写自己的 outbox，便于大 V 拉模式和故障回源。
         long timestamp = System.currentTimeMillis();
         redisTemplate.opsForZSet().add(RedisConstants.BLOG_OUTBOX_KEY + userId, String.valueOf(blog.getId()), timestamp);
+        // 3. 普通作者采用写扩散：发布一次，写入所有粉丝的 inbox；大 V 跳过该步骤避免写爆 Redis。
         if (!isBigV(userId)) {
             List<Follow> followers = followMapper.selectList(new LambdaQueryWrapper<Follow>().eq(Follow::getFollowUserId, userId));
             for (Follow follower : followers) {
@@ -203,6 +213,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     @Override
     @Transactional
     public void delete(Long userId, Long blogId) {
+        // 1. 先校验博客存在且属于当前用户，防止越权删除。
         Blog blog = getById(blogId);
         if (blog == null || !Integer.valueOf(1).equals(blog.getStatus())) {
             throw new BusinessException(404, "动态不存在");
@@ -210,6 +221,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         if (!Objects.equals(blog.getUserId(), userId)) {
             throw new BusinessException(403, "只能删除自己的动态");
         }
+        // 2. 只做软删除并记录 deleted_at，后台任务会在 30 天后归档、90 天后物理清理。
         boolean updated = lambdaUpdate()
                 .set(Blog::getStatus, 0)
                 .set(Blog::getDeletedAt, LocalDateTime.now())
@@ -220,6 +232,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
         if (!updated) {
             throw new BusinessException("删除动态失败");
         }
+        // 3. 数据库成功后清理详情缓存、点赞集合、outbox 和粉丝 inbox 中的残留。
         cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
         redisTemplate.delete(RedisConstants.BLOG_LIKED_KEY + blogId);
         redisTemplate.opsForZSet().remove(RedisConstants.BLOG_OUTBOX_KEY + userId, String.valueOf(blogId));
@@ -229,6 +242,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
     @Override
     @Transactional
     public void like(Long userId, Long blogId) {
+        // ZSet member 是 userId，score 是点赞时间；是否已存在决定本次是点赞还是取消。
         String key = RedisConstants.BLOG_LIKED_KEY + blogId;
         String member = String.valueOf(userId);
         Double score = redisTemplate.opsForZSet().score(key, member);
@@ -239,6 +253,7 @@ public class BlogService extends ServiceImpl<BlogMapper, Blog> implements IBlogS
             redisTemplate.opsForZSet().remove(key, member);
             lambdaUpdate().setSql("liked = greatest(liked - 1, 0)").eq(Blog::getId, blogId).update();
         }
+        // liked 数量变化后删除博客详情缓存，避免继续返回旧计数。
         cacheClient.delete(RedisConstants.BLOG_DETAIL_KEY + blogId);
     }
 

@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 
 import com.hm.badminton.entity.VenueInventory;
 import com.hm.badminton.entity.VenueCartItem;
+import com.hm.badminton.vo.AgentVenueProductVO;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Insert;
@@ -162,6 +163,179 @@ public interface VenueItemMapper {
             @Arg(column = "status", javaType = String.class)
     })
     List<VenueInventory> selectInventories(@Param("productId") Long productId, @Param("date") LocalDate date);
+
+    /**
+     * 找出已经过期的排序绑定演示库存。真实场馆库存会绑定 venue_id，不参与自动滚动。
+     * max_service_date 用于把过期行依次接到该商品现有最晚日期之后。
+     */
+    @Select("""
+            select demo.id,
+                   demo.product_id as productId,
+                   demo.service_date as serviceDate,
+                   demo.max_service_date as maxServiceDate
+            from (
+                select i.id, i.product_id, i.service_date,
+                       max(i.service_date) over (partition by i.product_id) as max_service_date
+                from venue_inventory i
+                join venue p on p.id = i.product_id
+                where i.venue_id is null
+                  and p.venue_id is null
+                  and p.place_rank is not null
+            ) demo
+            where demo.service_date < #{currentDate}
+            order by demo.product_id, demo.service_date, demo.id
+            """)
+    List<ExpiredDemoInventoryRow> selectExpiredDemoInventories(@Param("currentDate") LocalDate currentDate);
+
+    /** 查询排序绑定演示商品当前覆盖的日期窗口。 */
+    @Select("""
+            select i.product_id as productId,
+                   min(i.service_date) as minServiceDate,
+                   max(i.service_date) as maxServiceDate
+            from venue_inventory i
+            join venue p on p.id = i.product_id
+            where i.venue_id is null
+              and p.venue_id is null
+              and p.place_rank is not null
+            group by i.product_id
+            """)
+    List<DemoInventoryWindowRow> selectDemoInventoryWindows();
+
+    /** 当整个演示窗口从明天开始时，将它整体平移到今天，保证“今晚”存在真实可选场次。 */
+    @Update("""
+            update venue_inventory i
+            join venue p on p.id = i.product_id
+            set i.service_date = date_sub(i.service_date, interval #{days} day)
+            where i.product_id = #{productId}
+              and i.venue_id is null
+              and p.venue_id is null
+              and p.place_rank is not null
+            """)
+    int shiftDemoInventoryWindow(@Param("productId") Long productId, @Param("days") long days);
+
+    /**
+     * Demo single-court inventory starts with a small capacity. Raise it once to a stable showcase
+     * capacity while preserving already sold and locked quantities. Real venue-bound inventory is untouched.
+     */
+    @Update("""
+            update venue_inventory i
+            join venue p on p.id = i.product_id
+            set i.available_stock = i.available_stock + (8 - i.total_stock),
+                i.total_stock = 8
+            where i.venue_id is null
+              and p.venue_id is null
+              and p.place_rank is not null
+              and p.product_type = 'COURT_SLOT'
+              and i.total_stock < 8
+            """)
+    int ensureDemoCourtCapacity();
+
+    /** 将一条已过期演示库存复用为新的未来场次，并重置这个新场次的库存。 */
+    @Update("""
+            update venue_inventory
+            set service_date = #{nextServiceDate},
+                available_stock = greatest(total_stock - mod(id, 3), 1),
+                locked_stock = 0,
+                sold_stock = total_stock - greatest(total_stock - mod(id, 3), 1),
+                status = '可售'
+            where id = #{id} and service_date < #{currentDate}
+            """)
+    int rollDemoInventory(@Param("id") Long id,
+                          @Param("nextServiceDate") LocalDate nextServiceDate,
+                          @Param("currentDate") LocalDate currentDate);
+
+    @Select("""
+            <script>
+            select p.id as product_id, i.id as inventory_id, p.venue_id, p.amap_place_id,
+                   p.venue_name, p.place_rank, p.sport_code, p.product_type, p.title,
+                   p.description, p.cover_url, i.price, p.original_price, p.tags,
+                   p.use_rule, p.refund_rule, i.service_date, i.start_time, i.end_time,
+                   i.available_stock
+            from venue p
+            join venue_inventory i on i.product_id = p.id
+            where p.status = 1 and i.status = '可售' and i.available_stock &gt; 0
+              and p.sport_code = #{sportCode} and p.place_rank = #{placeRank}
+              and i.service_date = #{targetDate} and i.start_time = #{startTime}
+            <if test="endTime != null">and i.end_time = #{endTime}</if>
+            <if test="maxBudget != null">and i.price &lt;= #{maxBudget}</if>
+            order by i.price, p.id, i.id
+            limit #{limit}
+            </script>
+            """)
+    List<AgentVenueProductVO> selectExactAgentCandidates(@Param("sportCode") String sportCode,
+                                                         @Param("placeRank") Integer placeRank,
+                                                         @Param("targetDate") LocalDate targetDate,
+                                                         @Param("startTime") LocalTime startTime,
+                                                         @Param("endTime") LocalTime endTime,
+                                                         @Param("maxBudget") BigDecimal maxBudget,
+                                                         @Param("limit") int limit);
+
+    @Data
+    class ExpiredDemoInventoryRow {
+        private Long id;
+        private Long productId;
+        private LocalDate serviceDate;
+        private LocalDate maxServiceDate;
+    }
+
+    @Data
+    class DemoInventoryWindowRow {
+        private Long productId;
+        private LocalDate minServiceDate;
+        private LocalDate maxServiceDate;
+    }
+
+    @Select("""
+            <script>
+            select p.id as product_id, i.id as inventory_id, p.venue_id, p.amap_place_id,
+                   p.venue_name, p.place_rank, p.sport_code, p.product_type, p.title,
+                   p.description, p.cover_url, i.price, p.original_price, p.tags,
+                   p.use_rule, p.refund_rule, i.service_date, i.start_time, i.end_time,
+                   i.available_stock
+            from venue p
+            join venue_inventory i on i.product_id = p.id
+            where p.status = 1 and i.status = '可售' and i.available_stock &gt; 0
+              and p.sport_code = #{sportCode} and p.place_rank = #{placeRank}
+              and p.product_type = 'COURT_SLOT'
+              and i.service_date = #{targetDate}
+              and timestampdiff(minute, i.start_time, i.end_time) = 60
+              and i.start_time &gt;= #{startTime}
+            <if test="windowEnd != null">and i.start_time &lt; #{windowEnd}</if>
+            <if test="maxBudget != null">and i.price &lt;= #{maxBudget}</if>
+            order by abs(time_to_sec(timediff(i.start_time, #{startTime}))), i.price, p.id, i.id
+            limit #{limit}
+            </script>
+            """)
+    List<AgentVenueProductVO> selectOneHourAgentCandidates(@Param("sportCode") String sportCode,
+                                                           @Param("placeRank") Integer placeRank,
+                                                           @Param("targetDate") LocalDate targetDate,
+                                                           @Param("startTime") LocalTime startTime,
+                                                           @Param("windowEnd") LocalTime windowEnd,
+                                                           @Param("maxBudget") BigDecimal maxBudget,
+                                                           @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            select p.id as product_id, i.id as inventory_id, p.venue_id, p.amap_place_id,
+                   p.venue_name, p.place_rank, p.sport_code, p.product_type, p.title,
+                   p.description, p.cover_url, i.price, p.original_price, p.tags,
+                   p.use_rule, p.refund_rule, i.service_date, i.start_time, i.end_time,
+                   i.available_stock
+            from venue p
+            join venue_inventory i on i.product_id = p.id
+            where p.status = 1 and i.status = '可售' and i.available_stock &gt; 0
+              and p.sport_code = #{sportCode} and p.place_rank = #{placeRank}
+              and (i.service_date &gt; current_date
+                   or (i.service_date = current_date and i.start_time &gt; current_time))
+            <if test="maxBudget != null">and i.price &lt;= #{maxBudget}</if>
+            order by i.service_date, i.start_time, i.price, p.id
+            limit #{limit}
+            </script>
+            """)
+    List<AgentVenueProductVO> selectUpcomingAgentCandidates(@Param("sportCode") String sportCode,
+                                                            @Param("placeRank") Integer placeRank,
+                                                            @Param("maxBudget") BigDecimal maxBudget,
+                                                            @Param("limit") int limit);
 
     @Select("""
             select p.id as product_id, i.id as inventory_id, p.venue_id, p.amap_place_id,

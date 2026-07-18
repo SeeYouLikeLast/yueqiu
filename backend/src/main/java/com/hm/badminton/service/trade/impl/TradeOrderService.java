@@ -18,6 +18,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 普通交易的统一编排服务。
+ *
+ * <p>前端只需区分 {@code type=1} 场馆商品和 {@code type=2} 装备商品。本类负责路由到具体
+ * 服务，并用外层事务把“创建订单 + 模拟支付”组成一个原子业务。真正的库存 SQL 和订单明细
+ * 分别由 {@link IVenueItemService}、{@link IEquipmentService} 完成。</p>
+ */
 @Service
 public class TradeOrderService implements ITradeOrderService {
 

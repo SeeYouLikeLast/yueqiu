@@ -14,5 +14,6 @@ public interface IActivityMaintenanceService {
     class ActivityRefreshResult {
         private int refreshedDemoActivities;
         private int finishedUserActivities;
+        private int refreshedDemoInventories;
     }
 }

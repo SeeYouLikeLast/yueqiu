@@ -16,6 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
+/**
+ * “购买场馆时段并立即发起约球”的组合业务服务。
+ *
+ * <p>它本身不重复实现订单和活动规则，而是编排两个已有 Service。外层事务会传播到内部方法，
+ * 保证库存扣减、订单支付、活动和发起人成员记录一起提交或一起回滚。</p>
+ */
 @Service
 public class VenueActivityBookingService implements IVenueActivityBookingService {
 

@@ -79,6 +79,7 @@ create table agent_conversation (
   id bigint primary key,
   user_id bigint not null,
   title varchar(128) not null,
+  requirements_json json null,
   status tinyint not null default 1,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,

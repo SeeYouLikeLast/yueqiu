@@ -22,6 +22,7 @@ public class AgentConversation implements Serializable {
     private Long id;
     private Long userId;
     private String title;
+    private String requirementsJson;
     private Integer status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

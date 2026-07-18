@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
+/** 统一商品入口：type=1 查询场馆商品，type=2 查询装备商品。 */
 @RestController
 @RequestMapping("/items")
 public class ItemController {

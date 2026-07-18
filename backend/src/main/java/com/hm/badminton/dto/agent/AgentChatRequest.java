@@ -12,6 +12,8 @@ public class AgentChatRequest {
     private String message;
     private String sportCode;
     private List<String> sportCodes;
+    /** Distinguishes an explicit "all sports" choice from an omitted filter. */
+    private boolean allSportsRequested;
     private String city;
     private Double lng;
     private Double lat;

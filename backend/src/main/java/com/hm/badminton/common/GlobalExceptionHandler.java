@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+/**
+ * 全局异常翻译器。
+ *
+ * <p>Controller 和 Service 只需抛异常，这里统一决定 HTTP 状态和 {@link ApiResponse} 内容。
+ * 业务异常给用户可理解的提示，未知异常隐藏内部堆栈，详细原因只应写入服务端日志。</p>
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

@@ -6,8 +6,11 @@ import com.hm.badminton.entity.VenueOrder;
 import com.hm.badminton.entity.VenueItem;
 import com.hm.badminton.entity.VenueInventory;
 import com.hm.badminton.entity.VenueCartItem;
+import com.hm.badminton.vo.AgentVenueProductVO;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 public interface IVenueItemService {
@@ -18,6 +21,14 @@ public interface IVenueItemService {
     VenueItem detail(Long itemId);
 
     List<VenueInventory> inventories(Long itemId, LocalDate date);
+
+    List<AgentVenueProductVO> agentCandidates(String sportCode,
+                                              Integer placeRank,
+                                              LocalDate targetDate,
+                                              LocalTime startTime,
+                                              LocalTime endTime,
+                                              BigDecimal maxBudget,
+                                              int limit);
 
     void addCart(Long userId, VenueOrderCreateRequest request);
 

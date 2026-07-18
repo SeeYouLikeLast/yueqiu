@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 import java.util.Map;
 
+/** 登录用户的文件上传、查询、下载、临时地址和所有者删除入口。 */
 @RestController
 @RequestMapping("/files")
 public class FileController {

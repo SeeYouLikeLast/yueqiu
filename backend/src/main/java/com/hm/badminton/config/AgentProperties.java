@@ -13,4 +13,6 @@ public class AgentProperties {
     private int maxToolCalls = 6;
     private int memoryTtlMinutes = 60;
     private int rateLimitPerMinute = 10;
+    private int toolTimeoutSeconds = 5;
+    private int toolThreads = 6;
 }

@@ -206,6 +206,7 @@ $env:MAIL_PASSWORD="你的QQ邮箱SMTP授权码"
 
 ## 相关文档
 
+- [新手代码阅读指南：从页面到数据库完整追踪](docs/新手代码阅读指南.md)
 - [项目启动与关闭](docs/项目启动与关闭.md)
 - [后端 HMDP 分层结构与 API 转发](docs/后端HMDP分层结构与API转发.md)
 - [数据存储分工：MySQL、Redis、MinIO](docs/数据存储分工-MySQL-Redis-MinIO.md)

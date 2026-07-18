@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/** 平台场所扩展信息、评价和场馆团购聚合入口。 */
 @RestController
 @RequestMapping("/venues")
 public class VenueController {

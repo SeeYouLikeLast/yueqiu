@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.ArrayList;
 import java.util.List;
 
+/** 场馆商品与装备共用的购物车增删改查入口。 */
 @RestController
 @RequestMapping("/cart")
 public class CartController {

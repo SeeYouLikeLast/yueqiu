@@ -27,6 +27,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+/**
+ * 装备商城业务：分类与商品查询、详情缓存、购物车、库存扣减和装备订单。
+ *
+ * <p>普通购买以 MySQL 条件更新防超卖；秒杀购买不经过本类的下单方法，而由
+ * {@link SeckillService} 先在 Redis 预扣，再异步写入秒杀订单表。</p>
+ */
 @Service
 public class EquipmentService implements IEquipmentService {
 

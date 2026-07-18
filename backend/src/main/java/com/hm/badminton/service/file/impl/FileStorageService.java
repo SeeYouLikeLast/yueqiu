@@ -36,6 +36,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * 文件存储服务：MinIO 保存二进制文件，MySQL {@code file_metadata} 保存可检索的元数据。
+ *
+ * <p>数据库事务无法自动回滚 MinIO，因此上传采用“先传对象、再写元数据、失败时补偿删除对象”
+ * 的方式。删除操作要求当前用户是文件所有者，公开图片则由 Nginx 的 {@code /objects/} 直接
+ * 访问 MinIO，避免每张图片都经过 Java。</p>
+ */
 @Service
 public class FileStorageService implements IFileStorageService {
 
@@ -88,6 +95,7 @@ public class FileStorageService implements IFileStorageService {
 
     @Transactional
     public FileMetadata upload(Long userId, MultipartFile file, String bizType, Long bizId) {
+        // 1. 校验空文件、业务类型、MIME、后缀和大小，尽量在访问 MinIO 前拒绝非法文件。
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件不能为空");
         }
@@ -98,6 +106,7 @@ public class FileStorageService implements IFileStorageService {
         String objectName = buildObjectName(bizType, originalFilename);
         boolean objectUploaded = false;
         try {
+            // 2. 文件本体先上传到按业务和日期分层的 MinIO objectName。
             ensureBucketRequired();
             minioClient.putObject(PutObjectArgs.builder()
                     .bucket(properties.getBucket())
@@ -106,6 +115,7 @@ public class FileStorageService implements IFileStorageService {
                     .stream(file.getInputStream(), file.getSize(), -1)
                     .build());
             objectUploaded = true;
+            // 3. 读取 ETag 等对象信息，再把所有者、业务归属和公开 URL 写入 MySQL。
             StatObjectResponse stat = minioClient.statObject(StatObjectArgs.builder()
                     .bucket(properties.getBucket())
                     .object(objectName)
@@ -125,6 +135,7 @@ public class FileStorageService implements IFileStorageService {
             fileMetadataMapper.insertMetadata(row);
             return detail(row.getId());
         } catch (Exception e) {
+            // 4. 数据库写入失败时 Spring 只能回滚 MySQL，这里主动删掉已上传对象，避免孤儿文件。
             if (objectUploaded) {
                 removeObjectQuietly(properties.getBucket(), objectName);
             }
@@ -183,6 +194,7 @@ public class FileStorageService implements IFileStorageService {
 
     @Transactional
     public void remove(Long ownerUserId, Long id) {
+        // 元数据先用于校验所有权；不知道别人的文件 id 也不能越权删除。
         FileMetadata metadata = detail(id);
         requireOwner(ownerUserId, metadata);
         try {
@@ -193,6 +205,7 @@ public class FileStorageService implements IFileStorageService {
         } catch (Exception e) {
             throw new BusinessException(500, "删除 MinIO 文件失败: " + e.getMessage());
         }
+        // MinIO 删除成功后软删除元数据，保留审计线索。
         fileMetadataMapper.markDeleted(id);
     }
 

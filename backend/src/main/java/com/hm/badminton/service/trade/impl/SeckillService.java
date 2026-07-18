@@ -33,6 +33,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 场馆商品与装备共用的秒杀入口。
+ *
+ * <p>请求链路为：活动校验 -> Redisson 用户锁 -> Redis Lua 原子预扣 -> RocketMQ 投递
+ * -> 消费者事务落库。Redis 负责在高并发入口快速拒绝无库存/重复购买，MySQL 条件更新和唯一
+ * 索引负责最终一致性。轻量部署未启用 MQ 时，可降级为同步调用同一落库服务。</p>
+ */
 @Service
 public class SeckillService implements ISeckillService, ApplicationRunner {
 
@@ -100,7 +107,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
             throw new BusinessException(409, "不能重复抢购");
         }
 
-        // 2. 提前生成订单号。优先投递 RocketMQ；MQ 不可用时可降级到同一套事务落库服务。
+        // 2. 提前生成全局订单号。无论走 MQ 还是同步降级，都使用同一个 id，便于幂等去重。
         long orderId = idGenerator.nextId();
         SeckillOrderMessage orderMessage = new SeckillOrderMessage(
                 orderId,
@@ -112,7 +119,7 @@ public class SeckillService implements ISeckillService, ApplicationRunner {
 
         boolean preDeducted = false;
         try {
-            // Lua 在 Redis 内原子完成库存预扣和一人一单标记。
+            // 3. Lua 在 Redis 内原子完成库存预扣和一人一单标记。
             Long code = tryRedisPreDeduct(userId, tradeType, activityId);
             if (code == null) {
                 throw new BusinessException(503, "秒杀服务繁忙，请稍后再试");

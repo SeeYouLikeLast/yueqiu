@@ -13,6 +13,8 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AgentCard {
+    /** Stable reference exposed to the model, never rendered as user-facing text. */
+    private String cardId;
     private String type;
     private String title;
     private String subtitle;

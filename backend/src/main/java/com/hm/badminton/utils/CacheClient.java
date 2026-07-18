@@ -18,6 +18,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
+/**
+ * Redis 缓存模板，集中实现三种常见策略。
+ *
+ * <ul>
+ *   <li>旁路缓存 + 空值：适合普通详情，防止不存在 id 反复打到 MySQL。</li>
+ *   <li>逻辑过期：适合极少数热点 key，过期时先返回旧值并异步重建，防止击穿。</li>
+ *   <li>普通短缓存：适合高德 API 和低频变化列表，并支持随机 TTL 防雪崩。</li>
+ * </ul>
+ */
 @Component
 public class CacheClient {
 

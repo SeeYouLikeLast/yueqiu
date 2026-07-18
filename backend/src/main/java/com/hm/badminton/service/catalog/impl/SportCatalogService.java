@@ -14,6 +14,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * 平台运动目录。
+ *
+ * <p>当前支持的球类很少且发布时确定，因此直接在构造器注册，不为它单独访问数据库；对外列表
+ * 仍写入 Redis，供多个实例和高频首屏请求复用。若以后由运营后台动态维护，再迁移到 Mapper。</p>
+ */
 @Service
 public class SportCatalogService implements ISportCatalogService {
 

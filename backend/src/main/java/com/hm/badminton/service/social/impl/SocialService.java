@@ -19,6 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
+/**
+ * 球友资料和约球活动业务。
+ *
+ * <p>球友列表允许短缓存；活动列表直接查询数据库，保证用户发起或加入后立即可见。活动成员表
+ * 的唯一索引防止重复加入，活动表的条件更新负责在并发场景下限制最大人数。</p>
+ */
 @Service
 public class SocialService implements ISocialService {
 
@@ -39,6 +45,7 @@ public class SocialService implements ISocialService {
     @Override
     public PageResult<PlayerProfile> players(String sportCode, String city, String area, String level,
                                              Double lng, Double lat, int page, int size, Long excludeUserId) {
+        // 1. 规范分页和筛选条件，并把坐标粗化后组成稳定缓存 key。
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 50);
         String normalizedSport = normalizeSport(sportCode);
@@ -48,6 +55,7 @@ public class SocialService implements ISocialService {
         String key = RedisConstants.SOCIAL_PLAYERS_KEY
                 + listCacheKey(normalizedSport, cityText, areaText, levelText, safePage, safeSize, lng, lat)
                 + ":exclude:" + (excludeUserId == null ? "none" : excludeUserId);
+        // 2. 球友变化频率较低，使用一分钟短缓存减少同城列表重复查询。
         return cacheClient.querySimple(key, new TypeReference<PageResult<PlayerProfile>>() {
         }, () -> {
             Long total = socialMapper.countPlayers(normalizedSport, cityText, areaText, levelText, excludeUserId);
@@ -105,6 +113,7 @@ public class SocialService implements ISocialService {
     @Override
     @Transactional
     public Long createActivity(Long userId, ActivityRequest request) {
+        // 1. 在写库前校验时间和人数，避免生成开始时间已过去的活动。
         validateActivityTime(request);
         SocialMapper.InsertActivityRow row = new SocialMapper.InsertActivityRow();
         row.setSportCode(sportCatalogService.require(request.getSportCode()).getCode());
@@ -120,8 +129,10 @@ public class SocialService implements ISocialService {
         row.setMaxPlayers(request.getMaxPlayers());
         row.setLevelRequired(request.getLevelRequired());
         row.setFeeType(request.getFeeType());
+        // 2. 写活动主表，MyBatis 回填自增 id。
         socialMapper.insertActivity(row);
         long activityId = row.getId();
+        // 3. 发起人也是第一位成员；同一事务保证主表和成员表要么都成功、要么都回滚。
         socialMapper.insertMember(activityId, userId, ROLE_OWNER);
         return activityId;
     }
@@ -129,15 +140,19 @@ public class SocialService implements ISocialService {
     @Override
     @Transactional
     public void join(Long userId, Long activityId) {
+        // 1. 先做友好的状态校验；最终并发正确性仍由后面的条件 UPDATE 保证。
         SportActivity activity = detail(activityId);
         if (!ACTIVITY_RECRUITING.equals(activity.getStatus())) {
             throw new BusinessException("活动已满员或已结束");
         }
+        // 2. 先插入成员。数据库唯一索引 (activity_id, user_id) 防止重复加入。
         try {
             socialMapper.insertMember(activityId, userId, ROLE_MEMBER);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(409, "你已加入该活动");
         }
+        // 3. SQL 仅在 current_players < max_players 且仍招募时加一；失败会抛异常，
+        //    @Transactional 随之回滚刚插入的成员记录，因此不会超员或留下脏成员。
         int updated = socialMapper.increaseActivityPlayersIfAvailable(activityId);
         if (updated == 0) {
             throw new BusinessException("活动人数已满");

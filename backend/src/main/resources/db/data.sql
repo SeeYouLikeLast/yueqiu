@@ -782,6 +782,9 @@ insert into venue_inventory(id, product_id, venue_id, court_name, coach_id, serv
 (143, 36, null, '私教训练场', 12, date_add(current_date, interval 3 day), '18:00:00', '19:00:00', 2, 1, 0, 1, 214.00, '可售'),
 (144, 36, null, '私教训练场', 12, date_add(current_date, interval 4 day), '18:00:00', '19:00:00', 2, 1, 0, 2, 214.00, '可售');
 
+-- 演示窗口覆盖今天到未来 3 天，既能演示“今晚”，也保留后续预约日期。
+update venue_inventory set service_date = date_sub(service_date, interval 1 day);
+
 -- 博客：每种运动 6 篇，分别覆盖场馆、装备、预算、训练和避坑
 insert into blogs(id, user_id, sport_code, title, content, image_urls, related_type, related_id, related_title, related_cover_url, related_price, liked, status, created_at) values
 (1, 1, 'badminton', '羽毛球：新手第一套装备怎么选', '从价格、容错和使用频率出发选择，不必一步到顶。优点是容易上手，缺点是高强度对抗上限有限。', '/objects/hm-badminton/demo/blogs/images/blog-081.png', 'EQUIPMENT', 1, '轻羽 5U 新手羽毛球拍', '/objects/hm-badminton/demo/equipment/cover/equipment-056.png', 89.00, 29, 1, date_sub(now(), interval 3 hour)),

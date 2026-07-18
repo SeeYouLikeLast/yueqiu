@@ -25,7 +25,7 @@ public interface SocialMapper {
             join users u on u.id = pp.user_id
             where pp.allow_invite = 1 and u.status = 1
             <if test="sportCode != null and sportCode != ''">and pp.sport_code = #{sportCode}</if>
-            <if test="city != null and city != ''">and pp.city = #{city}</if>
+            <if test="city != null and city != ''">and replace(pp.city, '市', '') = replace(#{city}, '市', '')</if>
             <if test="area != null and area != ''">and pp.area = #{area}</if>
             <if test="level != null and level != ''">and pp.level = #{level}</if>
             <if test="excludeUserId != null">and pp.user_id != #{excludeUserId}</if>
@@ -54,7 +54,7 @@ public interface SocialMapper {
             join users u on u.id = pp.user_id
             where pp.allow_invite = 1 and u.status = 1
             <if test="sportCode != null and sportCode != ''">and pp.sport_code = #{sportCode}</if>
-            <if test="city != null and city != ''">and pp.city = #{city}</if>
+            <if test="city != null and city != ''">and replace(pp.city, '市', '') = replace(#{city}, '市', '')</if>
             <if test="area != null and area != ''">and pp.area = #{area}</if>
             <if test="level != null and level != ''">and pp.level = #{level}</if>
             <if test="excludeUserId != null">and pp.user_id != #{excludeUserId}</if>
@@ -147,7 +147,7 @@ public interface SocialMapper {
             where a.status in ('招募中', '已满员')
               and a.end_time &gt; #{currentTime}
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
-            <if test="city != null and city != ''">and a.city = #{city}</if>
+            <if test="city != null and city != ''">and replace(a.city, '市', '') = replace(#{city}, '市', '')</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
             <if test="scope == 'created'">and a.creator_id = #{userId}</if>
             <if test="scope == 'joined'">
@@ -179,7 +179,7 @@ public interface SocialMapper {
             where a.status in ('招募中', '已满员')
               and a.end_time &gt; #{currentTime}
             <if test="sportCode != null and sportCode != ''">and a.sport_code = #{sportCode}</if>
-            <if test="city != null and city != ''">and a.city = #{city}</if>
+            <if test="city != null and city != ''">and replace(a.city, '市', '') = replace(#{city}, '市', '')</if>
             <if test="level != null and level != ''">and a.level_required = #{level}</if>
             <if test="scope == 'created'">and a.creator_id = #{userId}</if>
             <if test="scope == 'joined'">

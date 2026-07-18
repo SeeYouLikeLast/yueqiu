@@ -11,14 +11,14 @@ Controller -> Service 接口 -> ServiceImpl -> Mapper / Entity -> MySQL
                          -> Redis / MinIO / RocketMQ / 高德 / DashScope
 ```
 
-| 类型 | 作用 | 约束 |
-| --- | --- | --- |
-| Entity | 数据表或领域实体 | 不直接作为复杂页面返回模型 |
-| DTO | HTTP 请求和层间输入 | Controller 的请求对象放这里 |
-| VO | 面向前端的展示结构 | 统一屏蔽库存、内部 id、数据库字段等不应暴露的信息 |
-| Mapper | MyBatis-Plus 数据访问 | 简单 CRUD 使用 `BaseMapper`，复杂 SQL 使用注解或 XML Mapper |
-| Service | 业务接口 | Controller 只依赖接口 |
-| ServiceImpl | 事务、缓存、远程调用与业务编排 | `@Transactional` 放在这一层，不包裹长时间第三方调用 |
+| 类型          |                                         | 作用                | 约束                                              |
+| ----------- | --------------------------------------- | ----------------- | ----------------------------------------------- |
+| Entity      | 实体类                                     | 数据表或领域实体          | 不直接作为复杂页面返回模型                                   |
+| DTO         | Data Transfer Object 数据传输对象             | HTTP 请求和层间输入      | Controller 的请求对象放这里                             |
+| VO          | **View Object** / **Value Object** 视图对象 | 面向前端的展示结构         | 统一屏蔽库存、内部 id、数据库字段等不应暴露的信息                      |
+| Mapper      |                                         | MyBatis-Plus 数据访问 | 简单 CRUD 使用 `BaseMapper`，复杂 SQL 使用注解或 XML Mapper |
+| Service     |                                         | 业务接口              | Controller 只依赖接口                                |
+| ServiceImpl |                                         | 事务、缓存、远程调用与业务编排   | `@Transactional` 放在这一层，不包裹长时间第三方调用              |
 
 ## 2. 当前目录
 

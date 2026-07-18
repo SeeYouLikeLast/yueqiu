@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+/** 邮箱验证码、注册登录、当前用户资料、公开主页和位置更新入口。 */
 @RestController
 @RequestMapping("/auth")
 public class AuthController {

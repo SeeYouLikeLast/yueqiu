@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
+/** 场馆商品/装备秒杀活动列表与抢购入口。 */
 @RestController
 @RequestMapping("/seckill")
 public class SeckillController {

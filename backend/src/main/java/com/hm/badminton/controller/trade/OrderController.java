@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+/** 按 type 查询普通订单与秒杀订单的统一入口。 */
 @RestController
 @RequestMapping("/orders")
 public class OrderController {

@@ -3049,6 +3049,32 @@ p {
   font-weight: 800;
 }
 
+.agent-rich-text {
+  line-height: 1.55;
+}
+
+.agent-answer-line + .agent-answer-line {
+  margin-top: 4px;
+}
+
+.agent-answer-gap {
+  height: 8px;
+}
+
+.agent-answer-list {
+  margin: 7px 0;
+  padding-left: 22px;
+}
+
+.agent-answer-list li + li {
+  margin-top: 7px;
+}
+
+.agent-rich-text strong {
+  color: #10251d;
+  font-weight: 900;
+}
+
 .agent-attached-deal {
   min-height: 66px;
   display: grid;

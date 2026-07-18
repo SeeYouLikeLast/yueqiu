@@ -1,0 +1,629 @@
+# 约个球 AI 助手当前业务逻辑
+
+> 最后更新：2026-07-18  
+> 本文只描述当前代码已经实现的行为。RAG 等未来方案见《约个球AI助手Agent实施规划.md》。
+
+## 1. 先理解当前实现是什么
+
+当前 AI 助手采用的是：
+
+```text
+Spring AI Alibaba StateGraph 多节点编排
+  + 后端结构化会话记忆
+  + DashScope 从真实候选中选择 cardId 并生成逐卡理由
+  + 后端校验并生成事实回答
+  + Vue 渲染文本和业务卡片
+```
+
+当前已经使用 `spring-ai-alibaba-graph-core` 的 `StateGraph`。它属于确定性工作流 Graph：节点和边由后端定义，模型负责候选选择和逐卡推荐理由，不允许自主执行购买、支付或任意数据库工具。它不是完全自治的 ReAct Agent，这种边界可以继续保护价格、库存和时段等业务事实。
+
+当前助手支持四类业务：
+
+1. 根据位置、运动、距离和营业信息推荐真实高德场所。
+2. 根据日期、时段、预算查询平台数据库中的真实场馆团购和库存。
+3. 查询仍可加入、人数未满且排除自己的约球活动。
+4. 根据运动、预算、评分、销量等条件推荐真实装备和装备秒杀。
+
+## 2. 总体架构
+
+```mermaid
+flowchart TD
+    U["用户输入问题"] --> V["Vue 助手页面"]
+    V --> S["POST /api/agent/chat/stream"]
+    S --> C["AgentController"]
+    C --> O["AgentGraphWorkflow / StateGraph"]
+
+    O --> P1["beginTurn：短事务 A 保存问题"]
+    P1 --> M["understandRequirement：合并 AgentRequirement"]
+    M --> X["dispatchTools"]
+    X --> T1["queryPlacesAndProducts"]
+    X --> T2["queryActivities"]
+    X --> T3["queryEquipment"]
+    T1 --> T4["场馆商品与真实库存工具"]
+
+    T4 --> R["mergeCandidates"]
+    T2 --> R
+    T3 --> R
+    R --> L["selectCandidates：cardId + 逐卡理由"]
+    L --> G["后端校验 ID、补齐关系和事实化回答"]
+    G --> P2["persistAnswer：短事务 B"]
+    P2 --> D["SSE done"]
+    D --> V
+```
+
+主要代码：
+
+| 责任 | 文件 |
+| --- | --- |
+| HTTP 和 SSE 入口 | `backend/src/main/java/com/hm/badminton/controller/agent/AgentController.java` |
+| Graph 定义与执行 | `backend/src/main/java/com/hm/badminton/service/agent/graph/AgentGraphWorkflow.java` |
+| Graph 运行上下文/状态 | `backend/src/main/java/com/hm/badminton/service/agent/graph/AgentGraphRunContext.java`、`AgentGraphState.java` |
+| 各节点业务实现 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentServiceImpl.java` |
+| 结构化需求 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRequirementService.java` |
+| 短事务持久化 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentPersistenceService.java` |
+| 并行工具线程池 | `backend/src/main/java/com/hm/badminton/config/AgentAsyncConfig.java` |
+| 场所工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/PlaceAgentTool.java` |
+| 场馆商品工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/VenueProductAgentTool.java` |
+| 活动工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/ActivityAgentTool.java` |
+| 装备工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/EquipmentAgentTool.java` |
+| 前端聊天页面 | `frontend/src/App.vue` |
+| 前端 SSE 客户端 | `frontend/src/api/client.ts` |
+| 生产 SSE 代理 | `deploy/production/nginx/hm-badminton.conf` |
+
+## 3. 前端入口和会话行为
+
+助手有两个入口：
+
+- 底部导航栏“助手”。
+- 各主要页面右下角悬浮“AI 助手”。
+
+进入助手页时，`openAssistant()` 会：
+
+1. 切换到助手页面。
+2. 查询 `/api/agent/status`，判断 DashScope 是否接入。
+3. 登录用户读取最近一次历史会话。
+4. 游客不恢复历史记录，刷新页面后聊天区为空。
+5. 聚焦底部输入框。
+
+快捷问题会先打开运动选择器。用户可以选择一个、多个运动或“不限球类”。前端发送：
+
+```json
+{
+  "conversationId": 123,
+  "message": "今晚附近能打球吗（羽毛球）",
+  "sportCode": "badminton",
+  "sportCodes": ["badminton"],
+  "allSportsRequested": false,
+  "city": "西安市",
+  "lng": 108.9747,
+  "lat": 34.15568
+}
+```
+
+其中：
+
+- `sportCode` 用于兼容单运动请求。
+- `sportCodes` 是当前正式使用的多运动字段。
+- `allSportsRequested=true` 只表示用户明确选择“不限”。
+- 如果运动编码和 `allSportsRequested` 错误地同时出现，后端优先采用明确运动编码。
+
+## 4. AI 接口
+
+浏览器统一带 `/api`，Nginx 或 Vite 会去掉 `/api` 后转给 Spring Boot。
+
+| 方法 | 前端路径 | 是否登录 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/agent/status` | 否 | 查询模型是否接入 |
+| POST | `/api/agent/chat` | 否 | 非流式聊天，主要作为兼容入口 |
+| POST | `/api/agent/chat/stream` | 否 | 当前前端使用的 SSE 聊天入口 |
+| GET | `/api/agent/conversations` | 是 | 查询当前用户最近 30 个会话 |
+| GET | `/api/agent/conversations/{id}/messages` | 是 | 查询一个会话的消息和卡片 |
+| DELETE | `/api/agent/conversations/{id}` | 是 | 软删除自己的会话 |
+
+登录要求由 `UserContext.requireUserId()` 和前端登录跳转共同保证。删除会话只把 `status` 改为 `0`，同时清除对应结构化需求缓存。
+
+## 5. 一次聊天请求的完整步骤
+
+核心入口是 `AgentServiceImpl.executeChat()`，它创建本次 `AgentGraphRunContext` 后交给 `AgentGraphWorkflow.execute()`。Graph 当前依次运行：
+
+```text
+beginTurn
+  -> understandRequirement
+  -> dispatchTools
+  -> [queryPlacesAndProducts | queryActivities | queryEquipment]
+  -> mergeCandidates
+  -> selectCandidates
+  -> persistAnswer
+```
+
+### 5.1 开关与限流
+
+1. `hm.agent.enabled=false` 时直接返回 503。
+2. 登录用户按 `userId` 限流。
+3. 游客按客户端 IP 限流。
+4. 默认每分钟最多 10 次请求。
+
+Redis Key：
+
+```text
+agent:rate:user:{userId}
+agent:rate:ip:{ip}
+```
+
+### 5.2 短事务 A：保存本轮问题
+
+`AgentPersistenceService.beginTurn()`：
+
+1. 检查 `conversationId` 是否属于当前用户且仍有效。
+2. 没有可复用会话时创建新会话。
+3. 将用户问题写入 `agent_message`。
+4. 立即提交事务，释放数据库连接。
+
+高德和 DashScope 调用不会占着数据库事务等待。
+
+### 5.3 读取并合并结构化需求
+
+先从 Redis 读取，未命中再读 MySQL：
+
+```text
+Redis: agent:conversation:requirement:{conversationId}
+MySQL: agent_conversation.requirements_json
+```
+
+本轮明确条件覆盖旧条件，本轮未提及的条件继续沿用。过期日期会在读取时清理。
+
+### 5.4 StateGraph 并行查询业务工具
+
+`dispatchTools` 同时连接三个查询节点，Spring AI Alibaba Graph 将它们转换成并行节点，并使用项目的有界 `agentToolExecutor` 执行：
+
+```text
+结构化需求
+  ├─ 场所查询 -> 场馆团购/库存查询
+  ├─ 活动查询
+  └─ 装备/装备秒杀查询
+```
+
+场馆团购依赖场所搜索结果，所以它和场所查询封装在同一个分支中，严格执行“高德场所 -> 对应场馆团购”。每个工具调用仍受 `tool-timeout-seconds` 限制，超时或异常时该分支返回空结果，不阻塞其他分支。
+
+### 5.5 模型选择候选
+
+后端把候选裁剪成人类可读字段，并发送给 DashScope。模型只能返回：
+
+```json
+{
+  "selectedCardIds": ["place:B0...", "venue:2:5"],
+  "recommendationReasons": {
+    "place:B0...": "距离较近，且营业时间覆盖晚间需求",
+    "venue:2:5": "时段完全匹配，价格也在预算内"
+  },
+  "explanation": "本次主要比较时间、距离和预算"
+}
+```
+
+模型不负责创造最终价格、库存、距离或时段。`recommendationReasons` 必须按已选 `cardId` 分别返回；后端只接受本轮已验证卡片对应的短理由，重复理由会被丢弃。`explanation` 仍只写调试日志，不直接展示。
+
+### 5.6 后端校验和补齐
+
+模型结果会经过：
+
+1. 删除不属于本轮候选集合的 `cardId`。
+2. JSON 错误、结果为空或模型异常时，按 `recommendScore` 确定性排序兜底。
+3. 场所类问题有多个真实候选时，至少保留 2 个场所。
+4. 优先补充带真实可售团购的场所。
+5. 模型只选团购时，补上对应真实场所。
+6. 模型只选场所时，补上同一场所最合适的真实团购。
+7. AI 逐卡理由只能绑定到通过校验的 `cardId`。
+8. 最终场所和团购组合最多保留 6 张底层卡片。
+
+### 5.7 后端生成事实回答
+
+最终回答由 `groundedAnswer()` 根据已验证卡片生成，而不是直接展示模型自由文本。
+
+回答中的名称、价格、日期和时段全部来自真实卡片。DashScope 正常时，逐项推荐理由由模型根据对应卡片事实生成；模型不可用、格式错误或理由重复时，回退到工具层基于时段、价格、退款规则和场景生成的事实理由。推荐理由只显示在上方回答，不在下方场所卡片中重复展示。
+
+### 5.8 短事务 B：保存结果
+
+`AgentPersistenceService.completeTurn()` 在一个短事务内：
+
+1. 保存助手回答。
+2. 保存最终业务卡片 JSON。
+3. 更新会话的结构化需求 JSON 和时间。
+
+随后再把结构化需求写入 Redis，默认 60 分钟并带随机 TTL。
+
+## 6. 结构化会话记忆
+
+`AgentRequirement` 当前字段：
+
+| 字段 | 含义 | 示例 |
+| --- | --- | --- |
+| `sportCodes` | 一个或多个运动编码 | `badminton`、`table_tennis` |
+| `targetDate` | 目标日期 | `2026-07-18` |
+| `startTime` | 开始时间 | `19:00` |
+| `endTime` | 结束时间 | `20:00` |
+| `maxBudget` | 最高预算 | `50` |
+| `maxDistanceMeters` | 最远距离 | `3000` |
+| `level` | 水平要求 | `不限`、`初级`、`中级`、`高级` |
+| `intents` | 当前业务意图 | `PLACE`、`ACTIVITY`、`EQUIPMENT` |
+| `lastSelectedCardIds` | 上轮最终卡片 | 用于记录上一轮选择 |
+
+当前解析规则包括：
+
+- 运动：羽毛球、乒乓球、足球、篮球、网球、排球。
+- 日期：今天、今晚、明天、后天、完整日期、月日。
+- 时间：`19:00-21:00`、`19点`、晚上、上午、下午、下班后。
+- 预算：`50 元以内`、`预算 300`。
+- 距离：`3km`、`1500米`。
+- 水平：不限、新手、初级、中级、高级、进阶。
+- 意图：根据场所、团购、活动、搭子、装备等关键词判断。
+
+位置优先级：
+
+```text
+本次请求经纬度
+  > 登录用户最近一次定位
+  > 默认西安坐标
+```
+
+## 7. 四类业务工具
+
+### 7.1 场所工具
+
+数据来源：高德附近 POI。
+
+当前行为：
+
+- 默认查询半径 8km，用户提出距离时使用该距离，最大限制 50km。
+- 高德一次返回最多 6 个场所。
+- 当前进入模型候选的是前 2 个场所。
+- 推荐依据包括距离、设施标签、营业时间和高德返回顺序。
+
+场所分数大致为：
+
+```text
+基础分 55
++ 距离最多 25
++ 设施最多 10
++ 营业到晚上 5
++ 搜索顺序最多 10
+```
+
+### 7.2 场馆团购工具
+
+数据来源：平台 MySQL 的 `venue` 和 `venue_inventory`，不是高德团购。
+
+查询条件包括：
+
+- 运动类型。
+- 当前高德结果对应的 `placeRank`。
+- 日期、开始时间和结束时间。
+- 最高预算。
+- `available_stock > 0` 且状态可售。
+
+匹配顺序：
+
+1. 日期、开始时间和结束时间完全匹配，标记 `EXACT`。
+2. 完全匹配不存在时，仅回退同一天真实存在的 `COURT_SLOT` 单场一小时，标记 `ONE_HOUR_FALLBACK`。
+3. 用户没有提出日期和时间时，查询最近未来可售时段，标记 `UPCOMING`。
+4. 仍没有库存时不生成团购卡，不拿上午券冒充晚间券。
+
+团购分数：
+
+```text
+完全匹配 95
+单场一小时回退 78
+最近可售 70
+真实折扣额外 +4
+```
+
+演示环境会在启动和每天 `00:05` 维护排序绑定演示库存：
+
+- 过期日期滚动到未来。
+- 明天才开始的窗口对齐到今天。
+- 演示 `COURT_SLOT` 容量不足 8 时扩到 8。
+- 只处理没有真实 `venue_id` 的演示库存，不修改真实场馆库存。
+- 日期、时段和库存校验仍然保留。
+
+### 7.3 约球活动工具
+
+数据来源：平台活动表。
+
+当前规则：
+
+- 查询同城市、同运动、对应水平的“他人发起”活动。
+- 排除当前登录用户自己创建的活动。
+- 排除人数已满的活动。
+- 每个运动最多加入 2 个候选。
+- 推荐依据包括水平匹配、剩余人数、明确时间和费用方式。
+
+活动分数大致为：
+
+```text
+基础分 50
++ 剩余人数最多 15
++ 水平匹配最多 20
++ 时间明确 10
++ 费用明确 5
+```
+
+### 7.4 装备工具
+
+数据来源：平台装备和装备秒杀表。
+
+普通装备：
+
+- 按运动、关键词和预算筛选。
+- 每个运动最多加入 2 个候选。
+- 推荐依据包括预算、评分、销量、库存、品牌和分类。
+
+只有问题包含“秒杀、特价、抢购、便宜”等词时，才额外查询装备秒杀，每个运动最多加入 2 个。
+
+装备分数大致为：
+
+```text
+基础分 45
++ 预算匹配最多 25
++ 评分贡献
++ 销量最多 10
++ 当前有库存 10
+```
+
+## 8. 候选数量规则
+
+当前每个运动的候选上限：
+
+| 类型 | 工具原始查询 | 进入总候选 |
+| --- | ---: | ---: |
+| 场所 | 6 | 2 |
+| 场馆团购 | 每个场所最多 6 | 每个场所取 1 |
+| 约球活动 | 8 | 2 |
+| 普通装备 | 8 | 2 |
+| 装备秒杀 | 6 | 2 |
+
+所有运动合并后最多保留 18 张候选卡片，模型最多选择 4 张。场所补齐和场所/团购配对后最多返回 6 张底层卡片。
+
+场所类回答不会再完全服从模型的“只选一处”：有至少两处真实场所时，后端保证最终展示两处，且有真实团购的场所优先。
+
+## 9. 防止模型编造
+
+当前保护有六层：
+
+1. 价格、库存、日期、时段全部先由业务工具查询。
+2. 模型只看到裁剪后的事实和不透明 `cardId`。
+3. 模型返回的 ID 必须属于本轮候选。
+4. 后端重新补齐场所和团购关系。
+5. AI 推荐理由只能绑定到已验证卡片 ID，重复和超长理由会被拒绝。
+6. 名称、价格、库存、距离和时段仍由后端根据卡片生成。
+
+模型不会收到前端动作 payload，也不会直接执行订单、支付、加购或加入活动。
+
+模型选择失败时，系统按照 `recommendScore` 排序，所以 DashScope 暂时不可用时仍能返回真实业务结果，只是推荐解释更模板化。
+
+## 10. AgentCard 和前端渲染
+
+统一卡片结构：
+
+```text
+cardId       模型使用的不透明候选 ID
+type         place / venue_product / activity / equipment / seckill
+title        名称
+subtitle     简介
+coverUrl     图片
+price        已格式化价格
+tags         页面标签
+action       前端跳转或操作描述
+meta         后端排序、匹配和动作所需结构化字段
+```
+
+场所和团购的配对方式：
+
+1. 后端把真实高德 `placeId` 附加到团购卡片。
+2. 场所和团购都携带相同的 `sportCode + placeRank`。
+3. 前端 `agentPlaceBundles()` 用该组合把两张底层卡合并成一张横滑场所卡。
+4. 上半部分展示场所，下半部分展示同场真实团购。
+5. 没有严格匹配的真实团购时显示“暂无在线团购”，不会伪造一个商品。
+
+AI 回答渲染先执行 HTML 转义，再只允许有限的加粗和有序/无序列表格式，防止回答内容直接注入任意 HTML。
+
+## 11. 用户动作闭环
+
+| 卡片 | 点击后的行为 |
+| --- | --- |
+| 场所 | 打开场所详情；返回时回到 AI 助手 |
+| 场馆团购 | 打开对应团购详情；返回时回到 AI 助手 |
+| 约球活动 | 登录后调用加入活动接口 |
+| 装备 | 打开真实装备详情 |
+| 装备秒杀 | 打开装备页面，由用户继续确认抢购 |
+
+场馆团购卡还提供“约球”：
+
+1. 前端再次查询该商品当前可购买库存。
+2. 弹出确认面板，选择库存时段、计划人数和水平要求。
+3. 默认计划人数 4，允许 2 至 20 人；水平默认“不限”。
+4. 用户确认后调用 `/api/social/activities/book-and-create`。
+5. `VenueActivityBookingService` 在一个事务中扣库存、创建并支付场馆订单、创建约球活动和发起人成员记录。
+6. 任一步失败，订单、库存和活动一起回滚。
+
+AI 本身不会自动购买，这个组合动作必须由用户点击并确认。
+
+## 12. SSE 流程
+
+当前 SSE 事件：
+
+| 事件 | 内容 | 前端行为 |
+| --- | --- | --- |
+| `stage` | 当前阶段和提示 | 显示“正在理解/查询/生成建议” |
+| `conversation` | `conversationId` | 尽早绑定本轮会话 |
+| `cards` | 全部候选卡片 | 服务端已发送，前端当前暂未提前渲染 |
+| `done` | 最终回答、卡片、快捷问题 | 结束思考态并渲染结果 |
+| `error` | 错误码和消息 | 结束思考态并提示错误 |
+
+前端使用 `fetch + ReadableStream`，因为原生 `EventSource` 只支持 GET，无法提交聊天 JSON。
+
+生产 Nginx 对 SSE 单独关闭缓冲：
+
+```nginx
+location = /api/agent/chat/stream {
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 120s;
+    add_header X-Accel-Buffering no always;
+}
+```
+
+当前流式的是“阶段进度”，最终回答仍一次性返回，不是逐字 Token 流。
+
+## 13. MySQL、Redis 和事务
+
+MySQL：
+
+```text
+agent_conversation
+  id / user_id / title / requirements_json / status / created_at / updated_at
+
+agent_message
+  id / conversation_id / user_id / role / content / cards_json
+  / tool_name / tool_result_json / created_at
+```
+
+Redis：
+
+```text
+agent:conversation:requirement:{conversationId}  结构化短期需求
+agent:rate:user:{userId}                         登录用户限流
+agent:rate:ip:{ip}                               游客限流
+```
+
+事务边界：
+
+```text
+事务 A：创建/复用会话 + 保存用户问题
+事务外：高德 + MySQL 查询工具 + DashScope
+事务 B：保存助手消息 + 卡片 + requirements_json
+```
+
+这样不会因为模型响应慢而长时间占用数据库连接。
+
+## 14. 日志和性能定位
+
+每次请求生成 8 位 `requestId`，主要日志格式：
+
+```text
+agent.step requestId=... step=places:badminton elapsedMs=... count=...
+agent.step requestId=... step=venue-products:badminton elapsedMs=... count=...
+agent.step requestId=... step=model elapsedMs=...
+agent.total requestId=... conversationId=... elapsedMs=... cards=...
+```
+
+通过同一个 `requestId` 可以判断时间花在：
+
+- 保存问题。
+- 读取记忆。
+- 高德场所查询。
+- 场馆库存查询。
+- 活动或装备查询。
+- DashScope 模型。
+- 保存回答。
+
+工具默认 5 秒超时。单个工具失败会返回空候选，不阻断其他工具；模型失败则走本地确定性排序。
+
+## 15. 关键配置
+
+```yaml
+spring:
+  ai:
+    dashscope:
+      enabled: ${AI_DASHSCOPE_ENABLED:false}
+      api-key: ${AI_DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${AI_MODEL:qwen-plus}
+          temperature: 0.3
+          max-tokens: 1200
+
+hm:
+  agent:
+    enabled: true
+    memory-ttl-minutes: 60
+    rate-limit-per-minute: 10
+    tool-timeout-seconds: 5
+    tool-threads: 6
+```
+
+生产环境变量：
+
+```text
+AI_DASHSCOPE_ENABLED=true
+AI_DASHSCOPE_API_KEY=<DashScope API Key>
+AI_MODEL=qwen-plus
+```
+
+API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
+
+## 16. 示例：今晚附近打羽毛球
+
+用户输入：
+
+```text
+今晚附近能打球吗（羽毛球）
+```
+
+当前执行过程：
+
+1. 识别 `sportCodes=[badminton]`。
+2. 识别意图 `PLACE`。
+3. 识别日期为今天，时段为 `19:00-20:00`。
+4. 按用户经纬度查询附近高德羽毛球场所。
+5. 对前两处场所查询 `venue_inventory`。
+6. 只接受今天 `19:00-20:00` 的真实可售库存；不存在时查同日真实单场一小时。
+7. DashScope 从候选中选择。
+8. 后端保证至少保留两处真实场所，并补齐对应团购。
+9. 后端生成包含价格、时段和推荐理由的回答。
+10. 前端展示两张横滑场所卡，每张卡包含“看场所”和真实团购操作。
+
+## 17. 当前仍存在的不足
+
+### 17.1 游客消息仍会写入数据库
+
+前端游客刷新后不恢复聊天，但后端当前使用 `userId=0` 保存游客会话。它们不会显示在游客历史页面，却会在数据库积累。后续应改为匿名会话 ID、短期 Redis 会话，或增加定时清理。
+
+### 17.2 需求识别主要依靠关键词和正则
+
+当前结构化需求稳定、便宜，但对“预算别太高”“离公司近点”“周六晚饭后”这类模糊表达能力有限。后续可以增加一个受 JSON Schema 约束的模型需求提取节点，再由 Java 校验。
+
+### 17.3 场所候选目前只取前两处
+
+高德返回 6 条，但当前只为前两处进入最终工具链并查询团购。这样请求数量小、响应快，但多样性不足。后续可先批量查询可售情况，再选 3 至 4 个差异明显的场所。
+
+### 17.4 Graph 仍是确定性工作流
+
+当前已经完成 StateGraph 多节点编排和并行分支，但需求意图仍由规则解析，节点路由也由后端业务规则控制。它还没有使用模型动态规划工具，也没有启用 Graph Checkpointer；跨轮业务记忆继续由现有 MySQL + Redis 管理。这是当前安全边界，不应描述成完全自治 Agent。
+
+### 17.5 尚无 RAG
+
+博客、场馆评价和装备心得尚未向量化检索。当前回答适合价格、距离、库存和时段等结构化事实，不擅长回答“环境到底怎么样”“这个球拍长期使用感受如何”等主观问题。
+
+### 17.6 SSE 还不是完整流式回答
+
+页面能及时看到查询阶段，但正文需要等待模型选卡完成。可以在保持结构化选卡的前提下，再增加一个经过事实约束的文本流式渲染阶段。
+
+### 17.7 部分配置和字段尚未真正使用
+
+`max-history-messages`、`max-tool-calls`，以及旧的 `agent:memory:`、`agent:conversation:context:` 常量目前没有进入主链路；`agent_message.tool_name/tool_result_json` 也尚未保存工具轨迹。后续应删除冗余项或在 Graph 阶段正式使用。
+
+## 18. 推荐阅读代码顺序
+
+第一次阅读时按下面顺序：
+
+1. `frontend/src/App.vue` 的 `sendAgentMessage()`，先看前端发送了什么。
+2. `frontend/src/api/client.ts` 的 `streamApi()`，理解 SSE 如何解析。
+3. `AgentController.chatStream()`，找到后端入口。
+4. `AgentGraphWorkflow`，先看节点、并行边和汇合点。
+5. `AgentServiceImpl.beginTurn()` 到 `persistAnswer()`，理解每个节点的业务实现。
+6. `AgentRequirementService.merge()`，理解多轮上下文。
+7. 四个 `service/agent/tools` 工具类，理解候选从哪里来。
+8. `VenueItemService.agentCandidates()`，理解真实时段匹配。
+9. `AgentServiceImpl.callModelOrFallback()`，理解模型选卡和逐卡理由。
+10. `AgentServiceImpl.finalizeSelection()`，理解后端怎样补齐两处场所和团购。
+11. `AgentPersistenceService`，理解两个短事务。
+12. 回到 `App.vue` 的 `agentPlaceBundles()` 和卡片模板，理解最终页面。

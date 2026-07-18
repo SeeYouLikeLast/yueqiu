@@ -42,6 +42,13 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * 认证与用户资料的核心业务实现。
+ *
+ * <p>这里处理邮箱验证码、密码登录、自动注册、资料更新和定位同步。登录成功后不把完整用户
+ * 对象塞进 Token，而是生成随机 Token，并在 Redis Hash 中仅保存恢复请求上下文所需的
+ * userId、城市和坐标；MySQL 始终是用户资料的最终事实来源。</p>
+ */
 @Service
 public class AuthService implements IAuthService {
 
@@ -94,9 +101,12 @@ public class AuthService implements IAuthService {
     }
 
     public CodeResponse sendCode(CodeRequest request) {
+        // 1. 邮箱先标准化为小写，避免同一邮箱因大小写产生多份账号。
         String email = normalizeEmail(request.getEmail());
         assertEmail(email);
+        // 2. 同时执行 60 秒冷却和 10 分钟窗口限流，防止邮件接口被滥用。
         assertCodeRateLimit(email);
+        // 3. 验证码只保存到 Redis，过期后自动删除，不进入 MySQL。
         String code = String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
         redisTemplate.opsForValue().set(RedisConstants.LOGIN_EMAIL_CODE_KEY + email, code, codeTtl);
         sendLoginCodeMail(email, code);
@@ -105,6 +115,7 @@ public class AuthService implements IAuthService {
 
     @Transactional
     public LoginResponse register(RegisterRequest request) {
+        // 1. 统一清洗输入。用户名未填写时，根据邮箱前缀生成一个不冲突的用户名。
         String phone = normalizePhone(request.getPhone());
         String email = normalizeEmail(request.getEmail());
         String username = normalizeUsername(request.getUsername());
@@ -112,6 +123,7 @@ public class AuthService implements IAuthService {
         if (username == null) {
             username = uniqueEmailUsername(email.substring(0, email.indexOf('@')));
         }
+        // 2. 布隆过滤器负责快速预判，MySQL 精确查询和唯一索引负责最终正确性。
         if (phone != null && !phone.isBlank()) {
             assertPhone(phone);
             assertUnique(RedisConstants.BLOOM_USER_PHONE_KEY, "phone", phone, "手机号已注册");
@@ -126,6 +138,7 @@ public class AuthService implements IAuthService {
         String level = request.getLevel() == null || request.getLevel().isBlank() ? "初级" : request.getLevel().trim();
         String passwordHash = passwordService.encode(request.getPassword());
 
+        // 3. 用户主表和球友资料表在同一事务中写入，任一步失败都会整体回滚。
         UserAccount account = new UserAccount();
         account.setPhone(phone);
         account.setEmail(email);
@@ -148,6 +161,7 @@ public class AuthService implements IAuthService {
         }
         playerProfileMapper.insert(defaultPlayerProfile(userId, city, "雁塔区", 108.946465, 34.347269, level));
 
+        // 4. 数据库成功后再更新布隆过滤器，不能让“尚未落库”的值提前污染过滤器。
         if (phone != null && !phone.isBlank()) {
             bloomFilterService.put(RedisConstants.BLOOM_USER_PHONE_KEY, phone);
         }
@@ -160,6 +174,7 @@ public class AuthService implements IAuthService {
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
+        // 一个入口兼容两种方式：出现验证码相关字段时走验证码，否则走账号密码。
         if ((request.getEmail() != null && !request.getEmail().isBlank())
                 || (request.getPhone() != null && !request.getPhone().isBlank())
                 || (request.getCode() != null && !request.getCode().isBlank())) {
@@ -177,10 +192,12 @@ public class AuthService implements IAuthService {
             throw new BusinessException(401, "验证码错误或已过期");
         }
 
+        // 邮箱第一次验证码登录会自动创建账号；已有账号则直接复用。
         LoginUser user = findByEmail(email);
         if (user == null) {
             user = createUserByEmail(email);
         }
+        // 验证码只能使用一次，登录成功立即删除。
         redisTemplate.delete(RedisConstants.LOGIN_EMAIL_CODE_KEY + email);
         return new LoginResponse(createLoginToken(user), user);
     }
@@ -436,6 +453,7 @@ public class AuthService implements IAuthService {
     }
 
     private String createLoginToken(LoginUser user) {
+        // Token 只是不可猜测的 Redis 索引，不承载完整资料；资料变化后无需重新签发 Token。
         String token = UUID.randomUUID().toString().replace("-", "");
         Map<String, String> userMap = new HashMap<>();
         userMap.put("id", String.valueOf(user.getId()));
@@ -590,6 +608,7 @@ public class AuthService implements IAuthService {
         if (value == null || value.isBlank()) {
             return;
         }
+        // false 表示一定不存在，可以跳过 MySQL；true 可能是假阳性，必须精确查询。
         Boolean mightExist = bloomFilterService.mightContain(bloomKey, value);
         if (Boolean.FALSE.equals(mightExist)) {
             return;

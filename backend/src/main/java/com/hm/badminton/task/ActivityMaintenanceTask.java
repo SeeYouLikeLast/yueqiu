@@ -25,14 +25,14 @@ public class ActivityMaintenanceTask {
 
     /**
      * 启动时补执行一次，防止应用在凌晨任务执行时处于停机状态。
-     * 更新只影响已过期的 DEMO_* 活动，因此重复执行是幂等的。
+     * 更新只影响已过期的 DEMO_* 活动和排序绑定演示库存，因此重复执行是幂等的。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void refreshAfterStartup() {
         refresh("startup");
     }
 
-    /** 每天 00:05 刷新滚动演示活动，并关闭已经结束的真实用户活动。 */
+    /** 每天 00:05 刷新滚动演示活动/库存，并关闭已经结束的真实用户活动。 */
     @Scheduled(cron = "0 5 0 * * ?", zone = "Asia/Shanghai")
     public void refreshEveryDay() {
         refresh("daily");
@@ -42,9 +42,14 @@ public class ActivityMaintenanceTask {
         try {
             IActivityMaintenanceService.ActivityRefreshResult result =
                     activityMaintenanceService.refreshActivityTimes(LocalDateTime.now(BUSINESS_ZONE));
-            if (result.getRefreshedDemoActivities() > 0 || result.getFinishedUserActivities() > 0) {
-                log.info("activity maintenance finished, trigger={}, demoRefreshed={}, userFinished={}",
-                        trigger, result.getRefreshedDemoActivities(), result.getFinishedUserActivities());
+            if (result.getRefreshedDemoActivities() > 0
+                    || result.getFinishedUserActivities() > 0
+                    || result.getRefreshedDemoInventories() > 0) {
+                log.info("demo maintenance finished, trigger={}, activitiesRefreshed={}, inventoriesRefreshed={}, userActivitiesFinished={}",
+                        trigger,
+                        result.getRefreshedDemoActivities(),
+                        result.getRefreshedDemoInventories(),
+                        result.getFinishedUserActivities());
             }
         } catch (RuntimeException e) {
             // 维护失败不阻断应用启动；下一次定时任务会再次尝试。

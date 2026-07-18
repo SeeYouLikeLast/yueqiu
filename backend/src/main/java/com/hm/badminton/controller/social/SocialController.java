@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+/** 球友资料、附近球友、约球活动以及购买后发起活动入口。 */
 @RestController
 @RequestMapping("/social")
 public class SocialController {

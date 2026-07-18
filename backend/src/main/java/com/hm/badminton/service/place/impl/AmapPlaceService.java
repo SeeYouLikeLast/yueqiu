@@ -25,6 +25,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * 高德地图 Web 服务适配层。
+ *
+ * <p>负责真实 POI 附近搜索、自动扩大半径、逆地理编码和 IP 定位。第三方响应先转换成项目自己的
+ * {@link AmapPlace}，再交给上层使用；Redis 短缓存用于降低高德调用次数和首屏延迟。</p>
+ */
 @Service
 public class AmapPlaceService implements IAmapPlaceService {
 

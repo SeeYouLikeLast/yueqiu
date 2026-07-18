@@ -101,6 +101,8 @@ hm:
     max-tool-calls: 6
     memory-ttl-minutes: 60
     rate-limit-per-minute: 10
+    tool-timeout-seconds: 5
+    tool-threads: 6
   seckill:
     # 默认优先 RocketMQ 异步落库；MQ 未部署或投递失败时可降级为同步事务落库。
     mq-enabled: ${SECKILL_MQ_ENABLED:true}

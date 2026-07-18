@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// 新手阅读地图：本文件采用 Vue <script setup>，从上到下依次是类型定义、响应式状态、
+// 数据加载函数、用户操作函数和生命周期；文件末尾依次是 template 与 scoped style。
+// 阅读某个页面时不要从头硬啃：先在 template 搜索页面标题，再从 @click/数据变量反查同名函数，
+// 最后沿 api('/...') 对照后端 Controller -> Service -> Mapper 阅读完整链路。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
@@ -31,7 +35,7 @@ import {
   X,
   Zap
 } from 'lucide-vue-next'
-import { api, clearToken, getToken, PageResult, setToken } from './api/client'
+import { api, clearToken, getToken, PageResult, setToken, streamApi } from './api/client'
 import { locateWithAmapFirst, type PreciseLocation } from './api/amapGeolocation'
 
 type Tab = 'home' | 'seckill' | 'social' | 'equipment' | 'profile' | 'assistant'
@@ -307,6 +311,7 @@ type AgentAction = {
 }
 
 type AgentCard = {
+  cardId?: string
   type: 'place' | 'venue_product' | 'activity' | 'equipment' | 'seckill'
   title: string
   subtitle?: string
@@ -453,6 +458,7 @@ const agentPendingQuickReply = ref('')
 const agentSelectedSportCodes = ref<string[]>([])
 const agentAiEnabled = ref(false)
 const agentThinking = ref(false)
+const agentProgressText = ref('')
 const agentHistoryLoaded = ref(false)
 const agentHistoryVisible = ref(false)
 const deletingAgentConversation = ref<AgentConversation | null>(null)
@@ -875,6 +881,7 @@ function resetAgentChat() {
   agentPendingQuickReply.value = ''
   agentSelectedSportCodes.value = []
   agentThinking.value = false
+  agentProgressText.value = ''
   agentHistoryLoaded.value = false
   agentHistoryVisible.value = false
   deletingAgentConversation.value = null
@@ -903,14 +910,14 @@ async function loadLatestAgentHistory() {
     return
   }
   try {
-    const conversations = await api<AgentConversation[]>('/api/agent/conversations')
+    const conversations = await api<AgentConversation[]>('/agent/conversations')
     agentConversations.value = conversations
     const latest = conversations[0]
     if (!latest) {
       agentHistoryLoaded.value = true
       return
     }
-    const records = await api<AgentMessageRecord[]>(`/api/agent/conversations/${latest.id}/messages`)
+    const records = await api<AgentMessageRecord[]>(`/agent/conversations/${latest.id}/messages`)
     const restored = records.map(toAgentMessage).filter(Boolean) as AgentMessage[]
     agentConversationId.value = latest.id
     agentMessages.value = restored.length ? restored : defaultAgentMessages()
@@ -929,7 +936,7 @@ async function loadAgentConversations() {
   }
   loadingAgentHistory.value = true
   try {
-    agentConversations.value = await api<AgentConversation[]>('/api/agent/conversations')
+    agentConversations.value = await api<AgentConversation[]>('/agent/conversations')
   } catch (error) {
     message.value = handleRequestError(error)
   } finally {
@@ -939,7 +946,7 @@ async function loadAgentConversations() {
 
 async function loadAgentStatus() {
   try {
-    const status = await api<AgentStatus>('/api/agent/status')
+    const status = await api<AgentStatus>('/agent/status')
     agentAiEnabled.value = status.aiEnabled
   } catch {
     agentAiEnabled.value = false
@@ -969,7 +976,7 @@ async function switchAgentConversation(conversation: AgentConversation) {
   }
   loadingAgentHistory.value = true
   try {
-    const records = await api<AgentMessageRecord[]>(`/api/agent/conversations/${conversation.id}/messages`)
+    const records = await api<AgentMessageRecord[]>(`/agent/conversations/${conversation.id}/messages`)
     const restored = records.map(toAgentMessage).filter(Boolean) as AgentMessage[]
     agentConversationId.value = conversation.id
     agentMessages.value = restored.length ? restored : defaultAgentMessages()
@@ -993,6 +1000,7 @@ function startNewAgentConversation() {
   agentPendingQuickReply.value = ''
   agentSelectedSportCodes.value = []
   agentThinking.value = false
+  agentProgressText.value = ''
   agentInput.value = ''
   void nextTick(() => {
     document.getElementById('agent-input')?.focus()
@@ -1016,7 +1024,7 @@ async function confirmDeleteAgentConversation() {
   const conversation = deletingAgentConversation.value
   loadingAgentHistory.value = true
   try {
-    await api(`/api/agent/conversations/${conversation.id}`, { method: 'DELETE' })
+    await api(`/agent/conversations/${conversation.id}`, { method: 'DELETE' })
     agentConversations.value = agentConversations.value.filter((item) => item.id !== conversation.id)
     deletingAgentConversation.value = null
     if (conversation.id === agentConversationId.value) {
@@ -1111,7 +1119,7 @@ async function wrap(action: () => Promise<void>, okMessage?: string) {
 
 async function sendLoginCode() {
   await wrap(async () => {
-    const result = await api<LoginCodeResponse>('/api/auth/code', {
+    const result = await api<LoginCodeResponse>('/auth/code', {
       method: 'POST',
       body: JSON.stringify({ email: loginForm.email.trim() })
     })
@@ -1131,7 +1139,7 @@ async function login() {
           email: loginForm.email.trim(),
           code: loginForm.code.trim()
         }
-    const result = await api<{ token: string }>('/api/auth/login', {
+    const result = await api<{ token: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(body)
     })
@@ -1147,7 +1155,7 @@ async function login() {
 }
 
 async function loadSports() {
-  sports.value = await api<SportType[]>('/api/sports')
+  sports.value = await api<SportType[]>('/sports')
 }
 
 function appendByKey<T>(current: T[], next: T[], keyOf: (item: T) => string | number) {
@@ -1240,7 +1248,7 @@ async function loadPlaces(page = 1, append = false) {
   if (placeQuery.radius !== DEFAULT_PLACE_RADIUS) params.set('radius', String(placeQuery.radius))
   setPagingParams(params, page, PLACE_PAGE_SIZE, 20)
   setTrimmedParam(params, 'keyword', placeQuery.keyword)
-  const result = await api<PageResult<Place>>(`/api/places/nearby?${params}`, {
+  const result = await api<PageResult<Place>>(`/places/nearby?${params}`, {
     headers: locationCityHeader()
   })
   places.value = append ? appendById(places.value, result.records) : result.records
@@ -1263,7 +1271,7 @@ async function loadVenueItemsForPlace(place: Place) {
     })
     const productSport = selectedSport.value || place.sportCode
     if (productSport) params.set('sport', productSport)
-    const productsForPlace = await api<VenueItem[]>(`/api/items/1?${params}`)
+    const productsForPlace = await api<VenueItem[]>(`/items/1?${params}`)
     const mappedVenueItems = productsForPlace.map((product) => productWithPlaceContext(product, place))
     venueItems.value = {
       ...venueItems.value,
@@ -1285,7 +1293,7 @@ async function loadVenueSaleItems(page = 1, append = false) {
   if (venueSaleView.value?.productType) params.set('category', venueSaleView.value.productType)
   setTrimmedParam(params, 'keyword', placeQuery.keyword)
   setPagingParams(params, page, 12, 12)
-  const result = await api<PageResult<VenueItem>>(`/api/items/1?${params}`)
+  const result = await api<PageResult<VenueItem>>(`/items/1?${params}`)
   const mappedRecords = result.records.map((product) => productWithPlaceContext(product, placeForEquipmentItem(product)))
   venueSaleItems.value = append ? appendById(venueSaleItems.value, mappedRecords) : mappedRecords
   venueSalesPage.value = result.page
@@ -1301,7 +1309,7 @@ async function loadEquipmentItems(page = 1, append = false) {
   if (productQuery.categoryId) params.set('categoryId', productQuery.categoryId)
   setTrimmedParam(params, 'keyword', productQuery.keyword)
   setPagingParams(params, page, PRODUCT_PAGE_SIZE, 12)
-  const result = await api<PageResult<EquipmentItem>>(`/api/items/2?${params}`)
+  const result = await api<PageResult<EquipmentItem>>(`/items/2?${params}`)
   products.value = append ? appendById(products.value, result.records) : result.records
   productsPage.value = result.page
   productsTotal.value = result.total
@@ -1313,7 +1321,7 @@ async function loadEquipmentItemCategories() {
     productCategorySport.value = selectedSport.value
     return
   }
-  categories.value = await api<Category[]>(`/api/categories/2?${new URLSearchParams({ sport: selectedSport.value })}`)
+  categories.value = await api<Category[]>(`/categories/2?${new URLSearchParams({ sport: selectedSport.value })}`)
   productCategorySport.value = selectedSport.value
 }
 
@@ -1321,7 +1329,7 @@ async function loadSeckill() {
   const params = new URLSearchParams()
   if (selectedSport.value) params.set('sport', selectedSport.value)
   if (productQuery.categoryId) params.set('categoryId', productQuery.categoryId)
-  seckillActivities.value = await api<SeckillActivity[]>(`/api/seckill/2?${params}`)
+  seckillActivities.value = await api<SeckillActivity[]>(`/seckill/2?${params}`)
 }
 
 async function loadBlogs(page = 1, append = false) {
@@ -1341,7 +1349,7 @@ async function loadBlogs(page = 1, append = false) {
       params.set('lastId', String(followFeedLastId.value))
       params.set('offset', String(followFeedOffset.value))
     }
-    const result = await api<ScrollResult<BlogPost>>(`/api/blogs/of/follow?${params}`)
+    const result = await api<ScrollResult<BlogPost>>(`/blogs/of/follow?${params}`)
     const records = result.list || []
     blogs.value = append ? appendById(blogs.value, records) : records
     blogsPage.value = page
@@ -1357,7 +1365,7 @@ async function loadBlogs(page = 1, append = false) {
   if (blogChannel.value === 'sport' && blogSport.value) params.set('sport', blogSport.value)
   setTrimmedParam(params, 'keyword', blogKeyword.value)
   setPagingParams(params, page, BLOG_PAGE_SIZE, 10)
-  const result = await api<PageResult<BlogPost>>(`/api/blogs?${params}`)
+  const result = await api<PageResult<BlogPost>>(`/blogs?${params}`)
   blogs.value = append ? appendById(blogs.value, result.records) : result.records
   blogsPage.value = result.page
   blogsTotal.value = result.total
@@ -1370,7 +1378,7 @@ async function loadSeckillCategories() {
     return
   }
   const categoryParams = new URLSearchParams({ sport: selectedSport.value })
-  seckillCategories.value = await api<Category[]>(`/api/categories/2?${categoryParams}`)
+  seckillCategories.value = await api<Category[]>(`/categories/2?${categoryParams}`)
   seckillCategorySport.value = selectedSport.value
 }
 
@@ -1382,7 +1390,7 @@ async function loadPlayers(page = 1, append = false) {
     params.set('lat', String(placeQuery.lat))
   }
   setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
-  const playersResult = await api<PageResult<Player>>(`/api/social/players?${params}`, {
+  const playersResult = await api<PageResult<Player>>(`/social/players?${params}`, {
     headers: locationCityHeader()
   })
   players.value = append ? appendByKey(players.value, playersResult.records, (player) => player.userId) : playersResult.records
@@ -1394,7 +1402,7 @@ async function loadActivities(page = 1, append = false) {
   const params = new URLSearchParams({ scope: activityScope.value })
   if (selectedSport.value) params.set('sport', selectedSport.value)
   setPagingParams(params, page, SOCIAL_PAGE_SIZE, 12)
-  const activitiesResult = await api<PageResult<SportActivity>>(`/api/social/activities?${params}`, {
+  const activitiesResult = await api<PageResult<SportActivity>>(`/social/activities?${params}`, {
     headers: locationCityHeader()
   })
   activities.value = append ? appendById(activities.value, activitiesResult.records) : activitiesResult.records
@@ -1417,7 +1425,7 @@ async function loadCartItems(force = false) {
     return
   }
   if (cartLoaded.value && !force) return
-  cartItems.value = await api<CartItem[]>('/api/cart')
+  cartItems.value = await api<CartItem[]>('/cart')
   cartCount.value = cartItems.value.reduce((sum, item) => sum + item.quantity, 0)
   cartLoaded.value = true
 }
@@ -1427,7 +1435,7 @@ async function loadVenueOrders() {
     venueOrders.value = []
     return
   }
-  venueOrders.value = await api<ProfileOrderCard[]>('/api/orders/1')
+  venueOrders.value = await api<ProfileOrderCard[]>('/orders/1')
 }
 
 async function loadEquipmentOrders() {
@@ -1435,7 +1443,7 @@ async function loadEquipmentOrders() {
     equipmentOrders.value = []
     return
   }
-  equipmentOrders.value = await api<ProfileOrderCard[]>('/api/orders/2')
+  equipmentOrders.value = await api<ProfileOrderCard[]>('/orders/2')
 }
 
 async function loadOrderBundle(force = false) {
@@ -1463,7 +1471,7 @@ async function loadUserProfile() {
     userProfile.value = null
     return
   }
-  userProfile.value = await api<UserProfile>('/api/auth/me')
+  userProfile.value = await api<UserProfile>('/auth/me')
 }
 
 async function loadSocialProfile() {
@@ -1472,7 +1480,7 @@ async function loadSocialProfile() {
     return
   }
   try {
-    socialProfile.value = await api<Player>('/api/social/profile/me')
+    socialProfile.value = await api<Player>('/social/profile/me')
   } catch {
     socialProfile.value = null
   }
@@ -1488,13 +1496,13 @@ async function ensureUserProfile() {
 }
 
 async function loadPublicProfile(userId: number) {
-  viewedUserProfile.value = await api<UserPublicProfile>(`/api/auth/users/${userId}`)
+  viewedUserProfile.value = await api<UserPublicProfile>(`/auth/users/${userId}`)
 }
 
 async function loadProfileBlogs(userId: number, page = 1, append = false) {
   const params = new URLSearchParams()
   setPagingParams(params, page, BLOG_PAGE_SIZE, 10)
-  const result = await api<PageResult<BlogPost>>(`/api/blogs/of/user/${userId}?${params}`)
+  const result = await api<PageResult<BlogPost>>(`/blogs/of/user/${userId}?${params}`)
   profileBlogs.value = append ? appendById(profileBlogs.value, result.records) : result.records
   profileBlogsPage.value = result.page
   profileBlogsTotal.value = result.total
@@ -1862,7 +1870,7 @@ async function toggleBlogLike(blog: BlogPost) {
   blog.liked += liked ? -1 : 1
   syncBlogLikeState(blog.id, blog.isLiked, blog.liked)
   try {
-    await api(`/api/blogs/${blog.id}/like`, { method: 'PUT' })
+    await api(`/blogs/${blog.id}/like`, { method: 'PUT' })
   } catch (error) {
     blog.isLiked = liked
     blog.liked += liked ? 1 : -1
@@ -1875,7 +1883,7 @@ async function deleteBlog(blog: BlogPost) {
   if (!isOwnBlog(blog)) return
   if (!window.confirm('确定删除这条动态吗？')) return
   await wrap(async () => {
-    await api(`/api/blogs/${blog.id}`, { method: 'DELETE' })
+    await api(`/blogs/${blog.id}`, { method: 'DELETE' })
     removeBlogFromState(blog.id)
   }, '动态已删除')
 }
@@ -1884,7 +1892,7 @@ async function toggleBlogFollow(blog: BlogPost) {
   if (!requireLogin('请先登录后关注作者')) return
   const next = !blog.followed
   await wrap(async () => {
-    await api(`/api/follows/${blog.userId}/${next}`, { method: 'PUT' })
+    await api(`/follows/${blog.userId}/${next}`, { method: 'PUT' })
     syncBlogFollowState(blog.userId, next)
   }, next ? '已关注作者' : '已取消关注')
 }
@@ -1893,7 +1901,7 @@ async function openBlogDetail(blog: BlogPost) {
   await wrap(async () => {
     await ensureUserProfile()
     relatedBlogReturn.value = null
-    selectedBlog.value = await api<BlogPost>(`/api/blogs/${blog.id}`)
+    selectedBlog.value = await api<BlogPost>(`/blogs/${blog.id}`)
   })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
@@ -2002,7 +2010,7 @@ async function publishBlog() {
   }
   const images = blogPublishForm.imageUrls
   await wrap(async () => {
-    await api<{ blogId: number }>('/api/blogs', {
+    await api<{ blogId: number }>('/blogs', {
       method: 'POST',
       body: JSON.stringify({
         sportCode: blogPublishForm.sportCode,
@@ -2081,7 +2089,7 @@ async function toggleProfileFollow() {
   const userId = viewedUserProfile.value.id
   const next = !viewedUserProfile.value.followed
   await wrap(async () => {
-    await api(`/api/follows/${userId}/${next}`, { method: 'PUT' })
+    await api(`/follows/${userId}/${next}`, { method: 'PUT' })
     if (viewedUserProfile.value) {
       syncBlogFollowState(userId, next)
       viewedUserProfile.value = { ...viewedUserProfile.value, followed: next }
@@ -2100,7 +2108,7 @@ async function openBlogRelated(blog: BlogPost) {
     productsTotal.value = 0
     await wrap(async () => {
       const [detail] = await Promise.all([
-        api<EquipmentItem>(`/api/items/2/${blog.relatedId}`),
+        api<EquipmentItem>(`/items/2/${blog.relatedId}`),
         loadEquipmentItems(),
         loadSeckill()
       ])
@@ -2120,7 +2128,7 @@ async function openBlogRelated(blog: BlogPost) {
       await loadPlaces()
     }
     const [detail] = await Promise.all([
-      api<VenueItem>(`/api/items/1/${blog.relatedId}`),
+      api<VenueItem>(`/items/1/${blog.relatedId}`),
       loadVenueSaleItems()
     ])
     const mapped = productWithPlaceContext(detail, placeForEquipmentItem(detail))
@@ -2177,7 +2185,7 @@ async function uploadFile(file: File, bizType: string, bizId?: number) {
   if (bizId) {
     formData.append('bizId', String(bizId))
   }
-  return api<FileMetadata>('/api/files/upload', {
+  return api<FileMetadata>('/files/upload', {
     method: 'POST',
     body: formData
   })
@@ -2211,7 +2219,7 @@ async function saveSocialProfile() {
     return
   }
   await wrap(async () => {
-    await api('/api/auth/me', {
+    await api('/auth/me', {
       method: 'PUT',
       body: JSON.stringify({
         username: profileForm.username.trim(),
@@ -2225,7 +2233,7 @@ async function saveSocialProfile() {
         preferTime: profileForm.availableTime.trim()
       })
     })
-    await api('/api/social/profile/me', {
+    await api('/social/profile/me', {
       method: 'POST',
       body: JSON.stringify({
         sportCode: profileForm.sportCode,
@@ -2308,7 +2316,7 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
     try {
       located = await locateWithAmapFirst()
     } catch (preciseLocationError) {
-      const fallback = await api<IpLocation>('/api/places/ip-location')
+      const fallback = await api<IpLocation>('/places/ip-location')
       if (!Number.isFinite(fallback.lng) || !Number.isFinite(fallback.lat)) {
         throw preciseLocationError
       }
@@ -2329,7 +2337,7 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
       placeQuery.preciseAddress = located.shortAddress || located.formattedAddress || ''
     } else {
       try {
-        const location = await api<RegeoLocation>(`/api/places/regeo?${new URLSearchParams({
+        const location = await api<RegeoLocation>(`/places/regeo?${new URLSearchParams({
           lng: String(placeQuery.lng),
           lat: String(placeQuery.lat)
         })}`)
@@ -2341,7 +2349,7 @@ async function refreshCurrentLocation(options: { reload?: boolean; showMessage?:
       }
     }
     if (loggedIn.value && located.source !== 'ip' && located.source !== 'default') {
-      await api('/api/auth/location', {
+      await api('/auth/location', {
         method: 'PUT',
         body: JSON.stringify({
           city: placeQuery.city,
@@ -2521,7 +2529,7 @@ function confirmAgentQuickReply() {
   closeAgentSportPicker()
   // 用户在选择器中点了“不限”时，必须保留“全运动”的语义，
   // 不能再回退为首页当前选中的单一运动。
-  void sendAgentMessage(content, sportCodes, true)
+  void sendAgentMessage(content, sportCodes, sportCodes.length === 0)
 }
 
 async function sendAgentMessage(
@@ -2544,10 +2552,13 @@ async function sendAgentMessage(
   ]
   agentQuickReplies.value = []
   agentThinking.value = true
+  agentProgressText.value = '正在理解你的需求'
   await nextTick()
   scrollAgentMessageIntoView(userMessageId)
   await wrap(async () => {
-    const result = await api<AgentChatResponse>('/api/agent/chat', {
+    let result: AgentChatResponse | undefined
+    let streamError = ''
+    await streamApi('/agent/chat/stream', {
       method: 'POST',
       body: JSON.stringify({
         conversationId: agentConversationId.value,
@@ -2556,9 +2567,25 @@ async function sendAgentMessage(
         sportCodes: effectiveSportCodes,
         city: placeQuery.city,
         lng: placeQuery.lng,
-        lat: placeQuery.lat
+        lat: placeQuery.lat,
+        allSportsRequested
       })
+    }, (event, data) => {
+      if (event === 'conversation') {
+        const payload = data as { conversationId?: number }
+        if (payload.conversationId) agentConversationId.value = payload.conversationId
+      } else if (event === 'stage') {
+        const payload = data as { message?: string }
+        if (payload.message) agentProgressText.value = payload.message
+      } else if (event === 'done') {
+        result = data as AgentChatResponse
+      } else if (event === 'error') {
+        const payload = data as { message?: string }
+        streamError = payload.message || 'AI 助手请求失败，请稍后重试'
+      }
     })
+    if (streamError) throw new Error(streamError)
+    if (!result) throw new Error('AI 助手响应未完成，请稍后重试')
     agentConversationId.value = result.conversationId
     agentQuickReplies.value = agentNextQuickReplies(result.quickReplies, result.cards || [], result.answer)
     agentAiEnabled.value = result.aiEnabled
@@ -2572,12 +2599,14 @@ async function sendAgentMessage(
       }
     ]
     agentThinking.value = false
+    agentProgressText.value = ''
     await nextTick()
     scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
   })
   if (agentThinking.value) {
     agentThinking.value = false
   }
+  agentProgressText.value = ''
   if (!agentQuickReplies.value.length) {
     syncAgentQuickRepliesFromMessages()
   }
@@ -2593,10 +2622,45 @@ function escapeHtml(value: string) {
 }
 
 function renderAgentContent(content: string) {
-  return escapeHtml(stripInternalAgentFields(content))
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n{2,}/g, '<br><br>')
-    .replace(/\n/g, '<br>')
+  const inline = (value: string) => value.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  const lines = escapeHtml(stripInternalAgentFields(content)).split(/\r?\n/)
+  const html: string[] = []
+  let orderedItems: string[] = []
+  let unorderedItems: string[] = []
+  const flushLists = () => {
+    if (orderedItems.length) {
+      html.push(`<ol class="agent-answer-list">${orderedItems.map((item) => `<li>${inline(item)}</li>`).join('')}</ol>`)
+      orderedItems = []
+    }
+    if (unorderedItems.length) {
+      html.push(`<ul class="agent-answer-list">${unorderedItems.map((item) => `<li>${inline(item)}</li>`).join('')}</ul>`)
+      unorderedItems = []
+    }
+  }
+  lines.forEach((line) => {
+    const ordered = line.match(/^\s*\d+[.、]\s*(.+)$/)
+    if (ordered) {
+      unorderedItems.length && flushLists()
+      orderedItems.push(ordered[1])
+      return
+    }
+    const unordered = line.match(/^\s*[-•]\s*(.+)$/)
+    if (unordered) {
+      orderedItems.length && flushLists()
+      unorderedItems.push(unordered[1])
+      return
+    }
+    flushLists()
+    if (!line.trim()) {
+      if (html.length && html[html.length - 1] !== '<div class="agent-answer-gap"></div>') {
+        html.push('<div class="agent-answer-gap"></div>')
+      }
+      return
+    }
+    html.push(`<div class="agent-answer-line">${inline(line)}</div>`)
+  })
+  flushLists()
+  return html.join('')
 }
 
 function stripInternalAgentFields(content: string) {
@@ -2698,7 +2762,7 @@ async function prepareAgentVenueBooking(product: AgentCard, place?: AgentCard) {
     return
   }
   await wrap(async () => {
-    const inventories = await api<VenueInventory[]>(`/api/items/1/${productId}/inventories`)
+    const inventories = await api<VenueInventory[]>(`/items/1/${productId}/inventories`)
     const available = inventories.filter((item) => item.purchasable)
     if (!available.length) {
       message.value = '该团购当前没有可购买的时段'
@@ -2738,7 +2802,7 @@ async function confirmAgentVenueBooking() {
   }
   await wrap(async () => {
     agentVenueBookingSubmitting.value = true
-    const result = await api<{ venueOrderId: number; verifyCode: string; activityId: number }>('/api/social/activities/book-and-create', {
+    const result = await api<{ venueOrderId: number; verifyCode: string; activityId: number }>('/social/activities/book-and-create', {
       method: 'POST',
       body: JSON.stringify({
         productId,
@@ -2841,7 +2905,7 @@ async function openAgentVenueProduct(card: AgentCard) {
     if (!places.value.length) {
       await loadPlaces()
     }
-    const detail = await api<VenueItem>(`/api/items/1/${id}`)
+    const detail = await api<VenueItem>(`/items/1/${id}`)
     const mapped = productWithPlaceContext(detail, placeForEquipmentItem(detail))
     venueSaleItems.value = [mapped]
     venueSalesTotal.value = 1
@@ -2857,7 +2921,7 @@ async function openAgentEquipment(card: AgentCard) {
   productQuery.keyword = ''
   productQuery.categoryId = ''
   await wrap(async () => {
-    const detail = await api<EquipmentItem>(`/api/items/2/${id}`)
+    const detail = await api<EquipmentItem>(`/items/2/${id}`)
     selectedSport.value = detail.sportCode || selectedSport.value
     await Promise.all([loadEquipmentItems(), loadSeckill()])
     products.value = [detail, ...products.value.filter((item) => item.id !== detail.id)]
@@ -2911,7 +2975,7 @@ async function switchPlaceDetailTab(tab: 'deals' | 'reviews') {
 
 async function loadVenueReviewsForPlace(place: Place) {
   const sport = place.sportCode || selectedSport.value
-  venueReviews.value = await api<VenueReview[]>(`/api/venues/reviews/${sport}/${placeRankFor(place)}`, {
+  venueReviews.value = await api<VenueReview[]>(`/venues/reviews/${sport}/${placeRankFor(place)}`, {
     headers: locationCityHeader(place.city || placeQuery.city)
   })
 }
@@ -2926,7 +2990,7 @@ async function buyVenueItem(product: VenueItem) {
       message.value = '该项目暂无可购买时段'
       return
     }
-    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/api/payments', {
+    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/payments', {
       method: 'POST',
       body: JSON.stringify({
         type: 1,
@@ -2945,7 +3009,7 @@ async function buyVenueItem(product: VenueItem) {
 async function addCart(product: EquipmentItem) {
   if (!requireLogin('请先登录后加入购物车')) return
   await wrap(async () => {
-    await api('/api/cart', {
+    await api('/cart', {
       method: 'POST',
       body: JSON.stringify({ type: 2, productId: product.id, quantity: 1 })
     })
@@ -2962,7 +3026,7 @@ async function addVenueCart(product: VenueItem) {
       message.value = '该项目暂无可购买时段'
       return
     }
-    await api('/api/cart', {
+    await api('/cart', {
       method: 'POST',
       body: JSON.stringify({ type: 1, productId: product.id, inventoryId: inventory.id, quantity: 1 })
     })
@@ -2974,7 +3038,7 @@ async function addVenueCart(product: VenueItem) {
 async function buyEquipmentNow(product: EquipmentItem) {
   if (!requireLogin('请先登录后购买装备')) return
   await wrap(async () => {
-    await api('/api/payments', {
+    await api('/payments', {
       method: 'POST',
       body: JSON.stringify({ type: 2, productId: product.id, quantity: 1, address: profileAddress() })
     })
@@ -2993,7 +3057,7 @@ async function checkoutCart() {
     return
   }
   await wrap(async () => {
-    await api<{ orderId: number }>('/api/payments/cart', {
+    await api<{ orderId: number }>('/payments/cart', {
       method: 'POST',
       body: JSON.stringify({ address: profileAddress() })
     })
@@ -3014,7 +3078,7 @@ async function showProfileCart() {
 
 async function removeCartItem(item: CartItem) {
   await wrap(async () => {
-    await api(`/api/cart/${item.type}/${item.id}`, { method: 'DELETE' })
+    await api(`/cart/${item.type}/${item.id}`, { method: 'DELETE' })
     cartItems.value = cartItems.value.filter((record) => !(record.type === item.type && record.id === item.id))
     cartCount.value = cartItems.value.reduce((sum, record) => sum + record.quantity, 0)
     cartLoaded.value = true
@@ -3025,7 +3089,7 @@ async function updateCartQuantity(item: CartItem, quantity: number) {
   const nextQuantity = Math.min(Math.max(quantity, 1), 99)
   if (nextQuantity === item.quantity) return
   await wrap(async () => {
-    await api(`/api/cart/${item.type}/${item.id}`, {
+    await api(`/cart/${item.type}/${item.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ quantity: nextQuantity })
     })
@@ -3045,7 +3109,7 @@ async function updateCartQuantity(item: CartItem, quantity: number) {
 async function submitSeckill(activityId: number) {
   if (!requireLogin('请先登录后参与秒杀')) return
   await wrap(async () => {
-    const result = await api<{ orderId: number }>(`/api/seckill/2/${activityId}`, { method: 'POST' })
+    const result = await api<{ orderId: number }>(`/seckill/2/${activityId}`, { method: 'POST' })
     message.value = `抢购请求已进入队列，订单号 ${result.orderId}`
     ordersLoaded.value = false
     await loadSeckill()
@@ -3068,7 +3132,7 @@ async function createActivity() {
     return
   }
   await wrap(async () => {
-    await api('/api/social/activities', {
+    await api('/social/activities', {
       method: 'POST',
       body: JSON.stringify({
         ...activityForm,
@@ -3092,7 +3156,7 @@ async function createActivity() {
 async function joinActivity(id: number) {
   if (!requireLogin('请先登录后加入活动')) return
   await wrap(async () => {
-    await api(`/api/social/activities/${id}/join`, { method: 'POST' })
+    await api(`/social/activities/${id}/join`, { method: 'POST' })
     await loadActivities()
   }, '已加入活动')
 }
@@ -3158,7 +3222,7 @@ async function ensureVenueInventories(product: VenueItem) {
   if (Object.prototype.hasOwnProperty.call(inventoriesByVenueItem.value, product.id)) {
     return inventoriesByVenueItem.value[product.id] || []
   }
-  const inventories = await api<VenueInventory[]>(`/api/items/1/${product.id}/inventories`)
+  const inventories = await api<VenueInventory[]>(`/items/1/${product.id}/inventories`)
   inventoriesByVenueItem.value = {
     ...inventoriesByVenueItem.value,
     [product.id]: inventories
@@ -3617,7 +3681,7 @@ onBeforeUnmount(() => {
               <div class="dual-action">
                 <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
                 <button class="primary pill-buy" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
-                  {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+                  {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
                 </button>
               </div>
             </article>
@@ -3770,7 +3834,7 @@ onBeforeUnmount(() => {
                     <div class="dual-action compact-actions">
                       <button type="button" @click="addVenueCart(item)" :disabled="!item.purchasable">加购</button>
                       <button class="primary" @click="buyVenueItem(item)" :disabled="buyingVenueItemId === item.id || !item.purchasable">
-                        {{ buyingVenueItemId === item.id ? '购买中' : '抢购' }}
+                        {{ buyingVenueItemId === item.id ? '购买中' : '购买' }}
                       </button>
                     </div>
                   </div>
@@ -4036,7 +4100,7 @@ onBeforeUnmount(() => {
             :class="item.role"
           >
             <div class="agent-bubble">
-              <p v-if="item.role === 'assistant'" v-html="renderAgentContent(item.content)"></p>
+              <div v-if="item.role === 'assistant'" class="agent-rich-text" v-html="renderAgentContent(item.content)"></div>
               <p v-else>{{ item.content }}</p>
             </div>
             <template v-if="item.cards?.length">
@@ -4155,7 +4219,7 @@ onBeforeUnmount(() => {
           </section>
           <article v-if="agentThinking" class="agent-message assistant agent-thinking">
             <div class="agent-bubble">
-              <span>AI 正在思考</span>
+              <span>{{ agentProgressText || 'AI 正在思考' }}</span>
               <i></i>
               <i></i>
               <i></i>

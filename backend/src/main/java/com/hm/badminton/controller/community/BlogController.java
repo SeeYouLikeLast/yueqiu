@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+/** 社区动态列表、详情、发布、删除、点赞和关注流入口。 */
 @RestController
 @RequestMapping("/blogs")
 public class BlogController {

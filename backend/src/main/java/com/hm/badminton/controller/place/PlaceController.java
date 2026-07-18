@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+/** 高德附近场所、逆地理编码和 IP 定位入口。 */
 @RestController
 @RequestMapping("/places")
 public class PlaceController {
