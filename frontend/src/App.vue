@@ -982,8 +982,7 @@ async function switchAgentConversation(conversation: AgentConversation) {
     agentMessages.value = restored.length ? restored : defaultAgentMessages()
     syncAgentQuickRepliesFromMessages()
     closeAgentHistory()
-    await nextTick()
-    document.getElementById('agent-chat-bottom')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    await positionAgentOnEntry()
   } catch (error) {
     message.value = handleRequestError(error)
   } finally {
@@ -1002,9 +1001,7 @@ function startNewAgentConversation() {
   agentThinking.value = false
   agentProgressText.value = ''
   agentInput.value = ''
-  void nextTick(() => {
-    document.getElementById('agent-input')?.focus()
-  })
+  scrollToPageTop()
 }
 
 function askDeleteAgentConversation(conversation: AgentConversation) {
@@ -1685,6 +1682,9 @@ async function switchTab(tab: Tab) {
     profileBlogsTotal.value = 0
   }
   await wrap(loadCurrentTab)
+  if (tab === 'assistant') {
+    await positionAgentOnEntry()
+  }
 }
 
 function logout() {
@@ -2473,8 +2473,7 @@ async function openAssistant(prefill = '') {
   agentInputPlaceholder.value = prefill || '问问附近场地、约球活动、装备推荐'
   await loadAgentStatus()
   await loadLatestAgentHistory()
-  await nextTick()
-  document.getElementById('agent-input')?.focus()
+  await positionAgentOnEntry()
 }
 
 function scrollAgentChatToBottom(behavior: ScrollBehavior = 'smooth') {
@@ -2491,6 +2490,26 @@ function scrollAgentMessageIntoView(messageId: string, behavior: ScrollBehavior 
       document.getElementById(`agent-message-${messageId}`)?.scrollIntoView({ behavior, block })
     })
   })
+}
+
+function latestAgentUserMessageId() {
+  for (let index = agentMessages.value.length - 1; index >= 0; index--) {
+    if (agentMessages.value[index].role === 'user') {
+      return agentMessages.value[index].id
+    }
+  }
+  return null
+}
+
+async function positionAgentOnEntry() {
+  await nextTick()
+  const messageId = latestAgentUserMessageId()
+  if (!messageId) {
+    scrollToPageTop()
+    return
+  }
+  scrollAgentMessageIntoView(messageId, 'auto', 'start')
+  requestAnimationFrame(() => requestAnimationFrame(resetHeaderVisibility))
 }
 
 function openAgentSportPicker(reply: string) {
@@ -2554,7 +2573,8 @@ async function sendAgentMessage(
   agentThinking.value = true
   agentProgressText.value = '正在理解你的需求'
   await nextTick()
-  scrollAgentMessageIntoView(userMessageId)
+  // Position the new turn once. Keeping the same anchor while the answer arrives avoids a second visual jump.
+  scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
   await wrap(async () => {
     let result: AgentChatResponse | undefined
     let streamError = ''
@@ -2600,8 +2620,6 @@ async function sendAgentMessage(
     ]
     agentThinking.value = false
     agentProgressText.value = ''
-    await nextTick()
-    scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
   })
   if (agentThinking.value) {
     agentThinking.value = false
@@ -2731,6 +2749,13 @@ function agentStandaloneCards(cards: AgentCard[] = []) {
     const key = agentPlaceKey(card)
     return !key || !placeKeys.has(key)
   })
+}
+
+function agentStandaloneSectionTitle(cards: AgentCard[] = []) {
+  const standaloneCards = agentStandaloneCards(cards)
+  return standaloneCards.length > 0 && standaloneCards.every((card) => card.type === 'activity')
+    ? '可加入的约球'
+    : '更多推荐'
 }
 
 function agentVenueProductId(card: AgentCard) {
@@ -4150,14 +4175,26 @@ onBeforeUnmount(() => {
 
               <section v-if="agentStandaloneCards(item.cards).length" class="agent-result-section">
                 <div class="agent-section-title">
-                  <strong>更多推荐</strong>
-                  <span>横滑查看更多</span>
+                  <strong>{{ agentStandaloneSectionTitle(item.cards) }}</strong>
+                  <span v-if="agentStandaloneCards(item.cards).length > 1">横滑查看更多</span>
                 </div>
                 <div class="agent-card-carousel">
-                  <article v-for="card in agentStandaloneCards(item.cards)" :key="`${card.type}-${card.action?.id || card.title}`" class="agent-result-card">
+                  <article
+                    v-for="card in agentStandaloneCards(item.cards)"
+                    :key="`${card.type}-${card.action?.id || card.title}`"
+                    class="agent-result-card"
+                    :class="{
+                      'without-cover': !card.coverUrl,
+                      'activity-card': card.type === 'activity',
+                      'single-card': agentStandaloneCards(item.cards).length === 1
+                    }"
+                  >
                     <img v-if="card.coverUrl" :src="card.coverUrl" :alt="card.title" loading="lazy" decoding="async" @error="imageFallback" />
-                    <div>
-                      <span>{{ agentCardTypeLabel(card) }}</span>
+                    <div class="agent-card-content">
+                      <div class="agent-card-kicker">
+                        <Users v-if="card.type === 'activity'" :size="14" />
+                        <span>{{ agentCardTypeLabel(card) }}</span>
+                      </div>
                       <h3>{{ card.title }}</h3>
                       <p>{{ card.subtitle }}</p>
                       <div class="tag-row" v-if="agentCardTags(card).length">
@@ -4168,6 +4205,7 @@ onBeforeUnmount(() => {
                       <strong v-if="card.price">{{ card.price }}</strong>
                       <button v-if="card.type === 'venue_product'" class="agent-book-button" type="button" @click="prepareAgentVenueBooking(card)">约球</button>
                       <button type="button" @click="handleAgentCardAction(card)">
+                        <Users v-if="card.type === 'activity'" :size="15" />
                         {{ agentCardActionLabel(card) }}
                       </button>
                     </div>

@@ -32,6 +32,7 @@ import com.hm.badminton.service.agent.graph.AgentGraphWorkflow;
 import com.hm.badminton.service.agent.graph.AgentPlaceBranchResult;
 import com.hm.badminton.service.agent.tools.ActivityAgentTool;
 import com.hm.badminton.service.agent.tools.EquipmentAgentTool;
+import com.hm.badminton.service.agent.tools.EquipmentQueryNormalizer;
 import com.hm.badminton.service.agent.tools.PlaceAgentTool;
 import com.hm.badminton.service.agent.tools.VenueProductAgentTool;
 import com.hm.badminton.utils.UserContext;
@@ -79,6 +80,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     private static final String RUN_CONTEXT = "recommendationContext";
     private static final String RUN_DECISION = "decision";
     private static final String RUN_MODEL_ENABLED = "modelEnabled";
+    private static final String RUN_CLARIFICATION = "clarification";
+    private static final String RUN_SEARCH_EXPANSION = "searchExpansion";
     private static final List<String> MODEL_META_KEYS = List.of(
             "distanceMeters",
             "rating",
@@ -103,6 +106,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             场所类问题有多个候选时应选择 2 到 3 个，优先选择带有真实可售团购的场所。
             优先考虑用户的运动、日期、时段、预算、距离和水平要求。
             recommendationReasons 必须为每个 selectedCardId 分别生成一句有差异的推荐理由。
+            每条理由至少引用一个该卡片独有的信息，例如场馆名、价格、距离或项目特点；禁止只复述所有卡片共有的规则。
             理由只能使用该卡片中已有的时间、价格、距离、水平、场景、优缺点等事实，不能补充未提供的信息。
             只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 以外的内容：
             {"selectedCardIds":["cardId"],"recommendationReasons":{"cardId":"该卡片的具体推荐理由"},"explanation":"本次选择的总体依据"}
@@ -221,11 +225,20 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 () -> requirementService.merge(previous, run.getRequest(), run.getLoginUser()));
         run.put(RUN_REQUIREMENT, requirement);
         run.put(RUN_CONTEXT, baseContext(run.getRequest(), run.getLoginUser(), requirement));
+        AgentClarificationResolver.Clarification clarification =
+                AgentClarificationResolver.budget(run.getRequest().getMessage(), requirement);
+        if (clarification != null) {
+            run.put(RUN_CLARIFICATION, clarification);
+        }
     }
 
     /** Emits the stages for the branches that the graph is about to run. */
     @Override
     public void dispatchTools(AgentGraphRunContext run) {
+        if (clarification(run) != null) {
+            run.emit(AgentGraphProgress.stage("补充预算", "还需要你的预算上限才能继续筛选"));
+            return;
+        }
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         if (shouldQuery(context, "PLACE")) {
             run.emit(AgentGraphProgress.stage("查询场所", "正在查询附近场所和真实可售时段"));
@@ -241,6 +254,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     /** Place branch: real AMap places must be known before products can be bound by place rank. */
     @Override
     public AgentPlaceBranchResult queryPlacesAndProducts(AgentGraphRunContext run) {
+        if (clarification(run) != null) {
+            return AgentPlaceBranchResult.empty();
+        }
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         if (!shouldQuery(context, "PLACE")) {
             return AgentPlaceBranchResult.empty();
@@ -248,10 +264,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         List<AgentCard> places = new ArrayList<>();
         List<AgentCard> products = new ArrayList<>();
         for (String sportCode : querySports(context)) {
-            int radius = context.requirement().getMaxDistanceMeters() == null
-                    ? 8000 : context.requirement().getMaxDistanceMeters();
-            List<AgentCard> found = safeTool(run.getRequestId(), "places:" + sportCode,
-                    () -> placeTool.searchNearbyPlaces(sportCode, context.city(), context.lng(), context.lat(), radius, null));
+            List<AgentCard> found = searchPlacesWithExpansion(run, context, sportCode);
             List<AgentCard> visiblePlaces = found.stream().limit(2).toList();
             places.addAll(visiblePlaces);
             products.addAll(safeTool(run.getRequestId(), "venue-products:" + sportCode,
@@ -263,6 +276,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     /** Activity branch, executed in parallel with place and equipment branches by StateGraph. */
     @Override
     public List<AgentCard> queryActivities(AgentGraphRunContext run) {
+        if (clarification(run) != null) {
+            return List.of();
+        }
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         if (!shouldQuery(context, "ACTIVITY")) {
             return List.of();
@@ -272,7 +288,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         for (String sportCode : querySports(context)) {
             result.addAll(safeTool(run.getRequestId(), "activities:" + sportCode,
                     () -> activityTool.searchJoinableActivities(sportCode, context.city(),
-                            context.requirement().getLevel(), userId).stream().limit(2).toList()));
+                            context.requirement().getLevel(),
+                            context.requirement().getTargetDate(),
+                            context.requirement().getStartTime(),
+                            context.requirement().getEndTime(),
+                            userId).stream().limit(2).toList()));
         }
         return result;
     }
@@ -280,15 +300,21 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     /** Equipment branch, including seckill rows only when the user explicitly asks for discounts. */
     @Override
     public List<AgentCard> queryEquipment(AgentGraphRunContext run) {
+        if (clarification(run) != null) {
+            return List.of();
+        }
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         if (!shouldQuery(context, "EQUIPMENT")) {
             return List.of();
         }
         String message = run.getRequest().getMessage();
+        String keyword = firstNotBlank(
+                EquipmentQueryNormalizer.normalize(message),
+                context.requirement().getEquipmentKeyword());
         List<AgentCard> result = new ArrayList<>();
         for (String sportCode : querySports(context)) {
             result.addAll(safeTool(run.getRequestId(), "equipment:" + sportCode,
-                    () -> equipmentTool.searchEquipment(sportCode, cleanKeyword(message), context.budget())
+                    () -> equipmentTool.searchEquipment(sportCode, keyword, context.budget())
                             .stream().limit(2).toList()));
             if (containsAny(message, "秒杀", "特价", "抢购", "便宜")) {
                 result.addAll(safeTool(run.getRequestId(), "seckill-equipment:" + sportCode,
@@ -312,7 +338,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         cards.addAll(activities);
         cards.addAll(equipment);
         assignCardIds(cards);
-        AgentContext context = base.withCards(cards.stream().limit(18).toList());
+        AgentContext context = base.withSearchExpansion(searchExpansion(run))
+                .withCards(cards.stream().limit(18).toList());
         run.put(RUN_CONTEXT, context);
         run.emit(new AgentGraphProgress("cards", context.cards()));
     }
@@ -321,6 +348,16 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     @Override
     public void selectCandidates(AgentGraphRunContext run) {
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
+        AgentClarificationResolver.Clarification clarification = clarification(run);
+        if (clarification != null) {
+            AgentDecisionResult decision = new AgentDecisionResult(clarification.answer(), List.of());
+            AgentRequirement requirement = run.require(RUN_REQUIREMENT, AgentRequirement.class);
+            requirement.setLastSelectedCardIds(List.of());
+            run.put(RUN_DECISION, decision);
+            run.put(RUN_MODEL_ENABLED, safeChatClientBuilder() != null);
+            run.put(AgentGraphState.SELECTED_COUNT, 0);
+            return;
+        }
         ChatClient.Builder chatClientBuilder = safeChatClientBuilder();
         run.emit(AgentGraphProgress.stage("生成建议", "正在核对候选并整理推荐依据"));
         AgentDecisionResult decision = timed(run.getRequestId(), "model",
@@ -347,11 +384,15 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         });
         requirementService.cache(turn.conversationId(), requirement);
         AgentContext selectedContext = context.withCards(decision.cards());
+        AgentClarificationResolver.Clarification clarification = clarification(run);
+        List<String> replies = clarification == null
+                ? quickReplies(selectedContext)
+                : clarification.quickReplies();
         AgentChatResponse response = new AgentChatResponse(
                 turn.conversationId(),
                 decision.answer(),
                 decision.cards(),
-                quickReplies(selectedContext),
+                replies,
                 Boolean.TRUE.equals(run.getAttributes().get(RUN_MODEL_ENABLED)));
         run.put(AgentGraphState.RESPONSE, response);
         log.info("agent.total requestId={} conversationId={} elapsedMs={} cards={}",
@@ -408,7 +449,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         Double lat = request.getLat() != null ? request.getLat() : loginUser == null ? null : loginUser.getLatitude();
         Integer budget = requirement.getMaxBudget() == null ? null : requirement.getMaxBudget().intValue();
         return new AgentContext(requirement, sportCodes, city, lng, lat, budget,
-                timePreference(requirement), List.of());
+                timePreference(requirement), List.of(), null);
     }
 
     /** A missing intent means broad discovery; otherwise only the matching graph branch does work. */
@@ -444,6 +485,76 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             result.addAll(products);
         }
         return result;
+    }
+
+    /**
+     * Searches the requested radius first, then widens only when fewer than two real
+     * places are available. Expansion stays inside 50 km and is recorded for the answer.
+     */
+    private List<AgentCard> searchPlacesWithExpansion(AgentGraphRunContext run,
+                                                       AgentContext context,
+                                                       String sportCode) {
+        List<Integer> radii = AgentSearchRadiusPolicy.candidates(
+                context.requirement().getMaxDistanceMeters());
+        LinkedHashMap<String, AgentCard> merged = new LinkedHashMap<>();
+        int initialCount = 0;
+        int usedRadius = radii.getFirst();
+        for (int index = 0; index < radii.size(); index++) {
+            int radius = radii.get(index);
+            if (index > 0) {
+                run.emit(AgentGraphProgress.stage("扩大范围",
+                        formatRadius(usedRadius) + "内结果较少，正在扩大到" + formatRadius(radius)));
+            }
+            List<AgentCard> found = safeTool(run.getRequestId(),
+                    "places:" + sportCode + ":" + radius,
+                    () -> placeTool.searchNearbyPlaces(sportCode, context.city(), context.lng(),
+                            context.lat(), radius, null));
+            if (index == 0) {
+                initialCount = found.size();
+            }
+            for (AgentCard card : found) {
+                merged.putIfAbsent(placeCandidateKey(card), card);
+            }
+            usedRadius = radius;
+            if (merged.size() >= MIN_PLACE_RECOMMENDATIONS) {
+                break;
+            }
+        }
+        if (usedRadius > radii.getFirst()) {
+            recordSearchExpansion(run, new SearchExpansion(
+                    radii.getFirst(), usedRadius, initialCount, merged.size()));
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private String placeCandidateKey(AgentCard card) {
+        if (card.getAction() != null && card.getAction().getId() != null
+                && !card.getAction().getId().isBlank()) {
+            return card.getAction().getId();
+        }
+        return firstNotBlank(card.getTitle(), "unknown") + "|" + firstNotBlank(card.getSubtitle(), "");
+    }
+
+    private void recordSearchExpansion(AgentGraphRunContext run, SearchExpansion update) {
+        run.getAttributes().compute(RUN_SEARCH_EXPANSION, (key, current) -> {
+            if (!(current instanceof SearchExpansion previous)) {
+                return update;
+            }
+            return new SearchExpansion(
+                    Math.min(previous.initialRadiusMeters(), update.initialRadiusMeters()),
+                    Math.max(previous.finalRadiusMeters(), update.finalRadiusMeters()),
+                    previous.initialCount() + update.initialCount(),
+                    previous.finalCount() + update.finalCount());
+        });
+    }
+
+    private SearchExpansion searchExpansion(AgentGraphRunContext run) {
+        Object value = run.getAttributes().get(RUN_SEARCH_EXPANSION);
+        return value instanceof SearchExpansion expansion ? expansion : null;
+    }
+
+    private String formatRadius(int meters) {
+        return meters % 1000 == 0 ? (meters / 1000) + "km" : meters + "m";
     }
 
     private List<AgentCard> safeTool(String requestId,
@@ -532,6 +643,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         List<AgentCard> fallback = deterministicSelection(context.cards());
         if (builder == null) {
             AgentContext selected = context.withCards(finalizeSelection(fallback, context));
+            bindRecommendationReasons(selected.cards(), Map.of(), "model-unavailable");
             return new AgentDecisionResult(groundedAnswer(selected), selected.cards());
         }
         try {
@@ -550,6 +662,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                     .content();
             if (content == null || content.isBlank()) {
                 AgentContext selected = context.withCards(finalizeSelection(fallback, context));
+                bindRecommendationReasons(selected.cards(), Map.of(), "model-empty");
                 return new AgentDecisionResult(groundedAnswer(selected), selected.cards());
             }
             AgentModelDecision modelDecision = objectMapper.readValue(stripJsonFence(content), AgentModelDecision.class);
@@ -558,7 +671,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 validated = fallback;
             }
             validated = finalizeSelection(validated, context);
-            applyModelReasons(validated, modelDecision.getRecommendationReasons());
+            bindRecommendationReasons(validated, modelDecision.getRecommendationReasons(), "model");
             // Overall explanation remains diagnostic; user-facing reasons are bound to validated card ids above.
             log.debug("Agent model selection explanation: {}", modelDecision.getExplanation());
             AgentContext selected = context.withCards(validated);
@@ -566,6 +679,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         } catch (Exception ex) {
             log.warn("Agent structured model output failed, using deterministic ranking: {}", ex.getMessage());
             AgentContext selected = context.withCards(finalizeSelection(fallback, context));
+            bindRecommendationReasons(selected.cards(), Map.of(), "model-failed");
             return new AgentDecisionResult(groundedAnswer(selected), selected.cards());
         }
     }
@@ -579,8 +693,36 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     private String groundedAnswer(AgentContext context) {
+        String answer = groundedAnswerBody(context);
+        SearchExpansion expansion = context.searchExpansion();
+        if (expansion == null) {
+            return answer;
+        }
+        String initialResult = expansion.initialCount() == 0
+                ? "没有找到场所"
+                : "只找到" + expansion.initialCount() + "个场所";
+        String outcome = expansion.finalCount() == 0
+                ? "扩大后仍没有符合条件的结果"
+                : "现已基于扩大后的真实结果筛选";
+        return "原先" + formatRadius(expansion.initialRadiusMeters()) + "范围内" + initialResult
+                + "，我已自动扩大到" + formatRadius(expansion.finalRadiusMeters()) + "，" + outcome + "。\n\n"
+                + answer;
+    }
+
+    private String groundedAnswerBody(AgentContext context) {
         if (context.cards().isEmpty()) {
-            return "我暂时没有找到合适结果。你可以换个运动类型、预算或扩大附近范围再试一次。";
+            AgentClarificationResolver.Clarification equipmentNoResult =
+                    AgentClarificationResolver.equipmentNoResult(context.requirement());
+            if (equipmentNoResult != null) {
+                return equipmentNoResult.answer();
+            }
+            if (hasIntent(context, "PLACE")) {
+                return "暂时没有找到符合条件的真实场所。可以更换运动类型或场所关键词后再试。";
+            }
+            if (hasIntent(context, "ACTIVITY")) {
+                return "当前城市暂时没有符合时间和水平要求、且仍可加入的约球活动。可以调整时间或水平要求。";
+            }
+            return "我暂时没有找到合适结果。请补充运动类型、时间或预算后再试一次。";
         }
         List<AgentCard> venueProducts = context.cards().stream()
                 .filter(card -> AgentConstants.CARD_VENUE_PRODUCT.equals(card.getType()))
@@ -717,6 +859,10 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     private List<String> reasonTexts(AgentCard card) {
+        Object resolvedReason = card.getMeta().get(AgentRecommendationReasonResolver.REASON_KEY);
+        if (resolvedReason instanceof String text && !text.isBlank()) {
+            return List.of(text);
+        }
         Object aiReason = card.getMeta().get("aiRecommendReason");
         if (aiReason instanceof String text && !text.isBlank()) {
             return List.of(text);
@@ -732,34 +878,13 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         return List.of();
     }
 
-    /**
-     * Binds model-generated reasons only to card ids that survived backend validation.
-     * Duplicate or oversized reasons are ignored so one generic sentence cannot be copied
-     * onto every recommendation and untrusted model output cannot expand the response.
-     */
-    private void applyModelReasons(List<AgentCard> cards, Map<String, String> modelReasons) {
-        if (modelReasons == null || modelReasons.isEmpty()) {
-            return;
-        }
-        Set<String> accepted = new HashSet<>();
-        for (AgentCard card : cards) {
-            String reason = sanitizeModelReason(modelReasons.get(card.getCardId()));
-            String normalized = reason.toLowerCase(Locale.ROOT);
-            if (reason.isBlank() || !accepted.add(normalized)) {
-                continue;
-            }
-            card.getMeta().put("aiRecommendReason", reason);
-        }
-    }
-
-    private String sanitizeModelReason(String reason) {
-        if (reason == null) {
-            return "";
-        }
-        String value = reason.replaceAll("[\\r\\n]+", " ")
-                .replace("**", "")
-                .trim();
-        return value.length() <= 80 ? value : value.substring(0, 80);
+    private void bindRecommendationReasons(List<AgentCard> cards,
+                                           Map<String, String> modelReasons,
+                                           String stage) {
+        AgentRecommendationReasonResolver.BindingResult result =
+                AgentRecommendationReasonResolver.bind(cards, modelReasons);
+        log.info("agent.reasons stage={} aiCount={} ruleFallbackCount={}",
+                stage, result.aiCount(), result.ruleCount());
     }
 
     private List<String> quickReplies(AgentContext context) {
@@ -781,10 +906,21 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             addQuickReply(replies, "这几件适合新手吗");
         }
         if (replies.isEmpty()) {
-            addQuickReply(replies, "换个运动类型试试");
-            addQuickReply(replies, "帮我扩大附近范围");
-            addQuickReply(replies, "推荐新手装备");
-            addQuickReply(replies, "帮我找能加入的局");
+            AgentClarificationResolver.Clarification equipmentNoResult =
+                    AgentClarificationResolver.equipmentNoResult(context.requirement());
+            if (equipmentNoResult != null) {
+                equipmentNoResult.quickReplies().forEach(reply -> addQuickReply(replies, reply));
+            } else if (hasIntent(context, "PLACE")) {
+                addQuickReply(replies, "换个运动类型试试");
+                addQuickReply(replies, "换个场所关键词");
+            } else if (hasIntent(context, "ACTIVITY")) {
+                // 快捷追问必须携带可以被结构化解析器执行的真实条件，不能只给模糊操作名。
+                addQuickReply(replies, "查看今天19:00可加入的局");
+                addQuickReply(replies, "不限水平查看今天可加入的局");
+            } else {
+                addQuickReply(replies, "补充运动类型");
+                addQuickReply(replies, "补充预算范围");
+            }
         } else if (!context.sportCodes().isEmpty()) {
             addQuickReply(replies, "换成离我更近的");
         }
@@ -793,6 +929,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
 
     private boolean hasCardType(AgentContext context, String cardType) {
         return context.cards().stream().anyMatch(card -> cardType.equals(card.getType()));
+    }
+
+    private boolean hasIntent(AgentContext context, String intent) {
+        return context.requirement().getIntents() != null
+                && context.requirement().getIntents().contains(intent);
     }
 
     private void addQuickReply(List<String> replies, String text) {
@@ -1056,18 +1197,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         return text;
     }
 
-    private String cleanKeyword(String message) {
-        if (message == null) {
-            return null;
-        }
-        String text = message
-                // “不限球类”是筛选条件而不是装备名称；保留它会变成 SQL like 关键词，导致全量查询为空。
-                .replaceAll("(推荐|帮我|找|购买|买|装备|不限球类|不限|球类|以内|以下|左右|元|块|附近|有没有|可以|适合|新手)", " ")
-                .replaceAll("(羽毛球|羽毛|乒乓球|乒乓|足球|篮球|网球|排球)", " ")
-                .replaceAll("[（）()，,。.!！?？、]", " ")
-                .replaceAll("\\d+", " ")
-                .trim();
-        return text.isBlank() || text.length() > 12 ? null : text;
+    private AgentClarificationResolver.Clarification clarification(AgentGraphRunContext run) {
+        Object value = run.getAttributes().get(RUN_CLARIFICATION);
+        return value instanceof AgentClarificationResolver.Clarification clarification
+                ? clarification
+                : null;
     }
 
     private boolean containsAny(String message, String... keywords) {
@@ -1096,10 +1230,23 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                                 Double lat,
                                 Integer budget,
                                 String timePreference,
-                                List<AgentCard> cards) {
+                                List<AgentCard> cards,
+                                SearchExpansion searchExpansion) {
         private AgentContext withCards(List<AgentCard> selectedCards) {
-            return new AgentContext(requirement, sportCodes, city, lng, lat, budget, timePreference, selectedCards);
+            return new AgentContext(requirement, sportCodes, city, lng, lat, budget,
+                    timePreference, selectedCards, searchExpansion);
         }
+
+        private AgentContext withSearchExpansion(SearchExpansion expansion) {
+            return new AgentContext(requirement, sportCodes, city, lng, lat, budget,
+                    timePreference, cards, expansion);
+        }
+    }
+
+    private record SearchExpansion(int initialRadiusMeters,
+                                   int finalRadiusMeters,
+                                   int initialCount,
+                                   int finalCount) {
     }
 
     private record AgentDecisionResult(String answer, List<AgentCard> cards) {

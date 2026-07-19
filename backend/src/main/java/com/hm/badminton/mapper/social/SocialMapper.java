@@ -224,24 +224,21 @@ public interface SocialMapper {
                                          @Param("offset") int offset);
 
     /**
-     * 演示活动按周循环。任务即使停机多天，也会一次顺延足够的整周，
-     * 保证结束时间重新落到 currentTime 之后，而不是每天无限向后推尚未发生的活动。
+     * 把全部演示活动对齐到业务时区的当天，保留原有时分秒。
+     *
+     * <p>只处理 {@code DEMO_*} 场所标识，用户真实发起的活动不会被改期。
+     * WHERE 条件让同一天内重复执行保持幂等，应用启动和每日任务可以安全共用。</p>
      */
     @Update("""
             update sport_activities
-            set start_time = timestampadd(
-                    day,
-                    7 * (floor(greatest(timestampdiff(day, end_time, #{currentTime}), 0) / 7) + 1),
-                    start_time),
-                end_time = timestampadd(
-                    day,
-                    7 * (floor(greatest(timestampdiff(day, end_time, #{currentTime}), 0) / 7) + 1),
-                    end_time),
+            set start_time = timestamp(date(#{currentTime}), time(start_time)),
+                end_time = timestamp(date(#{currentTime}), time(end_time)),
                 status = case when current_players >= max_players then '已满员' else '招募中' end
             where left(place_id, 5) = 'DEMO_'
-              and end_time <= #{currentTime}
+              and (date(start_time) <> date(#{currentTime})
+                   or date(end_time) <> date(#{currentTime}))
             """)
-    int refreshExpiredDemoActivities(@Param("currentTime") LocalDateTime currentTime);
+    int alignDemoActivitiesToCurrentDay(@Param("currentTime") LocalDateTime currentTime);
 
     @Update("""
             update sport_activities

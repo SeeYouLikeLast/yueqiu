@@ -9,6 +9,9 @@ import com.hm.badminton.service.social.ISocialService;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -26,15 +29,23 @@ public class ActivityAgentTool {
     }
 
     @Tool(name = "searchJoinableActivities", description = "Search joinable city sport activities that are not full.")
-    public List<AgentCard> searchJoinableActivities(String sportCode, String city, String level, Long excludeUserId) {
+    public List<AgentCard> searchJoinableActivities(String sportCode,
+                                                    String city,
+                                                    String level,
+                                                    LocalDate targetDate,
+                                                    LocalTime startTime,
+                                                    LocalTime endTime,
+                                                    Long excludeUserId) {
+        // 先取同城、同运动的有效活动，再在工具层做“等级兼容”和“时段重叠”判断。
+        // SQL 等值查询无法表达“中级用户可以参加初级以上活动”，也不能把“不限”当成无筛选。
         PageResult<SportActivity> page = socialService.activities(
                 blankToNull(sportCode),
                 blankToNull(city),
-                blankToNull(level),
+                null,
                 null,
                 "others",
                 1,
-                8);
+                50);
         List<AgentCard> cards = new ArrayList<>();
         for (SportActivity activity : page.getRecords()) {
             if (excludeUserId != null && excludeUserId.equals(activity.getCreatorId())) {
@@ -42,6 +53,10 @@ public class ActivityAgentTool {
             }
             if (activity.getCurrentPlayers() != null && activity.getMaxPlayers() != null
                     && activity.getCurrentPlayers() >= activity.getMaxPlayers()) {
+                continue;
+            }
+            if (!levelMatches(level, activity.getLevelRequired())
+                    || !timeMatches(activity, targetDate, startTime, endTime)) {
                 continue;
             }
             AgentCard card = new AgentCard();
@@ -84,7 +99,7 @@ public class ActivityAgentTool {
         if (vacancy(activity) > 0) {
             pros.add("还有空位，可以申请加入");
         }
-        if (level != null && !level.isBlank() && level.equals(activity.getLevelRequired())) {
+        if (hasSpecificLevel(level) && levelMatches(level, activity.getLevelRequired())) {
             pros.add("水平要求与你匹配");
         } else if (activity.getLevelRequired() == null || activity.getLevelRequired().isBlank() || "不限".equals(activity.getLevelRequired())) {
             pros.add("水平要求宽松");
@@ -114,7 +129,7 @@ public class ActivityAgentTool {
         } else if (vacancy > 0) {
             score += 8;
         }
-        if (level != null && !level.isBlank() && level.equals(activity.getLevelRequired())) {
+        if (hasSpecificLevel(level) && levelMatches(level, activity.getLevelRequired())) {
             score += 20;
         } else if (activity.getLevelRequired() == null || activity.getLevelRequired().isBlank() || "不限".equals(activity.getLevelRequired())) {
             score += 12;
@@ -133,6 +148,65 @@ public class ActivityAgentTool {
             return "近期可约";
         }
         return activity.getStartTime().format(FORMATTER) + "-" + activity.getEndTime().format(DateTimeFormatter.ofPattern("HH:mm"));
+    }
+
+    /**
+     * 判断活动是否覆盖用户目标时段。活动 19:00-21:00 可以匹配用户提出的 19:00-20:00，
+     * 但不会匹配上午时段；只有日期时则要求活动在该日期开始。
+     */
+    private boolean timeMatches(SportActivity activity,
+                                LocalDate targetDate,
+                                LocalTime startTime,
+                                LocalTime endTime) {
+        if (activity.getStartTime() == null || activity.getEndTime() == null) {
+            return targetDate == null && startTime == null && endTime == null;
+        }
+        LocalDate activityDate = activity.getStartTime().toLocalDate();
+        if (targetDate != null && !targetDate.equals(activityDate)) {
+            return false;
+        }
+        if (startTime == null && endTime == null) {
+            return true;
+        }
+        LocalDate queryDate = targetDate == null ? activityDate : targetDate;
+        LocalTime queryStartTime = startTime == null ? LocalTime.MIN : startTime;
+        LocalTime queryEndTime = endTime == null
+                ? (startTime == null ? LocalTime.MAX : startTime.plusHours(1))
+                : endTime;
+        LocalDateTime queryStart = queryDate.atTime(queryStartTime);
+        LocalDateTime queryEnd = queryDate.atTime(queryEndTime);
+        return activity.getStartTime().isBefore(queryEnd) && activity.getEndTime().isAfter(queryStart);
+    }
+
+    /** “初级以上/中级对抗”表示最低门槛，而不是必须与用户等级文本完全相同。 */
+    private boolean levelMatches(String userLevel, String requiredLevel) {
+        if (!hasSpecificLevel(userLevel) || requiredLevel == null || requiredLevel.isBlank()
+                || requiredLevel.contains("不限") || requiredLevel.contains("新手友好")) {
+            return true;
+        }
+        int userRank = levelRank(userLevel);
+        int requiredRank = levelRank(requiredLevel);
+        return userRank == 0 || requiredRank == 0 || userRank >= requiredRank;
+    }
+
+    private boolean hasSpecificLevel(String level) {
+        return level != null && !level.isBlank() && !level.contains("不限");
+    }
+
+    private int levelRank(String level) {
+        if (level == null) {
+            return 0;
+        }
+        if (level.contains("高级") || level.contains("高手") || level.contains("进阶")) {
+            return 3;
+        }
+        if (level.contains("中级")) {
+            return 2;
+        }
+        if (level.contains("初级") || level.contains("新手") || level.contains("入门")) {
+            return 1;
+        }
+        return 0;
     }
 
     private String blankToNull(String value) {

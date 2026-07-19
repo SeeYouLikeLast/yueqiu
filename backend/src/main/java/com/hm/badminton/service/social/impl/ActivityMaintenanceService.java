@@ -32,11 +32,12 @@ public class ActivityMaintenanceService implements IActivityMaintenanceService {
     @Override
     @Transactional
     public ActivityRefreshResult refreshActivityTimes(LocalDateTime currentTime) {
-        // 1. 先顺延演示活动，再结束真实活动，避免演示数据被误标记为已结束。
-        int refreshedDemoActivities = socialMapper.refreshExpiredDemoActivities(currentTime);
+        // 1. 每次启动及每日 00:05 都把 DEMO_* 活动统一放到当天；真实活动绝不改期。
+        int refreshedDemoActivities = socialMapper.alignDemoActivitiesToCurrentDay(currentTime);
+        // 2. 只有用户真实发起且已经过期的活动才转为“已结束”。
         int finishedUserActivities = socialMapper.finishExpiredUserActivities(currentTime);
 
-        // 2. 场馆库存代表具体日期，不能简单忽略过期条件。把过期演示行接到每个商品
+        // 3. 场馆库存代表具体日期，不能简单忽略过期条件。把过期演示行接到每个商品
         //    当前最晚日期之后，可长期演示，同时不改动绑定真实 venue_id 的业务库存。
         int refreshedDemoInventories = refreshDemoInventories(currentTime.toLocalDate());
         return new ActivityRefreshResult(

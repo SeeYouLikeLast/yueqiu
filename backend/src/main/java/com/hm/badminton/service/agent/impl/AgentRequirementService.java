@@ -10,6 +10,7 @@ import com.hm.badminton.dto.agent.AgentRequirement;
 import com.hm.badminton.entity.AgentConversation;
 import com.hm.badminton.mapper.agent.AgentConversationMapper;
 import com.hm.badminton.service.agent.IAgentRequirementService;
+import com.hm.badminton.service.agent.tools.EquipmentQueryNormalizer;
 import com.hm.badminton.utils.RedisTtl;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -75,14 +76,47 @@ public class AgentRequirementService implements IAgentRequirementService {
     public AgentRequirement merge(AgentRequirement previous, AgentChatRequest request, LoginUser loginUser) {
         AgentRequirement merged = copy(previous);
         String message = request.getMessage() == null ? "" : request.getMessage().trim();
+        Set<String> currentIntents = inferIntents(message);
+        Set<String> previousIntents = new LinkedHashSet<>(
+                merged.getIntents() == null ? List.of() : merged.getIntents());
+        // “扩大附近范围”是对上一轮结果的操作，不应仅因包含“附近”就把装备会话切成场所团购。
+        if (isRangeExpansionFollowUp(message) && !previousIntents.isEmpty()) {
+            currentIntents = previousIntents;
+        }
 
+        clearStaleCrossDomainBudget(merged, currentIntents, message);
         mergeSports(merged, request, message);
+        mergeEquipmentKeyword(merged, currentIntents, message);
         mergeDateAndTime(merged, message);
         mergeBudget(merged, message);
         mergeDistance(merged, message);
         mergeLevel(merged, message, loginUser);
-        mergeIntents(merged, message);
+        mergeIntents(merged, currentIntents);
         return merged;
+    }
+
+    private boolean isRangeExpansionFollowUp(String message) {
+        return containsAny(message, "扩大附近范围", "扩大范围", "范围再大", "找远一点", "更远一点");
+    }
+
+    /** Keeps the concrete equipment category across a follow-up such as "按预算筛选". */
+    private void mergeEquipmentKeyword(AgentRequirement target,
+                                       Set<String> currentIntents,
+                                       String message) {
+        if (!currentIntents.contains("EQUIPMENT")) {
+            return;
+        }
+        if (isRangeExpansionFollowUp(message)) {
+            return;
+        }
+        if (containsAny(message, "全部装备", "不限装备类别", "不限品类")) {
+            target.setEquipmentKeyword(null);
+            return;
+        }
+        String keyword = EquipmentQueryNormalizer.normalize(message);
+        if (keyword != null && !keyword.isBlank()) {
+            target.setEquipmentKeyword(keyword);
+        }
     }
 
     @Override
@@ -199,7 +233,7 @@ public class AgentRequirementService implements IAgentRequirementService {
         }
     }
 
-    private void mergeIntents(AgentRequirement target, String message) {
+    private Set<String> inferIntents(String message) {
         Set<String> intents = new LinkedHashSet<>();
         if (containsAny(message, "场所", "场馆", "球馆", "附近", "场地", "哪里", "团购", "私教")) {
             intents.add("PLACE");
@@ -210,8 +244,35 @@ public class AgentRequirementService implements IAgentRequirementService {
         if (containsAny(message, "装备", "球拍", "球鞋", "护具", "球包", "买", "购买")) {
             intents.add("EQUIPMENT");
         }
+        return intents;
+    }
+
+    private void mergeIntents(AgentRequirement target, Set<String> intents) {
         if (!intents.isEmpty()) {
             target.setIntents(new ArrayList<>(intents));
+        }
+    }
+
+    /**
+     * A venue budget and an equipment budget are different constraints. When a new turn
+     * explicitly switches between those domains, an old amount must not silently filter
+     * the new query unless the user says to keep the previous budget.
+     */
+    private void clearStaleCrossDomainBudget(AgentRequirement target,
+                                             Set<String> currentIntents,
+                                             String message) {
+        Set<String> previousIntents = new LinkedHashSet<>(
+                target.getIntents() == null ? List.of() : target.getIntents());
+        if (previousIntents.isEmpty() || currentIntents.isEmpty()
+                || !java.util.Collections.disjoint(previousIntents, currentIntents)) {
+            return;
+        }
+        boolean switchesEquipmentDomain = previousIntents.contains("EQUIPMENT")
+                != currentIntents.contains("EQUIPMENT");
+        boolean keepPreviousBudget = containsAny(message,
+                "同样预算", "相同预算", "这个预算", "刚才预算", "还是这个价格");
+        if (switchesEquipmentDomain && !keepPreviousBudget) {
+            target.setMaxBudget(null);
         }
     }
 
@@ -294,6 +355,7 @@ public class AgentRequirementService implements IAgentRequirementService {
         target.setMaxBudget(source.getMaxBudget());
         target.setMaxDistanceMeters(source.getMaxDistanceMeters());
         target.setLevel(source.getLevel());
+        target.setEquipmentKeyword(source.getEquipmentKeyword());
         target.setIntents(new ArrayList<>(source.getIntents() == null ? List.of() : source.getIntents()));
         target.setLastSelectedCardIds(new ArrayList<>(source.getLastSelectedCardIds() == null ? List.of() : source.getLastSelectedCardIds()));
         return target;

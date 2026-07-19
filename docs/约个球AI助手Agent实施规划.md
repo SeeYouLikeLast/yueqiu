@@ -1,6 +1,6 @@
 # 约个球 AI 助手 Agent 实施规划
 
-> 最后更新：2026-07-18
+> 最后更新：2026-07-19
 > 本文同时记录当前已经落地的代码、运行链路、部署要求和后续演进，避免把“规划中”误写成“已完成”。
 > 当前代码逐步执行逻辑、候选数量、推荐规则和已知不足详见 [约个球 AI 助手当前业务逻辑](约个球AI助手当前业务逻辑.md)。
 
@@ -36,22 +36,23 @@ AI 助手帮助用户完成四类决策：
 | 会话历史与限流      | 已完成 | MySQL 历史、Redis 结构化短期记忆、用户/IP 限流   |
 | 安全动作闭环       | 已完成 | 场所、团购、装备、活动卡片跳转及二次确认              |
 | Graph 多节点编排  | 已完成 | StateGraph 编排 9 个节点及 3 个并行工具分支    |
+| 演示活动日期维护     | 已完成 | 启动和每日 00:05 将 `DEMO_*` 活动对齐到当天     |
 | RAG 语义检索     | 未完成 | 尚未接入博客、评价、心得向量检索                  |
 
 ## 3. 技术栈
 
-| 层       | 技术                                                                 |
-| ------- | ------------------------------------------------------------------ |
-| 模型      | DashScope `qwen-plus`                                              |
-| AI 框架   | Spring AI Alibaba DashScope + `spring-ai-alibaba-graph-core`         |
-| 编排      | `StateGraph` + 有界 `ThreadPoolTaskExecutor`                         |
-| HTTP 流  | Spring MVC `SseEmitter` + 前端 `fetch` ReadableStream                |
-| 持久化     | MySQL + MyBatis-Plus                                               |
-| 短期记忆/限流 | Redis                                                              |
-| 场所来源    | 高德附近 POI                                                           |
-| 业务事实    | 本地 `venue_inventory`、活动和装备表                                        |
-| 前端      | Vue 3 + TypeScript                                                 |
-| 生产代理    | Nginx，SSE 路径关闭代理缓冲                                                 |
+| 层       | 技术                                                           |
+| ------- | ------------------------------------------------------------ |
+| 模型      | DashScope `qwen-plus`                                        |
+| AI 框架   | Spring AI Alibaba DashScope + `spring-ai-alibaba-graph-core` |
+| 编排      | `StateGraph` + 有界 `ThreadPoolTaskExecutor`                   |
+| HTTP 流  | Spring MVC `SseEmitter` + 前端 `fetch` ReadableStream          |
+| 持久化     | MySQL + MyBatis-Plus                                         |
+| 短期记忆/限流 | Redis                                                        |
+| 场所来源    | 高德附近 POI                                                     |
+| 业务事实    | 本地 `venue_inventory`、活动和装备表                                  |
+| 前端      | Vue 3 + TypeScript                                           |
+| 生产代理    | Nginx，SSE 路径关闭代理缓冲                                           |
 
 模型配置：
 
@@ -86,22 +87,22 @@ AI_MODEL=qwen-plus
 
 对应代码：
 
-| 责任 | 文件 |
-| --- | --- |
-| HTTP 与 SSE | `controller/agent/AgentController.java` |
-| Graph 定义和执行 | `service/agent/graph/AgentGraphWorkflow.java` |
-| Graph 状态与运行上下文 | `service/agent/graph/AgentGraphState.java`、`AgentGraphRunContext.java` |
-| Graph 节点业务实现 | `service/agent/impl/AgentServiceImpl.java` |
-| 结构化需求 | `service/agent/impl/AgentRequirementService.java` |
-| 短事务持久化 | `service/agent/impl/AgentPersistenceService.java` |
-| 并发线程池 | `config/AgentAsyncConfig.java` |
-| 场所工具 | `service/agent/tools/PlaceAgentTool.java` |
-| 场馆项目工具 | `service/agent/tools/VenueProductAgentTool.java` |
-| 活动工具 | `service/agent/tools/ActivityAgentTool.java` |
-| 装备工具 | `service/agent/tools/EquipmentAgentTool.java` |
-| 真实时段查询 | `mapper/trade/VenueItemMapper.java`、`service/trade/impl/VenueItemService.java` |
-| 前端 SSE 解析 | `frontend/src/api/client.ts` |
-| 前端聊天交互 | `frontend/src/App.vue` |
+| 责任             | 文件                                                                             |
+| -------------- | ------------------------------------------------------------------------------ |
+| HTTP 与 SSE     | `controller/agent/AgentController.java`                                        |
+| Graph 定义和执行    | `service/agent/graph/AgentGraphWorkflow.java`                                  |
+| Graph 状态与运行上下文 | `service/agent/graph/AgentGraphState.java`、`AgentGraphRunContext.java`         |
+| Graph 节点业务实现   | `service/agent/impl/AgentServiceImpl.java`                                     |
+| 结构化需求          | `service/agent/impl/AgentRequirementService.java`                              |
+| 短事务持久化         | `service/agent/impl/AgentPersistenceService.java`                              |
+| 并发线程池          | `config/AgentAsyncConfig.java`                                                 |
+| 场所工具           | `service/agent/tools/PlaceAgentTool.java`                                      |
+| 场馆项目工具         | `service/agent/tools/VenueProductAgentTool.java`                               |
+| 活动工具           | `service/agent/tools/ActivityAgentTool.java`                                   |
+| 装备工具           | `service/agent/tools/EquipmentAgentTool.java`                                  |
+| 真实时段查询         | `mapper/trade/VenueItemMapper.java`、`service/trade/impl/VenueItemService.java` |
+| 前端 SSE 解析      | `frontend/src/api/client.ts`                                                   |
+| 前端聊天交互         | `frontend/src/App.vue`                                                         |
 
 ## 5. 结构化会话记忆
 
@@ -114,6 +115,7 @@ startTime/endTime    目标开始和结束时间
 maxBudget            最高预算
 maxDistanceMeters    最远距离
 level                不限/初级/中级/高级
+equipmentKeyword     鞋/球拍/手胶/护具/球包/球袜等归一化类别
 intents              PLACE/ACTIVITY/EQUIPMENT
 lastSelectedCardIds  上轮最终采用的候选
 ```
@@ -124,6 +126,8 @@ lastSelectedCardIds  上轮最终采用的候选
 - 本轮没提到的条件沿用当前会话记忆。
 - “不限球类/不限预算/不限距离/不限水平”会主动清空对应限制。
 - “今晚、明天、7月16日、19:00-21:00、50 元以内、3km、新手”等表达由后端解析。
+- “鞋子/球鞋/训练鞋”等口语会归一为可命中数据库的装备关键词，并跨轮保留装备意图和品类。
+- 缺少预算时先发澄清问题；装备无结果时只调整预算或品类，不把“扩大范围”误解释为场馆团购。
 - 过期日期会在读取时清理，避免第二天继续推荐昨天时段。
 
 存储位置：
@@ -202,6 +206,8 @@ equipment:21
 - `completeTurn()`：短事务，原子保存答案、卡片和需求 JSON。
 
 每一步记录 `requestId` 和 `elapsedMs`，可在日志中定位是高德、数据库、模型还是持久化较慢。
+
+场所分支还包含一次请求内的有界扩圈：结果少于 2 个时按 `8km、15km、30km、50km` 逐级查询，得到足够场所后立即停止。扩圈只属于 `PLACE` 查询，不会作用于平台全局装备。
 
 可调配置：
 
@@ -318,7 +324,19 @@ RAG 不能替代实时工具。价格、库存、可售时段、活动人数和�
 5. 游客会话使用 `userId=0` 持久化但不开放历史管理，后续可增加匿名会话过期清理任务。
 6. Graph 已完成确定性工作流编排，但尚未接入动态模型路由、执行恢复和 RAG，不能宣称为完全自治 Agent。
 
-## 15. 安全规则
+## 15. 演示约球活动时间策略
+
+为保证约球页和 AI 活动推荐每天都有当天数据，轻量演示数据采用以下策略：
+
+1. `data.sql` 原始插入的 24 场 `DEMO_*` 活动统一为当天 `19:00-21:00`。
+2. `ActivityMaintenanceTask` 在应用启动和每天北京时间 `00:05` 调用维护服务。
+3. `SocialMapper.alignDemoActivitiesToCurrentDay()` 只修改 `place_id` 以 `DEMO_` 开头的记录，并保留活动原有时分秒、人数、水平和费用。
+4. 用户真实发起的活动保持原始日期，不参与滚动；结束后按正常业务规则转为“已结束”。
+5. AI 活动工具继续校验城市、运动、水平、人数和结束时间，不会因为演示日期刷新而绕过可加入条件。
+6. 活动筛选采用日期一致、时段重叠和水平门槛兼容规则；“不限水平”会取消等级限制，而不是作为 SQL 等值条件。
+7. 无结果快捷追问必须包含可解析的新条件。目前使用“查看今天19:00可加入的局”和“不限水平查看今天可加入的局”，避免旧的结构化条件被无意继承。
+
+## 16. 安全规则
 
 - DashScope API Key 只存在服务器环境变量，不进入 Git、前端、数据库或日志。
 - 模型没有数据库写权限、支付权限和 MinIO 管理权限。

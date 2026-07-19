@@ -2861,12 +2861,14 @@ p {
   gap: 12px;
   align-content: start;
   padding-bottom: 72px;
+  /* Messages and quick replies change height during a turn; manual anchoring is more stable here. */
+  overflow-anchor: none;
 }
 
 .agent-message {
   display: grid;
   gap: 8px;
-  scroll-margin-top: 132px;
+  scroll-margin-top: calc(166px + var(--safe-top));
   scroll-margin-bottom: 108px;
 }
 
@@ -3165,6 +3167,62 @@ p {
   scroll-snap-align: start;
 }
 
+.agent-result-card.without-cover {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.agent-result-card.single-card {
+  flex-basis: calc(100% - 4px);
+  max-width: none;
+}
+
+.agent-result-card.activity-card {
+  min-height: 126px;
+  align-items: stretch;
+  padding: 13px;
+  border-color: #cfe2d5;
+  border-left: 3px solid #15845f;
+  background: #ffffff;
+}
+
+.agent-card-content {
+  min-width: 0;
+}
+
+.agent-card-kicker {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #15845f;
+}
+
+.agent-card-kicker span {
+  color: inherit;
+  font-weight: 700;
+}
+
+.agent-result-card.activity-card h3 {
+  margin-top: 5px;
+  font-size: 16px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.agent-result-card.activity-card p {
+  margin-top: 4px;
+  -webkit-line-clamp: 2;
+}
+
+.agent-result-card.activity-card .tag-row {
+  margin-top: 9px;
+}
+
+.agent-result-card.activity-card .tag-row span {
+  padding: 3px 7px;
+  color: #35604d;
+  background: #edf7f0;
+}
+
 .agent-result-card img {
   width: 70px;
   height: 70px;
@@ -3179,6 +3237,10 @@ p {
   gap: 8px;
 }
 
+.agent-result-card.activity-card .agent-card-side {
+  align-content: center;
+}
+
 .agent-card-side strong {
   color: #e34b1f;
   font-size: 15px;
@@ -3191,6 +3253,20 @@ p {
   border-color: #15845f;
   background: #15845f;
   white-space: nowrap;
+}
+
+.agent-card-side button svg {
+  flex: 0 0 auto;
+}
+
+.agent-result-card.activity-card .agent-card-side button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 72px;
+  min-height: 38px;
+  font-weight: 800;
 }
 
 .agent-card-side .agent-book-button {

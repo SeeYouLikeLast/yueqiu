@@ -41,7 +41,7 @@ function Set-Utf8NoBomContent([string]$Path, [string]$Value) {
 }
 
 function FileUrl([int]$Id) {
-    return "/api/files/$Id/download"
+    return "/objects/hm-badminton/$(FileObjectName $Id)"
 }
 
 function FileObjectName([int]$Id) {
@@ -465,6 +465,9 @@ for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
 }
 Add-Insert $sb "venue" @("id", "venue_id", "amap_place_id", "venue_name", "place_rank", "sport_code", "product_type", "title", "description", "cover_url", "price", "original_price", "tags", "use_rule", "refund_rule", "sale_start_at", "sale_end_at", "status") $venueRows
 Add-Insert $sb "venue_inventory" @("id", "product_id", "venue_id", "court_name", "coach_id", "service_date", "start_time", "end_time", "total_stock", "available_stock", "locked_stock", "sold_stock", "price", "status") $inventoryRows
+Add-Section $sb '演示窗口覆盖今天到未来 3 天，既能演示“今晚”，也保留后续预约日期。'
+[void]$sb.AppendLine("update venue_inventory set service_date = date_sub(service_date, interval 1 day);")
+[void]$sb.AppendLine()
 
 Add-Section $sb "博客：每种运动 6 篇，分别覆盖场馆、装备、预算、训练和避坑"
 $blogRows = @()
@@ -522,7 +525,7 @@ for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
 Add-Insert $sb "seckill_equipment" @("id", "equipment_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillEquipmentRows
 Add-Insert $sb "seckill_venue" @("id", "venue_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillVenueRows
 
-Add-Section $sb "约球活动：每个城市、每种运动 1 场，时间、水平、费用和余位有差异"
+Add-Section $sb "约球活动：每个城市、每种运动 1 场；全部安排在当天，水平、费用和余位有差异"
 $activityRows = @()
 $memberRows = @()
 $activityId = 1
@@ -542,8 +545,8 @@ for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
         $activityRows += ,@($activityId, (Sql $sport.Code), $creator, (($sportIndex * 2) + (($activityId % 2) + 1)),
             (Sql "amap"), (Sql "DEMO_$($cityIndex + 1)_$($sportIndex + 1)"), (Sql "$($city.Name)$($sport.Name)附近场地"),
             (Sql "$($sport.Name)$activityKind"), (Sql $city.Name),
-            "timestamp(date_add(current_date, interval $(($activityId % 7) + 1) day), '19:00:00')",
-            "timestamp(date_add(current_date, interval $(($activityId % 7) + 1) day), '21:00:00')",
+            "timestamp(current_date, '19:00:00')",
+            "timestamp(current_date, '21:00:00')",
             $maxPlayers, $currentPlayers, (Sql $level), (Sql $fee), (Sql "招募中"))
         for ($m = 0; $m -lt $currentPlayers; $m++) {
             $memberUser = $matchedUsers[$m % $matchedUsers.Count]

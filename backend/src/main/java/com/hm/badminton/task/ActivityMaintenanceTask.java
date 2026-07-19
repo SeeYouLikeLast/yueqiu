@@ -25,14 +25,14 @@ public class ActivityMaintenanceTask {
 
     /**
      * 启动时补执行一次，防止应用在凌晨任务执行时处于停机状态。
-     * 更新只影响已过期的 DEMO_* 活动和排序绑定演示库存，因此重复执行是幂等的。
+     * 活动维护只对齐 DEMO_* 演示活动到当天，真实用户活动不会被改期。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void refreshAfterStartup() {
         refresh("startup");
     }
 
-    /** 每天 00:05 刷新滚动演示活动/库存，并关闭已经结束的真实用户活动。 */
+    /** 每天 00:05 将演示活动对齐到当天、滚动演示库存，并关闭已结束的真实活动。 */
     @Scheduled(cron = "0 5 0 * * ?", zone = "Asia/Shanghai")
     public void refreshEveryDay() {
         refresh("daily");

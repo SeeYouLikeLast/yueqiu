@@ -79,6 +79,86 @@ class AgentRequirementServiceTest {
         assertThat(result.getSportCodes()).containsExactly("badminton");
     }
 
+    @Test
+    void shoePurchaseShouldSelectBadmintonEquipmentBranch() {
+        AgentRequirement result = service.merge(new AgentRequirement(), request("我要买一个羽毛球鞋子"), null);
+
+        assertThat(result.getSportCodes()).containsExactly("badminton");
+        assertThat(result.getIntents()).contains("EQUIPMENT");
+        assertThat(result.getEquipmentKeyword()).isEqualTo("鞋");
+    }
+
+    @Test
+    void budgetFollowUpShouldKeepPreviousEquipmentCategory() {
+        AgentRequirement previous = service.merge(
+                new AgentRequirement(), request("我要买一个羽毛球鞋子"), null);
+
+        AgentRequirement result = service.merge(previous, request("帮我按预算筛装备（羽毛球）"), null);
+
+        assertThat(result.getEquipmentKeyword()).isEqualTo("鞋");
+        assertThat(result.getMaxBudget()).isNull();
+    }
+
+    @Test
+    void nearbyExpansionFollowUpMustNotSwitchEquipmentToVenueProducts() {
+        AgentRequirement previous = service.merge(
+                new AgentRequirement(), request("200元以内的羽毛球鞋"), null);
+
+        AgentRequirement result = service.merge(previous, request("帮我扩大附近范围（羽毛球）"), null);
+
+        assertThat(result.getIntents()).containsExactly("EQUIPMENT");
+        assertThat(result.getEquipmentKeyword()).isEqualTo("鞋");
+        assertThat(result.getMaxBudget()).isEqualByComparingTo(BigDecimal.valueOf(200));
+    }
+
+    @Test
+    void equipmentRequestShouldNotInheritVenueBudget() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setIntents(List.of("PLACE"));
+        previous.setMaxBudget(BigDecimal.valueOf(50));
+
+        AgentRequirement result = service.merge(previous, request("我要买一个羽毛球鞋子"), null);
+
+        assertThat(result.getMaxBudget()).isNull();
+        assertThat(result.getIntents()).containsExactly("EQUIPMENT");
+    }
+
+    @Test
+    void explicitRequestCanReuseBudgetAcrossDomains() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setIntents(List.of("PLACE"));
+        previous.setMaxBudget(BigDecimal.valueOf(300));
+
+        AgentRequirement result = service.merge(previous, request("按同样预算买羽毛球鞋"), null);
+
+        assertThat(result.getMaxBudget()).isEqualByComparingTo(BigDecimal.valueOf(300));
+    }
+
+    @Test
+    void activityQuickReplyShouldCarryExecutableDateAndTime() {
+        AgentRequirement result = service.merge(new AgentRequirement(),
+                request("查看今天19:00可加入的局（羽毛球）"), null);
+
+        assertThat(result.getIntents()).contains("ACTIVITY");
+        assertThat(result.getSportCodes()).containsExactly("badminton");
+        assertThat(result.getTargetDate()).isEqualTo(LocalDate.now());
+        assertThat(result.getStartTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(result.getEndTime()).isEqualTo(LocalTime.of(20, 0));
+    }
+
+    @Test
+    void unlimitedLevelQuickReplyShouldClearExactLevelRestriction() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setLevel("中级");
+
+        AgentRequirement result = service.merge(previous,
+                request("不限水平查看今天可加入的局（羽毛球）"), null);
+
+        assertThat(result.getIntents()).contains("ACTIVITY");
+        assertThat(result.getLevel()).isEqualTo("不限");
+        assertThat(result.getTargetDate()).isEqualTo(LocalDate.now());
+    }
+
     private AgentChatRequest request(String message) {
         AgentChatRequest request = new AgentChatRequest();
         request.setMessage(message);
