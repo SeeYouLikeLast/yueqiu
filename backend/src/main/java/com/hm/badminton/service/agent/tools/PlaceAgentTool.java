@@ -67,7 +67,6 @@ public class PlaceAgentTool {
             meta.put("sceneTags", sceneTags(place));
             meta.put("pros", pros(place));
             meta.put("cons", cons(place));
-            meta.put("recommendScore", placeScore(place, currentRank));
             meta.put("recommendReasons", pros(place).stream().limit(3).toList());
             meta.put("placeRank", currentRank);
             card.setMeta(meta);
@@ -130,30 +129,6 @@ public class PlaceAgentTool {
             cons.add("设施信息较少，建议进详情再确认");
         }
         return cons;
-    }
-
-    private int placeScore(AmapPlace place, int rank) {
-        int score = 55;
-        Double distance = place.getDistanceMeters();
-        if (distance != null) {
-            if (distance <= 1000) {
-                score += 25;
-            } else if (distance <= 3000) {
-                score += 18;
-            } else if (distance <= 6000) {
-                score += 10;
-            } else {
-                score += 4;
-            }
-        }
-        if (place.getFacilities() != null) {
-            score += Math.min(10, place.getFacilities().size() * 2);
-        }
-        if (place.getOpenHours() != null && place.getOpenHours().contains("22")) {
-            score += 5;
-        }
-        score += Math.max(0, 6 - rank) * 2;
-        return Math.min(100, score);
     }
 
     private String distanceText(Double distanceMeters) {

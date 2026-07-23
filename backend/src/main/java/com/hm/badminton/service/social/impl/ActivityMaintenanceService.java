@@ -32,8 +32,8 @@ public class ActivityMaintenanceService implements IActivityMaintenanceService {
     @Override
     @Transactional
     public ActivityRefreshResult refreshActivityTimes(LocalDateTime currentTime) {
-        // 1. 每次启动及每日 00:05 都把 DEMO_* 活动统一放到当天；真实活动绝不改期。
-        int refreshedDemoActivities = socialMapper.alignDemoActivitiesToCurrentDay(currentTime);
+        // 1. 每次启动及每日 00:05 都把 D0/D1 演示活动对齐到今天/明天；真实活动绝不改期。
+        int refreshedDemoActivities = socialMapper.alignDemoActivitiesToRollingWindow(currentTime);
         // 2. 只有用户真实发起且已经过期的活动才转为“已结束”。
         int finishedUserActivities = socialMapper.finishExpiredUserActivities(currentTime);
 

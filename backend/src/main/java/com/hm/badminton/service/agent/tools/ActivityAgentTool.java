@@ -79,7 +79,6 @@ public class ActivityAgentTool {
             meta.put("sceneTags", List.of(nullToText(activity.getLevelRequired()), nullToText(activity.getFeeType()), timeText(activity)));
             meta.put("pros", pros(activity, level));
             meta.put("cons", cons(activity));
-            meta.put("recommendScore", activityScore(activity, level));
             meta.put("recommendReasons", pros(activity, level).stream().limit(3).toList());
             card.setMeta(meta);
             cards.add(card);
@@ -119,28 +118,6 @@ public class ActivityAgentTool {
             cons.add("费用方式需要进一步确认");
         }
         return cons;
-    }
-
-    private int activityScore(SportActivity activity, String level) {
-        int score = 50;
-        int vacancy = vacancy(activity);
-        if (vacancy >= 3) {
-            score += 15;
-        } else if (vacancy > 0) {
-            score += 8;
-        }
-        if (hasSpecificLevel(level) && levelMatches(level, activity.getLevelRequired())) {
-            score += 20;
-        } else if (activity.getLevelRequired() == null || activity.getLevelRequired().isBlank() || "不限".equals(activity.getLevelRequired())) {
-            score += 12;
-        }
-        if (activity.getStartTime() != null) {
-            score += 10;
-        }
-        if (activity.getFeeType() != null && !activity.getFeeType().isBlank()) {
-            score += 5;
-        }
-        return Math.min(100, score);
     }
 
     private String timeText(SportActivity activity) {

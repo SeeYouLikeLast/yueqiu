@@ -90,7 +90,6 @@ public class VenueProductAgentTool {
         meta.put("sceneTags", tags(item));
         meta.put("pros", reasons(item));
         meta.put("cons", cons(item));
-        meta.put("recommendScore", score(item));
         meta.put("recommendReasons", reasons(item));
         card.setMeta(meta);
         return card;
@@ -147,15 +146,6 @@ public class VenueProductAgentTool {
             case "COURT_SLOT" -> "不限";
             default -> "新手/日常练习";
         };
-    }
-
-    private int score(AgentVenueProductVO item) {
-        int score = "EXACT".equals(item.getMatchType()) ? 95
-                : "ONE_HOUR_FALLBACK".equals(item.getMatchType()) ? 78 : 70;
-        if (item.getOriginalPrice() != null && item.getOriginalPrice().compareTo(item.getPrice()) > 0) {
-            score += 4;
-        }
-        return Math.min(score, 100);
     }
 
     private String productTypeName(String type) {

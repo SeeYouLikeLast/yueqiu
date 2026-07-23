@@ -7,16 +7,17 @@
 | 组件       | 保存内容                                   | 适合原因            | 是否为最终事实来源     |
 | -------- | -------------------------------------- | --------------- | ------------- |
 | MySQL    | 用户、场所扩展、商品、库存、订单、社区、评价、约球、AI 会话、文件元数据  | 可事务、可关联、可索引、可审计 | 是             |
-| Redis    | 登录态、验证码、缓存、布隆过滤器、秒杀状态、Feed、限流、AI 短期上下文 | 高并发、低延迟、允许失效后重建 | 否             |
+| Redis    | 登录态、验证码、缓存、布隆过滤器、秒杀状态、Feed、限流、AI 匿名历史/结构化记忆/RAG 向量 | 高并发、低延迟、支持 TTL | 通常否；游客历史在 TTL 内是临时事实源 |
 | MinIO    | 头像、博客图、评价图、演示图及用户上传文件本体                | 适合二进制大对象        | 文件本体是；元数据否    |
 | RocketMQ | 秒杀订单消息                                 | 削峰、异步落库、失败重试    | 否，订单最终落 MySQL |
 
 原则：
 
-- MySQL 保存业务最终状态；Redis 宕机或淘汰后不应造成不可恢复的数据丢失。
+- MySQL 保存长期业务最终状态；大多数 Redis 数据可重建。游客 AI 历史明确是 7 天临时数据，Redis/Cookie 丢失后不承诺恢复。
 - MinIO 只保存对象本体，归属用户、业务类型、对象路径和 MIME 类型由 MySQL `file_metadata` 管理。
 - 秒杀先在 Redis 原子预扣，再通过 RocketMQ 或同步补偿写入 MySQL；数据库唯一约束负责最终兜底。
-- AI 的会话和消息保存到 MySQL，Redis 只保存可过期的短期上下文。
+- 登录用户 AI 会话和消息保存到 MySQL；游客会话、消息和结构化需求只保存到 Redis，并支持历史查看、切换与删除。
+- RAG 原文仍在 MySQL；Redis 只缓存按内容哈希生成的 Embedding 向量，失效后可重新计算。
 
 ## 2. 运行位置与端口
 
@@ -60,7 +61,7 @@ Internet -> Nginx :80/:443 -> Vue 静态文件、/api
 | 社区 | `blogs`、`blog_archive`、`follows` | 博客、归档博客、关注关系 |
 | 场所评价 | `venue_reviews`、`venue_favorites` | 平台自有评价和收藏；不抓取第三方平台评价 |
 | 约球 | `sport_activities`、`sport_activity_members` | 活动、发起人和参与成员 |
-| AI | `agent_conversation`、`agent_message` | 登录用户的会话标题、用户问题、AI 回答及卡片快照 |
+| AI | `agent_conversation`、`agent_message` | 仅登录用户的会话标题、用户问题、AI 回答、结构化需求及卡片快照 |
 | 文件 | `file_metadata` | MinIO 对象路径、归属人、类型、大小、MIME、访问 URL 等元数据 |
 
 命名约定：
@@ -131,7 +132,15 @@ Redis Key 常量统一定义在：`backend/src/main/java/com/hm/badminton/consta
 | `seckill:users:{type}:{id}` | Set | 已抢购用户 id | 至活动结束后 1 小时 + 抖动 |
 | `lock:seckill:order:{type}:{id}:{userId}` | Redisson Lock | 分布式一人一单互斥锁 | 短生命周期，Redisson 自动管理 |
 | `lock:cache:rebuild:{key}` | String | 逻辑过期缓存重建锁 | 10 秒 |
-| `agent:conversation:context:{conversationId}` | String | 最近用户需求摘要，不保存模型自由文本 | 60 分钟 + 最多 60 秒抖动 |
+| `agent:conversation:requirement:{conversationId}` | String | 城市、运动、时段、预算、距离、水平、偏好等结构化需求 | 登录默认 60 分钟；游客与匿名历史 TTL 对齐，均带抖动 |
+| `agent:anonymous:conversations:{anonymousId}` | ZSet | 游客会话索引，score 为更新时间 | 7 天，访问时续期；最多 30 个会话 |
+| `agent:anonymous:conversation:{anonymousId}:{conversationId}` | String/JSON | 游客会话标题、结构化需求和时间 | 7 天，访问时续期 |
+| `agent:anonymous:messages:{anonymousId}:{conversationId}` | List/JSON | 游客问题、AI 回答和业务卡片快照 | 7 天，访问时续期；最多 100 条 |
+| `agent:rag:embedding:{sha256}` | String/JSON | 博客、评价、装备心得的可重建向量 | 默认 7 天 |
+
+游客浏览器由后端签发 `HttpOnly`、`SameSite=Lax` 的 `hm_agent_guest` Cookie。匿名 ID 同时进入 Redis key，接口会校验 Cookie 与会话归属；会话使用负数 ID，避免与 MySQL 正数 ID 混淆。清除 Cookie、更换浏览器或 Redis TTL 到期后，游客历史不能恢复，也不会自动并入登录账号。
+
+AI 的轻量 RAG 不保存价格、库存、可售时段和活动人数。场馆评价、博客和装备心得从 MySQL 按城市、球类和实体 ID 约束后检索；Embedding 不可用时使用词法检索，业务硬事实始终来自实时工具。
 
 秒杀库存和用户集合由 Redis Lua 脚本原子扣减与记录，随后才发送 MQ 消息/进行同步落库。订单消费者和数据库唯一约束共同保证重复消息不会创建重复订单。
 

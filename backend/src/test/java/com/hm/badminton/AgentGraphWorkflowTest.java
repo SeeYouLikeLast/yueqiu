@@ -29,7 +29,7 @@ class AgentGraphWorkflowTest {
             RecordingHandler handler = new RecordingHandler(parallelBranches);
             AgentChatRequest request = new AgentChatRequest();
             request.setMessage("今晚附近打羽毛球");
-            AgentGraphRunContext run = new AgentGraphRunContext(request, "127.0.0.1", null, ignored -> {
+            AgentGraphRunContext run = new AgentGraphRunContext(request, "127.0.0.1", "guest-test-id-1234567890", null, ignored -> {
             });
 
             AgentChatResponse response = workflow.execute(handler, run);
@@ -94,6 +94,18 @@ class AgentGraphWorkflowTest {
                     .toList();
             mergedCount = cards.size();
             run.put("mergedCards", cards);
+        }
+
+        @Override
+        public void enrichKnowledge(AgentGraphRunContext run) {
+            run.put(AgentGraphState.RAG_EVIDENCE_COUNT, 0);
+        }
+
+        @Override
+        public void scoreCandidates(AgentGraphRunContext run) {
+            @SuppressWarnings("unchecked")
+            List<AgentCard> cards = (List<AgentCard>) run.getAttributes().get("mergedCards");
+            run.put(AgentGraphState.SCORED_COUNT, cards.size());
         }
 
         @Override

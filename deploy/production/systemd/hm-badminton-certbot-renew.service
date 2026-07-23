@@ -5,4 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/hm-badminton/certbot/bin/certbot renew --quiet --deploy-hook /usr/bin/systemctl\ reload\ nginx
+# Keep the hook out of Certbot's argument parsing.  systemd runs this only
+# after a successful renewal, and an Nginx reload is harmless when no cert changed.
+ExecStart=/opt/hm-badminton/certbot/bin/certbot renew --quiet
+ExecStartPost=/usr/bin/systemctl reload nginx

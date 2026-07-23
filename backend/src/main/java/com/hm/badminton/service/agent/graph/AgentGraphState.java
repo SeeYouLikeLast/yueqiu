@@ -11,6 +11,8 @@ public final class AgentGraphState {
     public static final String ACTIVITY_CARDS = "activityCards";
     public static final String EQUIPMENT_CARDS = "equipmentCards";
     public static final String CANDIDATE_COUNT = "candidateCount";
+    public static final String RAG_EVIDENCE_COUNT = "ragEvidenceCount";
+    public static final String SCORED_COUNT = "scoredCount";
     public static final String SELECTED_COUNT = "selectedCount";
     public static final String RESPONSE = "response";
 

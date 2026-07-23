@@ -42,6 +42,8 @@ public class AgentGraphWorkflow {
     private static final String QUERY_ACTIVITY = "queryActivities";
     private static final String QUERY_EQUIPMENT = "queryEquipment";
     private static final String MERGE = "mergeCandidates";
+    private static final String RAG = "enrichKnowledge";
+    private static final String SCORE = "scoreCandidates";
     private static final String SELECT = "selectCandidates";
     private static final String PERSIST = "persistAnswer";
 
@@ -111,6 +113,16 @@ public class AgentGraphWorkflow {
                         return Map.of(AgentGraphState.CANDIDATE_COUNT,
                                 places.size() + products.size() + activities.size() + equipment.size());
                     }))
+                    .addNode(RAG, node_async((state, config) -> {
+                        handler(config).enrichKnowledge(run(config));
+                        return Map.of(AgentGraphState.RAG_EVIDENCE_COUNT,
+                                run(config).getAttributes().getOrDefault(AgentGraphState.RAG_EVIDENCE_COUNT, 0));
+                    }))
+                    .addNode(SCORE, node_async((state, config) -> {
+                        handler(config).scoreCandidates(run(config));
+                        return Map.of(AgentGraphState.SCORED_COUNT,
+                                run(config).getAttributes().getOrDefault(AgentGraphState.SCORED_COUNT, 0));
+                    }))
                     .addNode(SELECT, node_async((state, config) -> {
                         handler(config).selectCandidates(run(config));
                         return Map.of(AgentGraphState.SELECTED_COUNT,
@@ -129,7 +141,9 @@ public class AgentGraphWorkflow {
                     .addEdge(QUERY_PLACE, MERGE)
                     .addEdge(QUERY_ACTIVITY, MERGE)
                     .addEdge(QUERY_EQUIPMENT, MERGE)
-                    .addEdge(MERGE, SELECT)
+                    .addEdge(MERGE, RAG)
+                    .addEdge(RAG, SCORE)
+                    .addEdge(SCORE, SELECT)
                     .addEdge(SELECT, PERSIST)
                     .addEdge(PERSIST, END);
             // Conversation memory remains in MySQL/Redis. No in-memory graph checkpointer is

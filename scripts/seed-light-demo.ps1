@@ -525,7 +525,7 @@ for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
 Add-Insert $sb "seckill_equipment" @("id", "equipment_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillEquipmentRows
 Add-Insert $sb "seckill_venue" @("id", "venue_id", "seckill_price", "stock", "start_at", "end_at", "status") $seckillVenueRows
 
-Add-Section $sb "约球活动：每个城市、每种运动 1 场；全部安排在当天，水平、费用和余位有差异"
+Add-Section $sb "约球活动：每个城市、每种运动各有今天和明天 2 场；19:00 后今天场次不再推荐"
 $activityRows = @()
 $memberRows = @()
 $activityId = 1
@@ -535,25 +535,29 @@ for ($cityIndex = 0; $cityIndex -lt $cities.Count; $cityIndex++) {
     for ($sportIndex = 0; $sportIndex -lt $sports.Count; $sportIndex++) {
         $sport = $sports[$sportIndex]
         $matchedUsers = $usersBySlot["$($city.Name)|$($sport.Code)"]
-        $maxPlayers = @(4, 6, 8, 6, 4, 8)[$sportIndex]
-        $currentPlayers = if (($activityId % 4) -eq 0) { $maxPlayers - 1 } else { [Math]::Min(3, $matchedUsers.Count) }
-        $currentPlayers = [Math]::Min($currentPlayers, $matchedUsers.Count)
-        $level = @("新手友好", "初级以上", "中级对抗", "不限")[$activityId % 4]
-        $fee = @("AA", "免费", "场地费均摊")[$activityId % 3]
-        $creator = $matchedUsers[0]
-        $activityKind = if ($level -eq "新手友好") { "新手友好局" } else { "下班对抗局" }
-        $activityRows += ,@($activityId, (Sql $sport.Code), $creator, (($sportIndex * 2) + (($activityId % 2) + 1)),
-            (Sql "amap"), (Sql "DEMO_$($cityIndex + 1)_$($sportIndex + 1)"), (Sql "$($city.Name)$($sport.Name)附近场地"),
-            (Sql "$($sport.Name)$activityKind"), (Sql $city.Name),
-            "timestamp(current_date, '19:00:00')",
-            "timestamp(current_date, '21:00:00')",
-            $maxPlayers, $currentPlayers, (Sql $level), (Sql $fee), (Sql "招募中"))
-        for ($m = 0; $m -lt $currentPlayers; $m++) {
-            $memberUser = $matchedUsers[$m % $matchedUsers.Count]
-            $memberRole = if ($m -eq 0) { "OWNER" } else { "MEMBER" }
-            $memberRows += ,@($memberId++, $activityId, $memberUser, (Sql $memberRole), (Sql "已加入"))
+        for ($dayOffset = 0; $dayOffset -le 1; $dayOffset++) {
+            $maxPlayers = @(4, 6, 8, 6, 4, 8)[$sportIndex]
+            $currentPlayers = if (($activityId % 4) -eq 0) { $maxPlayers - 1 } else { [Math]::Min(3, $matchedUsers.Count) }
+            $currentPlayers = [Math]::Min($currentPlayers, $matchedUsers.Count)
+            $level = @("新手友好", "初级以上", "中级对抗", "不限")[$activityId % 4]
+            $fee = @("AA", "免费", "场地费均摊")[$activityId % 3]
+            $creator = $matchedUsers[0]
+            $dayTitle = if ($dayOffset -eq 0) { "今晚" } else { "明晚" }
+            $activityKind = if ($level -eq "新手友好") { "新手友好局" } else { "下班对抗局" }
+            $dateSql = if ($dayOffset -eq 0) { "current_date" } else { "date_add(current_date, interval 1 day)" }
+            $activityRows += ,@($activityId, (Sql $sport.Code), $creator, (($sportIndex * 2) + (($activityId % 2) + 1)),
+                (Sql "amap"), (Sql "DEMO_$($cityIndex + 1)_$($sportIndex + 1)_D$dayOffset"), (Sql "$($city.Name)$($sport.Name)附近场地"),
+                (Sql "$($sport.Name)$dayTitle$activityKind"), (Sql $city.Name),
+                "timestamp($dateSql, '19:00:00')",
+                "timestamp($dateSql, '21:00:00')",
+                $maxPlayers, $currentPlayers, (Sql $level), (Sql $fee), (Sql "招募中"))
+            for ($m = 0; $m -lt $currentPlayers; $m++) {
+                $memberUser = $matchedUsers[$m % $matchedUsers.Count]
+                $memberRole = if ($m -eq 0) { "OWNER" } else { "MEMBER" }
+                $memberRows += ,@($memberId++, $activityId, $memberUser, (Sql $memberRole), (Sql "已加入"))
+            }
+            $activityId++
         }
-        $activityId++
     }
 }
 Add-Insert $sb "sport_activities" @("id", "sport_code", "creator_id", "venue_id", "place_source", "place_id", "venue_name", "title", "city", "start_time", "end_time", "max_players", "current_players", "level_required", "fee_type", "status") $activityRows

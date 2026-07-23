@@ -1,5 +1,9 @@
 package com.hm.badminton.dto.agent;
 
-/** Identifies the short database transaction that starts an AI turn. */
-public record AgentTurnContext(Long conversationId, Long userId) {
+/** Identifies one persisted turn. Logged-in turns use MySQL; anonymous turns use Redis. */
+public record AgentTurnContext(Long conversationId, Long userId, String anonymousId) {
+
+    public boolean anonymous() {
+        return userId == null || userId <= 0;
+    }
 }

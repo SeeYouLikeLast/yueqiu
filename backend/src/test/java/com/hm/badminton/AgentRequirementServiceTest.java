@@ -159,6 +159,49 @@ class AgentRequirementServiceTest {
         assertThat(result.getTargetDate()).isEqualTo(LocalDate.now());
     }
 
+    @Test
+    void shouldExtractCityDistancePreferencesAndSortOrder() {
+        AgentRequirement result = service.merge(new AgentRequirement(),
+                request("北京 3 公里以内找一个离我最近、能停车、不要拥挤的羽毛球馆"), null);
+
+        assertThat(result.getCity()).isEqualTo("北京市");
+        assertThat(result.getMaxDistanceMeters()).isEqualTo(3000);
+        assertThat(result.getPreferenceTags()).contains("停车");
+        assertThat(result.getPreferenceTags()).contains("不拥挤");
+        assertThat(result.getSortPreference()).isEqualTo("DISTANCE");
+        assertThat(result.getFieldSources()).containsKeys("city", "maxDistanceMeters", "preferences", "sortPreference");
+    }
+
+    @Test
+    void distanceRefinementShouldKeepPreviousPlaceIntent() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setSportCodes(List.of("badminton"));
+        previous.setIntents(List.of("PLACE"));
+        previous.setTargetDate(LocalDate.now());
+        previous.setStartTime(LocalTime.of(19, 0));
+        previous.setEndTime(LocalTime.of(20, 0));
+
+        AgentRequirement result = service.merge(previous, request("帮我按距离重新筛（羽毛球）"), null);
+
+        assertThat(result.getSportCodes()).containsExactly("badminton");
+        assertThat(result.getIntents()).containsExactly("PLACE");
+        assertThat(result.getEquipmentKeyword()).isNull();
+        assertThat(result.getSortPreference()).isEqualTo("DISTANCE");
+        assertThat(result.getStartTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(result.getEndTime()).isEqualTo(LocalTime.of(20, 0));
+    }
+
+    @Test
+    void shouldSupportMinimumBudgetAndRangeExpansionFollowUp() {
+        AgentRequirement initial = service.merge(new AgentRequirement(), request("至少 200 元的羽毛球鞋，5 公里以内"), null);
+
+        AgentRequirement expanded = service.merge(initial, request("帮我扩大附近范围"), null);
+
+        assertThat(initial.getMinBudget()).isEqualByComparingTo(BigDecimal.valueOf(200));
+        assertThat(expanded.getMaxDistanceMeters()).isEqualTo(10000);
+        assertThat(expanded.getEquipmentKeyword()).isEqualTo("鞋");
+    }
+
     private AgentChatRequest request(String message) {
         AgentChatRequest request = new AgentChatRequest();
         request.setMessage(message);

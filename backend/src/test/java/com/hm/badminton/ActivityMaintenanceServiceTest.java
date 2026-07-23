@@ -31,9 +31,9 @@ class ActivityMaintenanceServiceTest {
     private ActivityMaintenanceService activityMaintenanceService;
 
     @Test
-    void shouldAlignDemoActivitiesToCurrentDayWithoutChangingUserActivitySchedule() {
+    void shouldAlignDemoActivitiesToRollingWindowWithoutChangingUserActivitySchedule() {
         LocalDateTime currentTime = LocalDateTime.of(2026, 7, 19, 0, 5);
-        when(socialMapper.alignDemoActivitiesToCurrentDay(currentTime)).thenReturn(24);
+        when(socialMapper.alignDemoActivitiesToRollingWindow(currentTime)).thenReturn(48);
         when(socialMapper.finishExpiredUserActivities(currentTime)).thenReturn(2);
         when(venueItemMapper.selectDemoInventoryWindows()).thenReturn(List.of());
         when(venueItemMapper.selectExpiredDemoInventories(currentTime.toLocalDate())).thenReturn(List.of());
@@ -41,9 +41,9 @@ class ActivityMaintenanceServiceTest {
         IActivityMaintenanceService.ActivityRefreshResult result =
                 activityMaintenanceService.refreshActivityTimes(currentTime);
 
-        assertEquals(24, result.getRefreshedDemoActivities());
+        assertEquals(48, result.getRefreshedDemoActivities());
         assertEquals(2, result.getFinishedUserActivities());
-        verify(socialMapper).alignDemoActivitiesToCurrentDay(currentTime);
+        verify(socialMapper).alignDemoActivitiesToRollingWindow(currentTime);
         verify(socialMapper).finishExpiredUserActivities(currentTime);
     }
 }

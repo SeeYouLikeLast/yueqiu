@@ -42,6 +42,9 @@ public final class EquipmentQueryNormalizer {
         if (compact.matches(".*(按预算|预算筛选?|按价格|价格筛选?).*")) {
             return null;
         }
+        if (compact.matches(".*(按距离|距离筛选?|重新筛|重新排序|离我更近|更近的|最划算|预约规则|这些场所|这些团购).*")) {
+            return null;
+        }
 
         // "买羽毛球" means a consumable ball when no racket/shoe/etc. alias matched first.
         if (!compact.contains("装备")

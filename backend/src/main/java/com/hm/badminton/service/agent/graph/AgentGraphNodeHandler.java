@@ -25,6 +25,10 @@ public interface AgentGraphNodeHandler {
                          List<AgentCard> activities,
                          List<AgentCard> equipment);
 
+    void enrichKnowledge(AgentGraphRunContext run);
+
+    void scoreCandidates(AgentGraphRunContext run);
+
     void selectCandidates(AgentGraphRunContext run);
 
     void persistAnswer(AgentGraphRunContext run);

@@ -97,12 +97,20 @@ hm:
       - http://127.0.0.1:5173
   agent:
     enabled: true
-    max-history-messages: 10
-    max-tool-calls: 6
     memory-ttl-minutes: 60
     rate-limit-per-minute: 10
     tool-timeout-seconds: 5
     tool-threads: 6
+    # 游客历史按浏览器匿名 Cookie 隔离，只保存在 Redis，过期后自动清理。
+    anonymous-history-ttl-days: 7
+    anonymous-max-conversations: 30
+    anonymous-max-messages-per-conversation: 100
+    # 轻量 RAG：MySQL 保存原文，Redis 缓存向量；Embedding 不可用时回退到关键词检索。
+    rag-enabled: true
+    rag-embedding-enabled: ${AI_RAG_EMBEDDING_ENABLED:true}
+    rag-candidate-limit: 48
+    rag-top-k: 3
+    rag-embedding-cache-days: 7
   seckill:
     # 默认优先 RocketMQ 异步落库；MQ 未部署或投递失败时可降级为同步事务落库。
     mq-enabled: ${SECKILL_MQ_ENABLED:true}

@@ -34,9 +34,11 @@ public final class RedisConstants {
     public static final String BLOG_LIKED_KEY = "blog:liked:";
     public static final String FEED_KEY = "feed:";
     public static final String BLOG_OUTBOX_KEY = "blog:outbox:";
-    public static final String AGENT_MEMORY_KEY = "agent:memory:";
-    public static final String AGENT_CONVERSATION_CONTEXT_KEY = "agent:conversation:context:";
     public static final String AGENT_CONVERSATION_REQUIREMENT_KEY = "agent:conversation:requirement:";
+    public static final String AGENT_ANONYMOUS_CONVERSATIONS_KEY = "agent:anonymous:conversations:";
+    public static final String AGENT_ANONYMOUS_CONVERSATION_KEY = "agent:anonymous:conversation:";
+    public static final String AGENT_ANONYMOUS_MESSAGES_KEY = "agent:anonymous:messages:";
+    public static final String AGENT_RAG_EMBEDDING_KEY = "agent:rag:embedding:";
     public static final String AGENT_RATE_USER_KEY = "agent:rate:user:";
     public static final String AGENT_RATE_IP_KEY = "agent:rate:ip:";
     public static final String CACHE_NULL_VALUE = "__NULL__";

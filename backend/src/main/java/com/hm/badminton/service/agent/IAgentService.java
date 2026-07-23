@@ -11,13 +11,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public interface IAgentService {
     boolean aiEnabled();
 
-    AgentChatResponse chat(AgentChatRequest request, String clientIp);
+    AgentChatResponse chat(AgentChatRequest request, String clientIp, String anonymousId);
 
-    SseEmitter chatStream(AgentChatRequest request, String clientIp);
+    SseEmitter chatStream(AgentChatRequest request, String clientIp, String anonymousId);
 
-    List<AgentConversationView> conversations(Long userId);
+    List<AgentConversationView> conversations(Long userId, String anonymousId);
 
-    List<AgentMessageView> messages(Long userId, Long conversationId);
+    List<AgentMessageView> messages(Long userId, String anonymousId, Long conversationId);
 
-    void deleteConversation(Long userId, Long conversationId);
+    void deleteConversation(Long userId, String anonymousId, Long conversationId);
 }

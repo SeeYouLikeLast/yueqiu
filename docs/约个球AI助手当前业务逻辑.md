@@ -1,7 +1,7 @@
 # 约个球 AI 助手当前业务逻辑
 
 > 最后更新：2026-07-19
-> 本文只描述当前代码已经实现的行为。RAG 等未来方案见《约个球AI助手Agent实施规划.md》。
+> 本文只描述当前代码已经实现的行为。后续演进方案见《约个球AI助手Agent实施规划.md》。
 
 ## 1. 先理解当前实现是什么
 
@@ -10,6 +10,8 @@
 ```text
 Spring AI Alibaba StateGraph 多节点编排
   + 后端结构化会话记忆
+  + 实体约束的博客/评价/装备心得混合 RAG
+  + 后端统一、可解释推荐评分
   + DashScope 从真实候选中选择 cardId 并生成逐卡理由
   + 后端校验并生成事实回答
   + Vue 渲染文本和业务卡片
@@ -44,7 +46,9 @@ flowchart TD
     T4 --> R["mergeCandidates"]
     T2 --> R
     T3 --> R
-    R --> L["selectCandidates：cardId + 逐卡理由"]
+    R --> K["enrichKnowledge：实体约束 RAG"]
+    K --> Q["scoreCandidates：统一推荐评分"]
+    Q --> L["selectCandidates：cardId + 逐卡理由"]
     L --> G["后端校验 ID、补齐关系和事实化回答"]
     G --> P2["persistAnswer：短事务 B"]
     P2 --> D["SSE done"]
@@ -61,6 +65,9 @@ flowchart TD
 | 各节点业务实现 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentServiceImpl.java` |
 | 结构化需求 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRequirementService.java` |
 | 短事务持久化 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentPersistenceService.java` |
+| 游客匿名身份 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentAnonymousSessionResolver.java` |
+| 统一评分 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRecommendationScorer.java` |
+| RAG 检索 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRagService.java` |
 | 并行工具线程池 | `backend/src/main/java/com/hm/badminton/config/AgentAsyncConfig.java` |
 | 场所工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/PlaceAgentTool.java` |
 | 场馆商品工具 | `backend/src/main/java/com/hm/badminton/service/agent/tools/VenueProductAgentTool.java` |
@@ -81,9 +88,10 @@ flowchart TD
 
 1. 切换到助手页面。
 2. 查询 `/api/agent/status`，判断 DashScope 是否接入。
-3. 登录用户读取最近一次历史会话。
-4. 游客不恢复历史记录，刷新页面后聊天区为空。
-5. 聚焦底部输入框。
+3. 登录用户从 MySQL 读取最近一次历史会话。
+4. 游客首次进入聊天区为空；提问后凭 `HttpOnly` 匿名 Cookie 从 Redis 恢复最近会话。
+5. 登录用户和游客均可打开历史面板、切换会话、确认后删除会话。
+6. 聚焦底部输入框。
 
 快捷问题会先打开运动选择器。用户可以选择一个、多个运动或“不限球类”。前端发送：
 
@@ -116,11 +124,11 @@ flowchart TD
 | GET | `/api/agent/status` | 否 | 查询模型是否接入 |
 | POST | `/api/agent/chat` | 否 | 非流式聊天，主要作为兼容入口 |
 | POST | `/api/agent/chat/stream` | 否 | 当前前端使用的 SSE 聊天入口 |
-| GET | `/api/agent/conversations` | 是 | 查询当前用户最近 30 个会话 |
-| GET | `/api/agent/conversations/{id}/messages` | 是 | 查询一个会话的消息和卡片 |
-| DELETE | `/api/agent/conversations/{id}` | 是 | 软删除自己的会话 |
+| GET | `/api/agent/conversations` | 否 | 登录用户查 MySQL；游客查自己的 Redis 会话索引 |
+| GET | `/api/agent/conversations/{id}/messages` | 否 | 按登录身份或匿名 Cookie 校验归属后查询消息和卡片 |
+| DELETE | `/api/agent/conversations/{id}` | 否 | 登录用户软删除；游客直接删除自己的 Redis 会话 |
 
-登录要求由 `UserContext.requireUserId()` 和前端登录跳转共同保证。删除会话只把 `status` 改为 `0`，同时清除对应结构化需求缓存。
+三个历史接口均允许游客访问。登录用户以 `userId` 校验 MySQL 会话归属；游客使用不可猜测的 `hm_agent_guest` Cookie 和负数会话 ID 共同定位 Redis 数据。两者删除时都会清除结构化需求缓存。
 
 ## 5. 一次聊天请求的完整步骤
 
@@ -132,6 +140,8 @@ beginTurn
   -> dispatchTools
   -> [queryPlacesAndProducts | queryActivities | queryEquipment]
   -> mergeCandidates
+  -> enrichKnowledge
+  -> scoreCandidates
   -> selectCandidates
   -> persistAnswer
 ```
@@ -154,20 +164,21 @@ agent:rate:ip:{ip}
 
 `AgentPersistenceService.beginTurn()`：
 
-1. 检查 `conversationId` 是否属于当前用户且仍有效。
-2. 没有可复用会话时创建新会话。
-3. 将用户问题写入 `agent_message`。
-4. 立即提交事务，释放数据库连接。
+1. 登录用户检查 `conversationId` 是否属于本人；会话和用户问题写入 MySQL。
+2. 游客由后端签发 `HttpOnly` 的 `hm_agent_guest` Cookie；会话元数据、消息和索引写入 Redis，不写 `userId=0` 数据库行。
+3. 没有可复用会话时创建新会话；游客使用负数会话 ID，与 MySQL 正数 ID 隔离。
+4. 写入结束后立即离开持久化步骤，释放数据库连接。
 
 高德和 DashScope 调用不会占着数据库事务等待。
 
 ### 5.3 读取并合并结构化需求
 
-先从 Redis 读取，未命中再读 MySQL：
+结构化需求优先从 Redis 快速读取。登录会话缓存未命中时回源 MySQL；游客会话回源自己的 Redis 元数据：
 
 ```text
 Redis: agent:conversation:requirement:{conversationId}
-MySQL: agent_conversation.requirements_json
+登录用户: MySQL agent_conversation.requirements_json
+游客: agent:anonymous:conversation:{anonymousId}:{conversationId}
 ```
 
 本轮明确条件覆盖旧条件，本轮未提及的条件继续沿用。过期日期会在读取时清理。
@@ -185,7 +196,28 @@ MySQL: agent_conversation.requirements_json
 
 场馆团购依赖场所搜索结果，所以它和场所查询封装在同一个分支中，严格执行“高德场所 -> 对应场馆团购”。每个工具调用仍受 `tool-timeout-seconds` 限制，超时或异常时该分支返回空结果，不阻塞其他分支。
 
-### 5.5 模型选择候选
+### 5.5 实体约束 RAG
+
+`enrichKnowledge` 只处理已经通过业务工具验证的卡片：
+
+1. 场馆评价按 `city + sportCode + placeRank` 定位本地场所记录，只绑定当前真实高德场所卡。
+2. 装备博客只绑定 `related_type=EQUIPMENT` 且 `related_id` 相同的装备卡。
+3. 场馆商品博客只绑定相同商品，并可同时为同一真实场所提供软知识。
+4. 向量可由 DashScope Embedding 生成并按内容哈希缓存到 Redis；不可用时自动使用中文词法相似度。
+5. 证据保留来源类型、来源 ID、标题、摘录和相关度，不允许覆盖价格、库存、时段等硬事实。
+
+### 5.6 统一推荐评分
+
+`scoreCandidates` 对所有卡片执行同一个评分入口，并按卡片类型使用不同业务因子。公共因子包括运动、当前可用、预算、水平、用户偏好、RAG 口碑和排序偏好；类型因子分别关注场所距离、团购时段、活动名额、装备评分与库存。结果写入：
+
+```text
+recommendScore   0-100 最终分
+scoreBreakdown   每个因子的得分
+rankingVersion   当前为 unified-v1
+recommendReasons 确定性兜底理由
+```
+
+### 5.7 模型选择候选
 
 后端把候选裁剪成人类可读字段，并发送给 DashScope。模型只能返回：
 
@@ -202,7 +234,7 @@ MySQL: agent_conversation.requirements_json
 
 模型不负责创造最终价格、库存、距离或时段。`recommendationReasons` 必须按已选 `cardId` 分别返回；后端只接受本轮已验证卡片对应的短理由，重复理由会被丢弃。`explanation` 仍只写调试日志，不直接展示。
 
-### 5.6 后端校验和补齐
+### 5.8 后端校验和补齐
 
 模型结果会经过：
 
@@ -215,21 +247,21 @@ MySQL: agent_conversation.requirements_json
 7. AI 逐卡理由只能绑定到通过校验的 `cardId`。
 8. 最终场所和团购组合最多保留 6 张底层卡片。
 
-### 5.7 后端生成事实回答
+### 5.9 后端生成事实回答
 
 最终回答由 `groundedAnswer()` 根据已验证卡片生成，而不是直接展示模型自由文本。
 
 回答中的名称、价格、日期和时段全部来自真实卡片。DashScope 正常时，逐项推荐理由由模型根据对应卡片事实生成；模型不可用、格式错误或理由重复时，回退到工具层基于时段、价格、退款规则和场景生成的事实理由。推荐理由只显示在上方回答，不在下方场所卡片中重复展示。
 
-### 5.8 短事务 B：保存结果
+### 5.10 短事务 B：保存结果
 
-`AgentPersistenceService.completeTurn()` 在一个短事务内：
+登录用户的 `AgentPersistenceService.completeTurn()` 在一个短事务内：
 
 1. 保存助手回答。
 2. 保存最终业务卡片 JSON。
 3. 更新会话的结构化需求 JSON 和时间。
 
-随后再把结构化需求写入 Redis，默认 60 分钟并带随机 TTL。
+游客的答案、卡片和结构化需求直接写入匿名 Redis 会话。随后结构化需求还会写入快速读取缓存：登录用户默认 60 分钟，游客与匿名历史 TTL 对齐。
 
 ## 6. 结构化会话记忆
 
@@ -238,13 +270,20 @@ MySQL: agent_conversation.requirements_json
 | 字段 | 含义 | 示例 |
 | --- | --- | --- |
 | `sportCodes` | 一个或多个运动编码 | `badminton`、`table_tennis` |
+| `city` | 本轮目标城市 | `西安市` |
 | `targetDate` | 目标日期 | `2026-07-18` |
 | `startTime` | 开始时间 | `19:00` |
 | `endTime` | 结束时间 | `20:00` |
-| `maxBudget` | 最高预算 | `50` |
+| `durationMinutes` | 期望时长 | `60` |
+| `minBudget/maxBudget` | 最低与最高预算 | `100-300` |
 | `maxDistanceMeters` | 最远距离 | `3000` |
 | `level` | 水平要求 | `不限`、`初级`、`中级`、`高级` |
 | `equipmentKeyword` | 归一化后的装备类别 | `鞋`、`球拍`、`手胶` |
+| `preferenceTags/avoidTags` | 偏好和排除项 | `停车`、`灯光好`、`不拥挤` |
+| `sortPreference` | 排序目标 | `DISTANCE`、`PRICE`、`VALUE` |
+| `availabilityRequired` | 是否要求当前可用 | `true` |
+| `refundableRequired` | 是否要求支持退款 | `true` |
+| `fieldSources` | 字段来源 | `request/rule/profile/follow-up` |
 | `intents` | 当前业务意图 | `PLACE`、`ACTIVITY`、`EQUIPMENT` |
 | `lastSelectedCardIds` | 上轮最终卡片 | 用于记录上一轮选择 |
 
@@ -253,8 +292,10 @@ MySQL: agent_conversation.requirements_json
 - 运动：羽毛球、乒乓球、足球、篮球、网球、排球。
 - 日期：今天、今晚、明天、后天、完整日期、月日。
 - 时间：`19:00-21:00`、`19点`、晚上、上午、下午、下班后。
-- 预算：`50 元以内`、`预算 300`。
+- 预算：`50 元以内`、`预算 300`、`至少 200 元`、`100-300 元`。
 - 距离：`3km`、`1500米`。
+- 偏好：停车、淋浴、地铁、灯光、地胶、环境、新手友好，以及否定条件。
+- 排序：最近、最低价、最高评分、时间优先和性价比。
 - 水平：不限、新手、初级、中级、高级、进阶。
 - 装备类别：把“鞋子/球鞋/训练鞋”归一为“鞋”，并识别球拍、手胶、护具、球包、球袜等类别。
 - 意图：根据场所、团购、活动、搭子、装备等关键词判断。
@@ -337,7 +378,7 @@ MySQL: agent_conversation.requirements_json
 - 先查询同城市、同运动的“他人发起”活动，再由 `ActivityAgentTool` 做语义筛选，避免 SQL 字符串等值比较误判。
 - 排除当前登录用户自己创建的活动。
 - 排除人数已满的活动。
-- 只返回结束时间晚于当前时间的有效活动。
+- “他人发起”和 AI 推荐只返回开始时间晚于当前时间的活动，场次开始后立即停止推荐；“自己发起/自己加入”仍可查看尚未结束的进行中活动。
 - 用户指定日期时只保留当天活动；指定时段时按区间重叠判断，例如活动 `19:00-21:00` 可以匹配需求 `19:00-20:00`。
 - 水平按最低门槛兼容：中级用户可以参加“初级以上”，高级用户可以参加初级或中级门槛；“不限”表示取消水平限制，不会查询字面值为“不限”的活动。
 - 每个运动最多加入 2 个候选。
@@ -345,15 +386,16 @@ MySQL: agent_conversation.requirements_json
 
 无结果时，后端返回的是可直接执行的快捷问题：
 
-- `查看今天19:00可加入的局`
-- `不限水平查看今天可加入的局`
+- 19:00 前：`查看今天19:00可加入的局`、`不限水平查看今天可加入的局`
+- 19:00 后：`查看明天19:00可加入的局`、`不限水平查看明天可加入的局`
 
 这两个问题会重新解析日期、时间和水平，不再使用“调整约球时间”这种没有新条件的模糊指令，因此不会错误沿用上一轮筛选。
 
 演示活动的时间维护规则：
 
-- `data.sql` 中 24 场 `DEMO_*` 活动全部使用当天 `19:00-21:00`，不再分散到未来 1 至 7 天。
-- 应用启动时和每天北京时间 `00:05`，`ActivityMaintenanceTask` 会把全部 `DEMO_*` 活动重新对齐到当天，重复执行是幂等的。
+- `data.sql` 中 48 场 `DEMO_*` 活动覆盖 4 城市 × 6 球类 × 今天/明天，时段统一为 `19:00-21:00`。
+- `_D0` 表示今天，`_D1` 表示明天。应用启动时和每天北京时间 `00:05`，`ActivityMaintenanceTask` 会把它们重新对齐到滚动两日窗口，重复执行是幂等的。
+- 今天 19:00 开始后，D0 场次不再出现在可加入推荐中，系统自然回退到明天的 D1 场次。
 - 维护 SQL 只识别 `place_id` 以 `DEMO_` 开头的演示记录；用户真实发起的活动绝不改期，过期后只会转为“已结束”。
 - AI 活动工具与普通约球页读取同一张活动表，因此两处看到的演示日期一致。
 
@@ -511,16 +553,23 @@ Redis：
 
 ```text
 agent:conversation:requirement:{conversationId}  结构化短期需求
+agent:anonymous:conversations:{anonymousId}      游客历史索引
+agent:anonymous:conversation:{anonymousId}:{id}  游客会话元数据和结构化需求
+agent:anonymous:messages:{anonymousId}:{id}      游客消息与卡片
+agent:rag:embedding:{contentHash}                 RAG 向量缓存
 agent:rate:user:{userId}                         登录用户限流
 agent:rate:ip:{ip}                               游客限流
 ```
 
+游客会话默认保留 7 天，最多 30 个会话，每个会话最多 100 条消息；每次访问会续期。浏览器清除 Cookie 或 TTL 到期后，匿名历史无法恢复。
+
 事务边界：
 
 ```text
-事务 A：创建/复用会话 + 保存用户问题
-事务外：高德 + MySQL 查询工具 + DashScope
-事务 B：保存助手消息 + 卡片 + requirements_json
+登录事务 A：创建/复用会话 + 保存用户问题
+事务外：高德 + MySQL 查询工具 + RAG/Embedding + DashScope
+登录事务 B：保存助手消息 + 卡片 + requirements_json
+游客持久化：Redis 短操作，不开启跨外部调用的数据库事务
 ```
 
 这样不会因为模型响应慢而长时间占用数据库连接。
@@ -532,6 +581,7 @@ agent:rate:ip:{ip}                               游客限流
 ```text
 agent.step requestId=... step=places:badminton elapsedMs=... count=...
 agent.step requestId=... step=venue-products:badminton elapsedMs=... count=...
+agent.step requestId=... step=rag elapsedMs=...
 agent.step requestId=... step=model elapsedMs=...
 agent.total requestId=... conversationId=... elapsedMs=... cards=...
 ```
@@ -543,6 +593,7 @@ agent.total requestId=... conversationId=... elapsedMs=... cards=...
 - 高德场所查询。
 - 场馆库存查询。
 - 活动或装备查询。
+- RAG 评价、博客和装备心得检索。
 - DashScope 模型。
 - 保存回答。
 
@@ -569,6 +620,14 @@ hm:
     rate-limit-per-minute: 10
     tool-timeout-seconds: 5
     tool-threads: 6
+    anonymous-history-ttl-days: 7
+    anonymous-max-conversations: 30
+    anonymous-max-messages-per-conversation: 100
+    rag-enabled: true
+    rag-embedding-enabled: ${AI_RAG_EMBEDDING_ENABLED:true}
+    rag-candidate-limit: 48
+    rag-top-k: 3
+    rag-embedding-cache-days: 7
 ```
 
 生产环境变量：
@@ -604,33 +663,37 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 
 ## 17. 当前仍存在的不足
 
-### 17.1 游客消息仍会写入数据库
-
-前端游客刷新后不恢复聊天，但后端当前使用 `userId=0` 保存游客会话。它们不会显示在游客历史页面，却会在数据库积累。后续应改为匿名会话 ID、短期 Redis 会话，或增加定时清理。
-
-### 17.2 需求识别主要依靠关键词和正则
+### 17.1 需求识别仍以规则为主
 
 当前结构化需求稳定、便宜，但对“预算别太高”“离公司近点”“周六晚饭后”这类模糊表达能力有限。后续可以增加一个受 JSON Schema 约束的模型需求提取节点，再由 Java 校验。
 
-### 17.3 场所候选目前只取前两处
+### 17.2 场所候选目前只取前两处
 
 高德单次最多返回 6 条，数量不足时已经自动扩圈，但当前仍只为前两处进入最终工具链并查询团购。这样请求数量小、响应快，但多样性不足。后续可先批量查询可售情况，再选 3 至 4 个差异明显的场所。
 
-### 17.4 Graph 仍是确定性工作流
+### 17.3 Graph 仍是确定性工作流
 
 当前已经完成 StateGraph 多节点编排和并行分支，但需求意图仍由规则解析，节点路由也由后端业务规则控制。它还没有使用模型动态规划工具，也没有启用 Graph Checkpointer；跨轮业务记忆继续由现有 MySQL + Redis 管理。这是当前安全边界，不应描述成完全自治 Agent。
 
-### 17.5 尚无 RAG
+### 17.4 RAG 仍是轻量实现
 
-博客、场馆评价和装备心得尚未向量化检索。当前回答适合价格、距离、库存和时段等结构化事实，不擅长回答“环境到底怎么样”“这个球拍长期使用感受如何”等主观问题。
+当前已接入实体约束的混合 RAG，但仍按完整博客/评价检索，尚未做长文本分段、增量索引、召回率评估和用户反馈学习。数据量明显增大后应引入专用向量存储，而不是无限扩张 Redis 向量缓存。
+
+### 17.5 游客历史不会自动归并账号
+
+游客已能查看、切换和删除自己的 Redis 历史，但清除 Cookie、更换浏览器或 TTL 到期会丢失；游客随后登录时也不会自动合并到账号，避免未经确认污染用户正式历史。
 
 ### 17.6 SSE 还不是完整流式回答
 
 页面能及时看到查询阶段，但正文需要等待模型选卡完成。可以在保持结构化选卡的前提下，再增加一个经过事实约束的文本流式渲染阶段。
 
-### 17.7 部分配置和字段尚未真正使用
+### 17.7 评分权重仍是代码配置
 
-`max-history-messages`、`max-tool-calls`，以及旧的 `agent:memory:`、`agent:conversation:context:` 常量目前没有进入主链路；`agent_message.tool_name/tool_result_json` 也尚未保存工具轨迹。后续应删除冗余项或在 Graph 阶段正式使用。
+统一评分已经产生 `scoreBreakdown`，但权重目前固定在 Java 中。下一步应把权重外置，并基于点击、加购、购买、加入活动等反馈做离线评估，避免凭主观长期调参。
+
+### 17.8 部分配置和字段尚未真正使用
+
+`agent_message.tool_name/tool_result_json` 尚未保存工具轨迹。若后续需要逐节点审计，可在 Graph 节点完成时记录摘要；当前不要保存完整高德响应或模型提示词，避免无意义的数据膨胀。
 
 ## 18. 推荐阅读代码顺序
 
@@ -643,8 +706,10 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 5. `AgentServiceImpl.beginTurn()` 到 `persistAnswer()`，理解每个节点的业务实现。
 6. `AgentRequirementService.merge()`，理解多轮上下文。
 7. 四个 `service/agent/tools` 工具类，理解候选从哪里来。
-8. `VenueItemService.agentCandidates()`，理解真实时段匹配。
-9. `AgentServiceImpl.callModelOrFallback()`，理解模型选卡和逐卡理由。
-10. `AgentServiceImpl.finalizeSelection()`，理解后端怎样补齐两处场所和团购。
-11. `AgentPersistenceService`，理解两个短事务。
-12. 回到 `App.vue` 的 `agentPlaceBundles()` 和卡片模板，理解最终页面。
+8. `AgentRagService`，理解评价、博客、装备心得如何按实体绑定。
+9. `AgentRecommendationScorer`，理解统一评分与分项得分。
+10. `VenueItemService.agentCandidates()`，理解真实时段匹配。
+11. `AgentServiceImpl.callModelOrFallback()`，理解模型选卡和逐卡理由。
+12. `AgentServiceImpl.finalizeSelection()`，理解后端怎样补齐两处场所和团购。
+13. `AgentPersistenceService` 与 `AgentAnonymousSessionResolver`，理解登录/游客两种存储。
+14. 回到 `App.vue` 的 `agentPlaceBundles()` 和卡片模板，理解最终页面。

@@ -1,8 +1,6 @@
 package com.hm.badminton.service.agent.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.common.BusinessException;
 import com.hm.badminton.config.AgentProperties;
@@ -17,10 +15,7 @@ import com.hm.badminton.dto.agent.AgentMessageView;
 import com.hm.badminton.dto.agent.AgentModelDecision;
 import com.hm.badminton.dto.agent.AgentRequirement;
 import com.hm.badminton.dto.agent.AgentTurnContext;
-import com.hm.badminton.entity.AgentConversation;
-import com.hm.badminton.entity.AgentMessage;
-import com.hm.badminton.mapper.agent.AgentConversationMapper;
-import com.hm.badminton.mapper.agent.AgentMessageMapper;
+import com.hm.badminton.service.agent.IAgentRagService;
 import com.hm.badminton.service.agent.IAgentService;
 import com.hm.badminton.service.agent.IAgentPersistenceService;
 import com.hm.badminton.service.agent.IAgentRequirementService;
@@ -46,7 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,6 +71,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AgentServiceImpl.class);
     private static final int MIN_PLACE_RECOMMENDATIONS = 2;
+    private static final LocalTime DEMO_ACTIVITY_START_TIME = LocalTime.of(19, 0);
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String RUN_TURN = "turn";
     private static final String RUN_REQUIREMENT = "requirement";
     private static final String RUN_CONTEXT = "recommendationContext";
@@ -98,7 +96,12 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             "pros",
             "cons",
             "recommendScore",
-            "recommendReasons"
+            "scoreBreakdown",
+            "recommendReasons",
+            "ragEvidence",
+            "knowledgeHighlights",
+            "knowledgeSources",
+            "knowledgeScore"
     );
     private static final String SYSTEM_PROMPT = """
             你是“约个球”平台的候选选择器，不负责创造业务事实。
@@ -108,6 +111,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             recommendationReasons 必须为每个 selectedCardId 分别生成一句有差异的推荐理由。
             每条理由至少引用一个该卡片独有的信息，例如场馆名、价格、距离或项目特点；禁止只复述所有卡片共有的规则。
             理由只能使用该卡片中已有的时间、价格、距离、水平、场景、优缺点等事实，不能补充未提供的信息。
+            ragEvidence 是博客、场馆评价或装备心得的可追溯软知识；可以引用其标题和摘录，但不能把主观体验写成库存、价格或可售时段事实。
             只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 以外的内容：
             {"selectedCardIds":["cardId"],"recommendationReasons":{"cardId":"该卡片的具体推荐理由"},"explanation":"本次选择的总体依据"}
             explanation 只概括总体选择依据；页面上的逐项理由来自 recommendationReasons。
@@ -115,8 +119,6 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
 
     private final AgentProperties agentProperties;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
-    private final AgentConversationMapper conversationMapper;
-    private final AgentMessageMapper messageMapper;
     private final PlaceAgentTool placeTool;
     private final VenueProductAgentTool venueProductTool;
     private final ActivityAgentTool activityTool;
@@ -126,12 +128,12 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     private final StringRedisTemplate redisTemplate;
     private final IAgentPersistenceService persistenceService;
     private final IAgentRequirementService requirementService;
+    private final IAgentRagService ragService;
+    private final AgentRecommendationScorer recommendationScorer;
     private final AgentGraphWorkflow agentGraphWorkflow;
 
     public AgentServiceImpl(AgentProperties agentProperties,
                             ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
-                            AgentConversationMapper conversationMapper,
-                            AgentMessageMapper messageMapper,
                             PlaceAgentTool placeTool,
                             VenueProductAgentTool venueProductTool,
                             ActivityAgentTool activityTool,
@@ -141,11 +143,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                             StringRedisTemplate redisTemplate,
                             IAgentPersistenceService persistenceService,
                             IAgentRequirementService requirementService,
+                            IAgentRagService ragService,
+                            AgentRecommendationScorer recommendationScorer,
                             AgentGraphWorkflow agentGraphWorkflow) {
         this.agentProperties = agentProperties;
         this.chatClientBuilderProvider = chatClientBuilderProvider;
-        this.conversationMapper = conversationMapper;
-        this.messageMapper = messageMapper;
         this.placeTool = placeTool;
         this.venueProductTool = venueProductTool;
         this.activityTool = activityTool;
@@ -155,6 +157,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         this.redisTemplate = redisTemplate;
         this.persistenceService = persistenceService;
         this.requirementService = requirementService;
+        this.ragService = ragService;
+        this.recommendationScorer = recommendationScorer;
         this.agentGraphWorkflow = agentGraphWorkflow;
     }
 
@@ -164,18 +168,18 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     @Override
-    public AgentChatResponse chat(AgentChatRequest request, String clientIp) {
-        return executeChat(request, clientIp, userContext.current().orElse(null), progress -> {
+    public AgentChatResponse chat(AgentChatRequest request, String clientIp, String anonymousId) {
+        return executeChat(request, clientIp, anonymousId, userContext.current().orElse(null), progress -> {
         });
     }
 
     @Override
-    public SseEmitter chatStream(AgentChatRequest request, String clientIp) {
+    public SseEmitter chatStream(AgentChatRequest request, String clientIp, String anonymousId) {
         LoginUser loginUser = userContext.current().orElse(null);
         SseEmitter emitter = new SseEmitter(120_000L);
         Thread.startVirtualThread(() -> {
             try {
-                AgentChatResponse response = executeChat(request, clientIp, loginUser,
+                AgentChatResponse response = executeChat(request, clientIp, anonymousId, loginUser,
                         progress -> sendEvent(emitter, progress.event(), progress.data()));
                 sendEvent(emitter, "done", response);
                 emitter.complete();
@@ -193,10 +197,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
 
     private AgentChatResponse executeChat(AgentChatRequest request,
                                           String clientIp,
+                                          String anonymousId,
                                           LoginUser loginUser,
                                           Consumer<AgentGraphProgress> progress) {
         return agentGraphWorkflow.execute(this,
-                new AgentGraphRunContext(request, clientIp, loginUser, progress));
+                new AgentGraphRunContext(request, clientIp, anonymousId, loginUser, progress));
     }
 
     /** First graph node: protect the endpoint and persist the user's question in a short transaction. */
@@ -205,11 +210,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         if (!agentProperties.isEnabled()) {
             throw new BusinessException(503, "AI 助手暂未开启");
         }
-        Long userId = run.getLoginUser() == null ? 0L : run.getLoginUser().getId();
+        Long userId = run.getLoginUser() == null ? null : run.getLoginUser().getId();
         checkRateLimit(userId, run.getClientIp());
         run.emit(AgentGraphProgress.stage("理解需求", "正在理解你的运动、时间和预算要求"));
         AgentTurnContext turn = timed(run.getRequestId(), "persist-question",
-                () -> persistenceService.beginTurn(userId, run.getRequest()));
+                () -> persistenceService.beginTurn(userId, run.getAnonymousId(), run.getRequest()));
         run.put(RUN_TURN, turn);
         run.put(AgentGraphState.CONVERSATION_ID, turn.conversationId());
         run.emit(new AgentGraphProgress("conversation", Map.of("conversationId", turn.conversationId())));
@@ -220,7 +225,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     public void understandRequirement(AgentGraphRunContext run) {
         AgentTurnContext turn = run.require(RUN_TURN, AgentTurnContext.class);
         AgentRequirement previous = timed(run.getRequestId(), "memory-load",
-                () -> requirementService.load(turn.conversationId()));
+                () -> requirementService.load(turn));
         AgentRequirement requirement = timed(run.getRequestId(), "requirement-merge",
                 () -> requirementService.merge(previous, run.getRequest(), run.getLoginUser()));
         run.put(RUN_REQUIREMENT, requirement);
@@ -339,9 +344,40 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         cards.addAll(equipment);
         assignCardIds(cards);
         AgentContext context = base.withSearchExpansion(searchExpansion(run))
-                .withCards(cards.stream().limit(18).toList());
+                .withCards(cards.stream().limit(24).toList());
         run.put(RUN_CONTEXT, context);
         run.emit(new AgentGraphProgress("cards", context.cards()));
+    }
+
+    /** Retrieves only entity-bound reviews/blogs and never changes hard business facts. */
+    @Override
+    public void enrichKnowledge(AgentGraphRunContext run) {
+        AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
+        if (context.cards().isEmpty() || clarification(run) != null) {
+            run.put(AgentGraphState.RAG_EVIDENCE_COUNT, 0);
+            return;
+        }
+        run.emit(AgentGraphProgress.stage("检索体验", "正在核对相关评价、博客和装备心得"));
+        List<AgentCard> enriched = timed(run.getRequestId(), "rag",
+                () -> ragService.enrich(run.getRequest().getMessage(), context.city(),
+                        context.requirement(), context.cards()));
+        int evidenceCount = enriched.stream()
+                .mapToInt(card -> card.getMeta() != null && card.getMeta().get("ragEvidence") instanceof List<?> list
+                        ? list.size() : 0)
+                .sum();
+        run.put(RUN_CONTEXT, context.withCards(enriched));
+        run.put(AgentGraphState.RAG_EVIDENCE_COUNT, evidenceCount);
+    }
+
+    /** Applies one explainable scoring policy after all hard facts and soft evidence are available. */
+    @Override
+    public void scoreCandidates(AgentGraphRunContext run) {
+        AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
+        List<AgentCard> scored = recommendationScorer
+                .scoreAndSort(context.cards(), context.requirement())
+                .stream().limit(18).toList();
+        run.put(RUN_CONTEXT, context.withCards(scored));
+        run.put(AgentGraphState.SCORED_COUNT, scored.size());
     }
 
     /** Model node: choose existing card ids and attach validated, card-specific AI reasons. */
@@ -376,13 +412,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         AgentRequirement requirement = run.require(RUN_REQUIREMENT, AgentRequirement.class);
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         AgentDecisionResult decision = run.require(RUN_DECISION, AgentDecisionResult.class);
-        Long userId = run.getLoginUser() == null ? 0L : run.getLoginUser().getId();
         timed(run.getRequestId(), "persist-answer", () -> {
-            persistenceService.completeTurn(turn.conversationId(), userId,
-                    decision.answer(), decision.cards(), requirement);
+            persistenceService.completeTurn(turn, decision.answer(), decision.cards(), requirement);
             return null;
         });
-        requirementService.cache(turn.conversationId(), requirement);
+        requirementService.cache(turn, requirement);
         AgentContext selectedContext = context.withCards(decision.cards());
         AgentClarificationResolver.Clarification clarification = clarification(run);
         List<String> replies = clarification == null
@@ -400,42 +434,18 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     @Override
-    public List<AgentConversationView> conversations(Long userId) {
-        return conversationMapper.selectList(new LambdaQueryWrapper<AgentConversation>()
-                        .eq(AgentConversation::getUserId, userId)
-                        .eq(AgentConversation::getStatus, 1)
-                        .orderByDesc(AgentConversation::getUpdatedAt)
-                        .last("limit 30"))
-                .stream()
-                .map(this::toConversationView)
-                .toList();
+    public List<AgentConversationView> conversations(Long userId, String anonymousId) {
+        return persistenceService.conversations(userId, anonymousId);
     }
 
     @Override
-    public List<AgentMessageView> messages(Long userId, Long conversationId) {
-        AgentConversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !Objects.equals(conversation.getUserId(), userId)) {
-            throw new BusinessException(404, "会话不存在");
-        }
-        return messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
-                        .eq(AgentMessage::getConversationId, conversationId)
-                        .orderByAsc(AgentMessage::getCreatedAt))
-                .stream()
-                .map(this::toMessageView)
-                .toList();
+    public List<AgentMessageView> messages(Long userId, String anonymousId, Long conversationId) {
+        return persistenceService.messages(userId, anonymousId, conversationId);
     }
 
     @Override
-    public void deleteConversation(Long userId, Long conversationId) {
-        AgentConversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !Objects.equals(conversation.getUserId(), userId)) {
-            throw new BusinessException(404, "会话不存在");
-        }
-        conversationMapper.updateById(new AgentConversation()
-                .setId(conversationId)
-                .setStatus(0)
-                .setUpdatedAt(LocalDateTime.now()));
-        redisTemplate.delete(RedisConstants.AGENT_CONVERSATION_CONTEXT_KEY + conversationId);
+    public void deleteConversation(Long userId, String anonymousId, Long conversationId) {
+        persistenceService.deleteConversation(userId, anonymousId, conversationId);
         requirementService.evict(conversationId);
     }
 
@@ -444,7 +454,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                                      LoginUser loginUser,
                                      AgentRequirement requirement) {
         List<String> sportCodes = requirement.getSportCodes() == null ? List.of() : requirement.getSportCodes();
-        String city = firstNotBlank(request.getCity(), loginUser == null ? null : loginUser.getCity(), "西安市");
+        String city = firstNotBlank(requirement.getCity(), request.getCity(),
+                loginUser == null ? null : loginUser.getCity(), "西安市");
         Double lng = request.getLng() != null ? request.getLng() : loginUser == null ? null : loginUser.getLongitude();
         Double lat = request.getLat() != null ? request.getLat() : loginUser == null ? null : loginUser.getLatitude();
         Integer budget = requirement.getMaxBudget() == null ? null : requirement.getMaxBudget().intValue();
@@ -915,8 +926,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 addQuickReply(replies, "换个场所关键词");
             } else if (hasIntent(context, "ACTIVITY")) {
                 // 快捷追问必须携带可以被结构化解析器执行的真实条件，不能只给模糊操作名。
-                addQuickReply(replies, "查看今天19:00可加入的局");
-                addQuickReply(replies, "不限水平查看今天可加入的局");
+                String dayText = LocalTime.now(BUSINESS_ZONE).isBefore(DEMO_ACTIVITY_START_TIME) ? "今天" : "明天";
+                addQuickReply(replies, "查看" + dayText + "19:00可加入的局");
+                addQuickReply(replies, "不限水平查看" + dayText + "可加入的局");
             } else {
                 addQuickReply(replies, "补充运动类型");
                 addQuickReply(replies, "补充预算范围");
@@ -1126,37 +1138,6 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         }
     }
 
-    private AgentConversationView toConversationView(AgentConversation conversation) {
-        AgentConversationView view = new AgentConversationView();
-        view.setId(conversation.getId());
-        view.setTitle(conversation.getTitle());
-        view.setCreatedAt(conversation.getCreatedAt());
-        view.setUpdatedAt(conversation.getUpdatedAt());
-        return view;
-    }
-
-    private AgentMessageView toMessageView(AgentMessage message) {
-        AgentMessageView view = new AgentMessageView();
-        view.setId(message.getId());
-        view.setRole(message.getRole());
-        view.setContent(message.getContent());
-        view.setCards(readCards(message.getCardsJson()));
-        view.setCreatedAt(message.getCreatedAt());
-        return view;
-    }
-
-    private List<AgentCard> readCards(String cardsJson) {
-        if (cardsJson == null || cardsJson.isBlank()) {
-            return List.of();
-        }
-        try {
-            return objectMapper.readValue(cardsJson, new TypeReference<List<AgentCard>>() {
-            });
-        } catch (JsonProcessingException e) {
-            return List.of();
-        }
-    }
-
     private String writeJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -1179,6 +1160,8 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         meta.put("placeTitle", place.getTitle());
         meta.put("placeSubtitle", place.getSubtitle());
         meta.put("city", place.getMeta().get("city"));
+        meta.put("placeRank", place.getMeta().get("placeRank"));
+        meta.put("distanceMeters", place.getMeta().get("distanceMeters"));
         meta.put("placeSource", "amap");
         if (place.getAction() != null) {
             meta.put("placeId", place.getAction().getId());

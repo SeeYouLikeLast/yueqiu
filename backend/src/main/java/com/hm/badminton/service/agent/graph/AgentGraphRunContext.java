@@ -24,16 +24,19 @@ public final class AgentGraphRunContext {
     private final long startedNanos = System.nanoTime();
     private final AgentChatRequest request;
     private final String clientIp;
+    private final String anonymousId;
     private final LoginUser loginUser;
     private final Consumer<AgentGraphProgress> progressConsumer;
     private final Map<String, Object> attributes = new ConcurrentHashMap<>();
 
     public AgentGraphRunContext(AgentChatRequest request,
                                 String clientIp,
+                                String anonymousId,
                                 LoginUser loginUser,
                                 Consumer<AgentGraphProgress> progressConsumer) {
         this.request = request;
         this.clientIp = clientIp;
+        this.anonymousId = anonymousId;
         this.loginUser = loginUser;
         this.progressConsumer = progressConsumer;
     }

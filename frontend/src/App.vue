@@ -494,6 +494,10 @@ const blogsTotal = ref(0)
 const followFeedLastId = ref<number | undefined>()
 const followFeedOffset = ref(0)
 const followFeedHasMore = ref(true)
+// 推荐流首屏会在首页空闲时预取；登录态改变后自动失效，避免复用游客的点赞/关注状态。
+let recommendedBlogsLoadedToken: string | null | undefined
+let recommendedBlogsRequest: Promise<void> | null = null
+let recommendedBlogsRequestToken: string | null | undefined
 const profileBlogsPage = ref(1)
 const profileBlogsTotal = ref(0)
 const headerVisible = ref(true)
@@ -857,7 +861,7 @@ function handleRequestError(error: unknown) {
 }
 
 function defaultAgentMessages(): AgentMessage[] {
-  // Guest conversations are intentionally in-memory only. A refresh starts with a clean assistant.
+  // A new guest starts blank; once a guest has chatted, history is restored from its HttpOnly-cookie Redis session.
   if (!authToken.value) return []
   return [
     {
@@ -901,14 +905,6 @@ function toAgentMessage(record: AgentMessageRecord): AgentMessage | null {
 
 async function loadLatestAgentHistory() {
   if (agentHistoryLoaded.value) return
-  if (!loggedIn.value) {
-    // Do not restore guest messages after a refresh. Login is required for persistent history.
-    agentMessages.value = []
-    agentConversationId.value = null
-    agentQuickReplies.value = initialAgentQuickReplies()
-    agentHistoryLoaded.value = true
-    return
-  }
   try {
     const conversations = await api<AgentConversation[]>('/agent/conversations')
     agentConversations.value = conversations
@@ -930,10 +926,6 @@ async function loadLatestAgentHistory() {
 }
 
 async function loadAgentConversations() {
-  if (!loggedIn.value) {
-    agentConversations.value = []
-    return
-  }
   loadingAgentHistory.value = true
   try {
     agentConversations.value = await api<AgentConversation[]>('/agent/conversations')
@@ -954,11 +946,6 @@ async function loadAgentStatus() {
 }
 
 async function openAgentHistory() {
-  if (!requireLogin('登录后可以切换历史聊天')) return
-  if (!loggedIn.value) {
-    message.value = '登录后可以切换历史聊天'
-    return
-  }
   agentHistoryVisible.value = true
   deletingAgentConversation.value = null
   await loadAgentConversations()
@@ -1017,7 +1004,7 @@ function cancelDeleteAgentConversation() {
 }
 
 async function confirmDeleteAgentConversation() {
-  if (!loggedIn.value || !deletingAgentConversation.value) return
+  if (!deletingAgentConversation.value) return
   const conversation = deletingAgentConversation.value
   loadingAgentHistory.value = true
   try {
@@ -1329,8 +1316,17 @@ async function loadSeckill() {
   seckillActivities.value = await api<SeckillActivity[]>(`/seckill/2?${params}`)
 }
 
-async function loadBlogs(page = 1, append = false) {
-  await ensureUserProfile()
+function isDefaultRecommendBlogRequest(page: number, append: boolean) {
+  return !append
+    && page === 1
+    && blogChannel.value === 'recommend'
+    && !blogSport.value
+    && !blogKeyword.value.trim()
+}
+
+async function fetchBlogs(page = 1, append = false) {
+  // 博客接口会自行从 Token 解析当前用户。资料请求仅用于页面其它区域，和博客查询并行即可。
+  const profileRequest = ensureUserProfile()
   if (blogChannel.value === 'follow' && !loggedIn.value) {
     blogs.value = []
     blogsPage.value = 1
@@ -1354,6 +1350,7 @@ async function loadBlogs(page = 1, append = false) {
     followFeedLastId.value = result.minTime || undefined
     followFeedOffset.value = result.offset || 0
     followFeedHasMore.value = Boolean(result.minTime) && records.length >= BLOG_PAGE_SIZE
+    await profileRequest
     return
   }
   const params = new URLSearchParams({
@@ -1366,6 +1363,50 @@ async function loadBlogs(page = 1, append = false) {
   blogs.value = append ? appendById(blogs.value, result.records) : result.records
   blogsPage.value = result.page
   blogsTotal.value = result.total
+  await profileRequest
+}
+
+async function loadBlogs(page = 1, append = false, force = false) {
+  const isDefaultRecommend = isDefaultRecommendBlogRequest(page, append)
+  const token = authToken.value || null
+  if (isDefaultRecommend && !force && recommendedBlogsLoadedToken === token && blogs.value.length) {
+    return
+  }
+  if (isDefaultRecommend && !force && recommendedBlogsRequest && recommendedBlogsRequestToken === token) {
+    return recommendedBlogsRequest
+  }
+
+  const request = fetchBlogs(page, append)
+  if (!isDefaultRecommend) {
+    return request
+  }
+  recommendedBlogsRequest = request
+  recommendedBlogsRequestToken = token
+  try {
+    await request
+    recommendedBlogsLoadedToken = token
+  } finally {
+    if (recommendedBlogsRequest === request) {
+      recommendedBlogsRequest = null
+      recommendedBlogsRequestToken = undefined
+    }
+  }
+}
+
+function preloadRecommendedBlogs() {
+  const preload = () => {
+    void loadBlogs().catch(() => {
+      // 预取失败不影响首页；真正进入社区时会按正常流程重试。
+    })
+  }
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+  }
+  if (idleWindow.requestIdleCallback) {
+    idleWindow.requestIdleCallback(preload, { timeout: 2500 })
+  } else {
+    window.setTimeout(preload, 700)
+  }
 }
 
 async function loadSeckillCategories() {
@@ -2512,9 +2553,55 @@ async function positionAgentOnEntry() {
   requestAnimationFrame(() => requestAnimationFrame(resetHeaderVisibility))
 }
 
+function sportCodesFromAgentContext(reply = '') {
+  const matched = sports.value
+    .filter((sport) => reply.includes(sport.name))
+    .map((sport) => sport.code)
+  if (matched.length) return [...new Set(matched)]
+
+  for (let index = agentMessages.value.length - 1; index >= 0; index -= 1) {
+    const item = agentMessages.value[index]
+    const cardSports = (item.cards || [])
+      .map((card) => String(card.meta?.sportCode || card.action?.payload?.sportCode || ''))
+      .filter(Boolean)
+    if (cardSports.length) return [...new Set(cardSports)]
+
+    const messageSports = sports.value
+      .filter((sport) => item.content.includes(sport.name))
+      .map((sport) => sport.code)
+    if (messageSports.length) return [...new Set(messageSports)]
+  }
+  return []
+}
+
+function replyNeedsSportSelection(reply: string) {
+  if (sportCodesFromAgentContext(reply).length) return false
+  return !hasAgentConversation.value
+}
+
+function handleAgentQuickReply(reply: string) {
+  if (replyNeedsSportSelection(reply)) {
+    openAgentSportPicker(reply)
+    return
+  }
+
+  const sportCodes = sportCodesFromAgentContext(reply)
+  const alreadyNamesSport = sports.value.some((sport) => reply.includes(sport.name))
+  const sportNames = sportCodes.map((code) => sportNameByCode(code))
+  const content = !alreadyNamesSport && sportNames.length
+    ? `${reply}（${sportNames.join('、')}）`
+    : reply
+  void sendAgentMessage(content, sportCodes)
+}
+
 function openAgentSportPicker(reply: string) {
   agentPendingQuickReply.value = reply
-  agentSelectedSportCodes.value = selectedSport.value ? [selectedSport.value] : []
+  const contextualSports = sportCodesFromAgentContext(reply)
+  agentSelectedSportCodes.value = contextualSports.length
+    ? contextualSports
+    : selectedSport.value
+      ? [selectedSport.value]
+      : []
   agentSportPickerVisible.value = true
   void nextTick(() => {
     document.getElementById('agent-sport-picker')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -3295,7 +3382,10 @@ onMounted(async () => {
   } catch {
     sports.value = fallbackSports
   }
-  await useCurrentLocation()
+  // 定位可能等待数秒；社区预取不依赖定位，两个任务并行避免首次切换仍在等网络。
+  const locationRequest = useCurrentLocation()
+  preloadRecommendedBlogs()
+  await locationRequest
   if (!places.value.length) {
     await loadCurrentTab()
   }
@@ -3880,7 +3970,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="title-actions">
             <button class="primary" type="button" @click="openBlogPublisher"><PenLine :size="16" /> 发动态</button>
-            <button class="ghost" @click="() => loadBlogs()"><Heart :size="16" /> 刷新</button>
+          <button class="ghost" @click="() => loadBlogs(1, false, true)"><Heart :size="16" /> 刷新</button>
           </div>
         </div>
 
@@ -4216,10 +4306,10 @@ onBeforeUnmount(() => {
           </article>
           <div v-if="visibleAgentQuickReplies.length" class="agent-quick-list" :class="{ followup: hasAgentConversation }">
             <div class="agent-quick-title">
-              <span>{{ hasAgentConversation ? '下一步可以问' : '试试这样问' }}</span>
+              <span>{{ hasAgentConversation ? '继续操作' : '试试这样问' }}</span>
             </div>
             <div class="agent-quick-stack">
-              <button v-for="reply in visibleAgentQuickReplies" :key="reply" type="button" @click="openAgentSportPicker(reply)">
+              <button v-for="reply in visibleAgentQuickReplies" :key="reply" type="button" @click="handleAgentQuickReply(reply)">
                 <span>{{ reply }}</span>
               </button>
             </div>
