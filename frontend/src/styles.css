@@ -2123,17 +2123,25 @@ p {
 
 .blog-detail-images {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.blog-detail-images.single-image {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .blog-detail-images img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 1;
   object-fit: cover;
   border-radius: 8px;
   background: #eef3ef;
 }
 
+.blog-detail-images.single-image img {
+  aspect-ratio: 4 / 3;
+}
 .blog-detail-card h2 {
   margin: 0;
   font-size: 22px;

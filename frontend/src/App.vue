@@ -789,6 +789,15 @@ function imageFallback(event: Event, fallback = FALLBACK_IMAGE) {
   image.src = fallback
 }
 
+/**
+ * 演示数据的图片统一位于 MinIO 的 /demo/ 目录。
+ * 这些文件只保留作数据兼容，页面改用本地 SVG，避免为虚构内容请求对象存储。
+ * 用户上传文件位于 /blog/、/avatar/ 等日期目录，不会被判定为演示图片。
+ */
+function isDemoAssetUrl(url?: string) {
+  return Boolean(url?.trim() && /\/demo\//i.test(url))
+}
+
 type ListCoverKind = 'place' | 'venue' | 'equipment' | 'community'
 type ListCoverLayout = 'thumbnail' | 'hero'
 
@@ -891,6 +900,19 @@ function venueListCover(item: VenueItem) {
   return listSvgCover('venue', item.title, item.sportCode, item.productTypeName)
 }
 
+function blogRelatedOptionCover(option?: BlogRelatedOption) {
+  if (!option) return listSvgCover('community', '关联内容', blogPublishForm.sportCode)
+  if (option.coverUrl && !isDemoAssetUrl(option.coverUrl)) {
+    return option.coverUrl
+  }
+  return listSvgCover(
+    option.type === 'EQUIPMENT' ? 'equipment' : 'venue',
+    option.title,
+    option.sportCode,
+    option.subtitle
+  )
+}
+
 function communitySvgCover(blog: BlogPost) {
   const palettes: Array<[string, string, string, string]> = [
     ['#fff4e4', '#ffd7a8', '#ef8a5a', '#6f3522'],
@@ -924,12 +946,38 @@ function communitySvgCover(blog: BlogPost) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
-function communityListCover(blog: BlogPost) {
-  return communitySvgCover(blog)
+/**
+ * 动态图片只能来自作者主动上传的 images。
+ *
+ * 旧版发布页曾把 relatedCoverUrl 自动塞进 images，导致装备封面被误当成动态照片。
+ * 这里同时清洗历史数据：关联商品封面不参与社区图片展示；没有作者图片时再使用
+ * 本地生成的社区插画，头像仍由独立的 avatar 字段渲染，不受此逻辑影响。
+ */
+function communityContentImages(blog: BlogPost) {
+  const relatedCover = blog.relatedCoverUrl?.trim()
+  return (blog.images || [])
+    .map((image) => image?.trim())
+    .filter((image): image is string =>
+      Boolean(image)
+      && image !== relatedCover
+      && !isDemoAssetUrl(image)
+    )
 }
 
-function communityDetailCover(blog: BlogPost) {
-  return communitySvgCover(blog)
+function communityListCover(blog: BlogPost) {
+  return communityContentImages(blog)[0] || communitySvgCover(blog)
+}
+
+function communityDetailImages(blog: BlogPost) {
+  const images = communityContentImages(blog)
+  return images.length ? images : [communitySvgCover(blog)]
+}
+
+function communityImageFallback(event: Event, blog: BlogPost) {
+  const image = event.target as HTMLImageElement
+  if (!image) return
+  image.onerror = null
+  image.src = communitySvgCover(blog)
 }
 
 function resetListPaging() {
@@ -2142,9 +2190,6 @@ function fillBlogPublishDraft(option?: BlogRelatedOption) {
   if (!blogPublishForm.content.trim()) {
     blogPublishForm.content = `今天体验了「${related.title}」，整体感受不错，适合周末约球或者下班后放松。`
   }
-  if (!blogPublishForm.imageUrls.length && related.coverUrl) {
-    blogPublishForm.imageUrls = [related.coverUrl]
-  }
 }
 
 async function openBlogPublisher() {
@@ -2200,7 +2245,8 @@ async function publishBlog() {
     message.value = '请填写动态正文'
     return
   }
-  const images = blogPublishForm.imageUrls
+  // 关联商品封面由 relatedCoverUrl 单独保存，不能混入作者上传的动态图片。
+  const images = blogPublishForm.imageUrls.filter((image) => image !== related.coverUrl)
   await wrap(async () => {
     await api<{ blogId: number }>('/blogs', {
       method: 'POST',
@@ -3833,9 +3879,8 @@ onBeforeUnmount(() => {
 
           <article v-if="selectedBlogRelatedOption()" class="publish-related-preview">
             <img
-              :src="selectedBlogRelatedOption()?.coverUrl || FALLBACK_IMAGE"
+              :src="blogRelatedOptionCover(selectedBlogRelatedOption())"
               :alt="selectedBlogRelatedOption()?.title"
-              @error="imageFallback"
             />
             <div>
               <span>{{ selectedBlogRelatedOption()?.subtitle }}</span>
@@ -3872,8 +3917,19 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="blog-detail-images">
-            <img :src="communityDetailCover(selectedBlog)" :alt="selectedBlog.title" />
+          <div
+            class="blog-detail-images"
+            :class="{ 'single-image': communityDetailImages(selectedBlog).length === 1 }"
+          >
+            <img
+              v-for="(image, index) in communityDetailImages(selectedBlog)"
+              :key="`${selectedBlog.id}:${image}`"
+              :src="image"
+              :alt="`${selectedBlog.title} ${index + 1}`"
+              loading="lazy"
+              decoding="async"
+              @error="communityImageFallback($event, selectedBlog)"
+            />
           </div>
           <p>{{ selectedBlog.content }}</p>
           <button class="blog-related detail-related" type="button" @click="openBlogRelated(selectedBlog)">
@@ -4154,6 +4210,7 @@ onBeforeUnmount(() => {
                 :alt="blog.title"
                 loading="lazy"
                 decoding="async"
+                @error="communityImageFallback($event, blog)"
               />
             </button>
             <div class="blog-body">
@@ -4808,6 +4865,7 @@ onBeforeUnmount(() => {
                   :alt="blog.title"
                   loading="lazy"
                   decoding="async"
+                  @error="communityImageFallback($event, blog)"
                 />
               </button>
               <div class="blog-body">
