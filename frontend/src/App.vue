@@ -789,6 +789,149 @@ function imageFallback(event: Event, fallback = FALLBACK_IMAGE) {
   image.src = fallback
 }
 
+type ListCoverKind = 'place' | 'venue' | 'equipment' | 'community'
+type ListCoverLayout = 'thumbnail' | 'hero'
+
+function sportCoverArtwork(sportCode?: string) {
+  const common = 'fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"'
+  switch (sportCode) {
+    case 'badminton':
+      return `<path fill="#ffffff" fill-rule="evenodd" d="M239.5,256.9L233.5,257.6L230.5,264.4L235,265.9L239.5,261.4ZM215.4,244.1L212.4,250.1L215.4,257.6L219.2,259.1L221.4,253.9L219.2,245.6ZM240.2,232.8L236.5,235L241.7,247.1L244.8,247.1L247,242.6L244,234.3ZM140.8,52L129.5,59.6L119.8,72.4L113.7,92.7L96.4,92.7L84.4,99.5L74.6,116.8L76.1,137.9L124.3,186.1L163.4,217L161.2,235L165.7,255.4L180.8,274.9L196.6,285.5L208.6,288.5L231.2,288.5L250,282.5L268.9,269.7L279.4,256.9L284.7,236.5L282.4,217L273.4,195.9L259.1,180.8L248.5,174L247,156L250.8,67.9L238,47.5L226.7,40.8L207.1,40L196.6,46L183,62.6L171,54.3L158.2,49.8ZM270.4,204.9L277.9,230.5L275.6,247.1L262.8,264.4L248.5,274.2L236.5,279.5L207.9,280.2L193.6,274.9L177,259.9L171.7,245.6L173.2,242.6L219.2,229.8L245.5,217.7L265.8,202.7ZM260.6,194.4L255.3,201.9L245.5,208.7L216.1,223L176.2,234.3L170.2,232L170.2,224.5L175.5,213.2L206.4,198.1L245.5,183.1ZM160.4,166.5L167.2,170.3L189,196.6L167.2,208.7L147.6,195.1L138.6,184.6ZM199.6,147.7L211.6,186.8L198.1,193.6L182.3,173.3L177.7,171.8L173.2,161.2ZM238,132.6L240.2,134.9L240.2,173.3L238,177.8L221.4,183.8L210.1,153L210.1,143.9ZM240.2,115.3L240.2,122.1L236.5,125.8L196.6,137.9L146.9,165L131.8,177L127.3,176.3L120.5,168.8L128,159.7L149.9,146.2L230.5,113.8L238,113ZM94.9,103.3L113.7,102.5L118.3,105.5L141.6,136.4L141.6,142.4L115.2,159.7L109.2,159L83.6,133.4L82.9,119.1ZM158.9,60.3L180,72.4L192,117.6L187.5,122.8L180,123.6L154.4,135.6L128.8,104.8L125,96.5L125,84.4L137.1,64.8ZM224.4,49L234.2,55.8L241.7,70.9L241.7,102.5L202.6,115.3L195.1,98.7L189.8,71.6L204.8,52L211.6,49Z"/>`
+    case 'table_tennis':
+      return `<path fill="#ffffff" fill-rule="evenodd" d="M231.8,118.6L210.9,134.4L212.8,139.4L234.3,124.9L234.9,122.4ZM217.2,108.5L208.4,115.4L210.3,122.4L219.1,114.2ZM278.5,99.7L271.5,102.2L272.8,106.6L279.7,102.8ZM163,103.4L140.9,97.1L128.2,97.1L106.8,104.1L84,122.4L69.5,143.9L63.8,161.5L62.6,182.4L67,210.8L73.9,224.7L56.9,239.8L55,246.1L61.9,253.1L86.6,268.2L91.6,267.6L103,242.3L120,244.9L134.5,243.6L156,236.7L167.4,229.7L178.1,219L192.6,198.8L198.3,183.6L200.8,162.2L195.2,133.8L181.9,116.1ZM69.5,179.8L71.4,177.9L137.1,221.5L146.5,229.7L145.9,232.2L133.3,236.7L113.1,237.3L106.8,234.8L109.9,223.4L103.6,222.1L91.6,252.4L86.6,258.8L72,251.2L64.5,243.6L94.8,217.1L95.4,213.3L90.4,210.8L82.8,218.3L79,217.7L73.9,209.5L70.8,197.5ZM117.5,107.9L134.5,104.7L161.1,111L181.3,124.9L191.4,142L194.5,164.1L190.1,187.4L180.6,205.1L165.5,222.1L156,228.4L136.4,212.7L69.5,167.2L75.8,147.6L87.8,129.3L104.9,114.8ZM263.3,85.1L264,93.3L267.1,96.5L269,95.2L268.4,84.5ZM283.5,81.4L280.4,83.2L282.9,94.6L285.4,93.3ZM270.9,60.5L258.3,66.2L252,71.9L248.8,78.2L246.9,97.8L257,114.8L266.5,119.9L279.1,120.5L291.1,116.7L300.6,107.2L304.4,97.1L304.4,83.9L301.8,74.4L291.1,64.3ZM265.2,70.6L272.2,68.7L288,71.9L294.9,78.8L296.8,95.2L293,104.1L283.5,112.9L271.5,114.2L265.2,112.3L253.9,100.3L253.9,84.5L256.4,78.8Z"/>`
+    case 'football':
+      return `<g ${common}><circle cx="180" cy="163" r="89"/><path d="m180 112 40 28-15 47h-50l-15-47 40-28Zm-40 28-45-14m125 14 45-14m-60 61 27 38m-77-38-27 38"/></g>`
+    case 'basketball':
+      return `<path fill="#ffffff" fill-rule="evenodd" d="M221,218.6L223,225.7L232.1,226.7L235.2,223.7L229.1,217.6ZM262.5,205.5L257.4,205.5L248.3,215.6L247.3,223.7L253.4,223.7L264.5,211.6ZM235.2,185.2L221,195.4L221,204.5L237.2,191.3ZM166.3,42.5L131.9,51.6L88.4,81L63.1,115.4L56,142.7L55,167L60.1,202.4L78.3,238.9L101.6,261.2L144.1,283.4L191.6,285.4L241.2,270.3L278.7,242.9L298.9,203.5L304,176.1L303,146.8L293.9,112.4L280.7,91.1L252.4,63.8L215.9,45.6ZM72.2,192.3L75.2,189.3L96.5,189.3L124.8,199.4L156.2,232.8L168.4,254.1L172.4,270.3L169.4,273.3L148.1,271.3L115.7,256.1L86.4,226.7L73.2,205.5ZM69.2,168L81.3,163L100.5,163L121.8,168L150.1,186.3L183.5,224.7L196.7,258.1L196.7,269.3L192.7,272.3L184.6,269.3L182.5,255.1L168.4,226.7L140,195.4L121.8,184.2L100.5,177.1L72.2,177.1ZM140,62.8L150.1,62.8L178.5,121.5L206.8,149.8L249.3,172.1L276.7,177.1L290.8,185.2L286.8,202.4L270.6,231.8L249.3,250L214.9,267.2L209.9,264.2L198.7,223.7L180.5,197.4L157.2,174.1L117.8,153.9L97.5,149.8L72.2,150.8L69.2,147.8L74.2,122.5L92.4,94.1ZM191.6,57.7L203.8,55.7L239.2,68.8L253.4,79L277.7,106.3L288.8,135.6L282.7,138.7L268.6,134.6L228.1,113.4L206.8,93.1ZM163.3,58.7L170.4,54.7L177.5,57.7L193.7,96.2L212.9,119.5L244.3,138.7L288.8,153.9L292.9,165L287.8,168L254.4,158.9L230.1,148.8L212.9,136.7L190.6,113.4Z"/>`
+    case 'tennis':
+      return `<g transform="rotate(-31 165 166)" ${common}>
+        <ellipse cx="160" cy="126" rx="61" ry="76" fill="#ffffff" fill-opacity=".04"/>
+        <path d="M128 62v128m32-140v152m32-140v128M103 93h114M99 126h122M105 159h110M160 202v70" stroke-width="5" opacity=".82"/>
+        <path d="M145 272h30"/>
+      </g>
+      <circle cx="277" cy="102" r="24" fill="#dff45f" stroke="#ffffff" stroke-width="7"/>
+      <path d="M257 94c11 1 20 8 25 19" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+      `
+    case 'volleyball':
+      return `<path fill="#ffffff" fill-rule="evenodd" d="M156.8,154L150.6,159.3L152.4,162.8L158.5,158.4ZM138.3,143.5L136.6,147L141.8,154.9L144.5,151.4ZM143.6,48.8L105.9,66.3L79.6,88.2L62.9,113.7L55,147.9L55.9,186.5L69,222.5L90.1,247.9L129.6,276L134.8,274.2L160.3,283L187.5,283.9L231.3,275.1L269.9,253.2L291.8,218.9L303.2,188.2L301.5,133.9L288.3,105.8L272.5,83L248,63.7L214.6,48.8L185.7,45.3ZM269.9,182.1L280.4,190.9L284.8,203.2L269,232.1L248,251.4L216.4,264.6L214.6,261.1L221.7,256.7L241.8,229.5L263.8,183.9ZM207.6,173.3L184.8,218.1L160.3,246.1L138.3,262.8L110.3,248.8L101.5,240L99.7,233.9L102.4,231.2L155.9,213.7L172.5,199.6L190.1,174.2L203.2,170.7ZM250.6,174.2L253.2,180.4L233.1,220.7L212,247.9L197.1,261.1L192.7,270.7L160.3,269.8L157.6,267.2L189.2,232.1L209.4,201.4L221.7,170.7L230.4,168.9ZM69.9,156.7L79.6,168.9L91.8,197L107.6,212.8L105,217.2L86.6,220.7L81.3,214.6L69,187.4L67.3,168.1ZM177.8,144.4L198,135.6L224.3,131.2L261.1,133L284.8,139.1L291.8,162.8L290.1,176.8L286.6,178.6L259.4,162.8L234.8,156.7L211.1,156.7L190.1,161.9ZM167.3,109.3L178.7,98.8L194.5,93.5L233.1,92.6L266.4,98.8L280.4,120.7L274.3,123.3L226.1,118.9L197.1,122.5L172.5,130.4ZM108.5,80.4L112,83L110.3,111.9L115.5,149.6L124.3,172.5L143.6,204L141,207.5L122.5,212.8L113.8,199.6L101.5,189.1L83.9,154.9L76.1,125.1L76.9,115.4L84.8,102.3ZM245.4,78.6L248,80.4L246.2,83L243.6,81.2ZM158.5,60.2L161.1,65.4L154.1,88.2L155,123.3L159.4,133.9L153.2,135.6L151.5,140.9L155.9,147L160.3,140L176.9,167.2L165.5,188.2L156.8,196.1L143.6,181.2L132.2,160.2L126.1,138.2L122.5,104.9L127.8,70.7ZM168.2,85.6L176.9,58.4L213.8,61.9L241,76.8L238.3,80.4L214.6,78.6L187.5,82.1L173.4,88.2Z"/>`
+    default:
+      return `<g ${common}><circle cx="132" cy="106" r="22" fill="#ffffff" stroke="none"/><circle cx="236" cy="106" r="22" fill="#ffffff" stroke="none"/><path d="m132 139 39 34 35-35m-35 35-34 81m34-81 42 79m-73-70-54 33m120-34 60 32"/></g>`
+  }
+}
+
+/**
+ * 列表页不再下载商品和动态的真实封面。根据稳定文本生成 data URI SVG，
+ * 保留卡片的视觉辨识度，同时避免首屏被 MinIO 或第三方图片请求拖慢。
+ */
+function listSvgCover(
+  kind: ListCoverKind,
+  title: string,
+  sportCode?: string,
+  subtitle?: string,
+  layout: ListCoverLayout = 'thumbnail'
+) {
+  const palettes: Record<ListCoverKind, Array<[string, string, string]>> = {
+    place: [['#08765f', '#39b993', '#dff8ef'], ['#176da3', '#4bb4d8', '#e2f6fc'], ['#be681d', '#efad45', '#fff1d8']],
+    venue: [['#b95f18', '#ee9b37', '#fff1d7'], ['#a74568', '#e27a9d', '#ffedf4'], ['#13745f', '#45b990', '#e1f8ef']],
+    equipment: [['#155f87', '#3fa7ca', '#e3f7ff'], ['#5148a5', '#8176d8', '#efedff'], ['#b54f2e', '#ea8654', '#fff0d7']],
+    community: [['#087765', '#34b9a0', '#e4faf5'], ['#1e5e91', '#4aa6d1', '#e8f7ff'], ['#a84767', '#df7697', '#fff0f5']]
+  }
+  const seed = Array.from(`${kind}:${title}:${sportCode || ''}`).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  const [deep, light, surface] = palettes[kind][seed % palettes[kind].length]
+  const escapeSvg = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char] || char))
+  const sport = sportNameByCode(sportCode)
+  const kindLabel = kind === 'place' ? '运动场馆' : kind === 'venue' ? '场馆团购' : kind === 'equipment' ? '运动装备' : '球友动态'
+  const label = escapeSvg(`${sport} · ${kindLabel}`)
+  const cleanTitle = (title || sport).replace(/\s+/g, '').slice(0, 20)
+  const headline = escapeSvg(cleanTitle)
+  const titleLines = Array.from(cleanTitle).reduce<string[]>((lines, char) => {
+    const last = lines.length - 1
+    if (last < 0 || Array.from(lines[last]).length >= 10) lines.push(char)
+    else lines[last] += char
+    return lines
+  }, []).slice(0, 2).map(escapeSvg)
+  const artwork = sportCoverArtwork(sportCode)
+  const heroCopy = layout === 'hero'
+    ? `<g transform="translate(0 -24) scale(.72) translate(70 46)">${artwork}</g>
+       <rect x="22" y="258" width="316" height="80" rx="18" fill="#ffffff" opacity=".94"/>
+       <text x="40" y="282" fill="${deep}" font-size="14" font-family="Arial, sans-serif" font-weight="700">${label}</text>
+       ${titleLines.map((line, index) => `<text x="40" y="${307 + index * 22}" fill="#17251f" font-size="18" font-family="Arial, sans-serif" font-weight="800">${line}</text>`).join('')}`
+    : `<g transform="translate(0 22)">${artwork}</g>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" role="img" aria-label="${headline}">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${light}"/><stop offset="1" stop-color="${deep}"/></linearGradient><pattern id="p" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M34 0H0v34" fill="none" stroke="#ffffff" stroke-opacity=".08"/></pattern></defs>
+    <rect width="360" height="360" rx="26" fill="url(#g)"/>
+    <rect width="360" height="360" rx="26" fill="url(#p)"/>
+    <circle cx="318" cy="42" r="86" fill="${surface}" opacity=".14"/><circle cx="24" cy="340" r="92" fill="${surface}" opacity=".1"/>
+    ${heroCopy}
+  </svg>`
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+// 只信任高德返回的远程场所照片；旧缓存中的 /objects/ 演示图同样转为本地 SVG。
+function placeListCover(place: Place, layout: ListCoverLayout = 'thumbnail') {
+  const coverUrl = place.coverUrl?.trim() || ''
+  return /^https?:\/\//i.test(coverUrl) && !coverUrl.includes('/objects/')
+    ? coverUrl
+    : listSvgCover('place', place.name, place.sportCode, place.area || place.city, layout)
+}
+
+function placeImageFallback(event: Event, place: Place, layout: ListCoverLayout = 'thumbnail') {
+  const image = event.target as HTMLImageElement
+  if (!image) return
+  image.onerror = null
+  image.src = listSvgCover('place', place.name, place.sportCode, place.area || place.city, layout)
+}
+
+function equipmentListCover(item: Pick<EquipmentItem, 'name' | 'sportCode' | 'categoryName'> | SeckillActivity) {
+  const title = 'name' in item ? item.name : item.productName
+  return listSvgCover('equipment', title, item.sportCode, item.categoryName)
+}
+
+function venueListCover(item: VenueItem) {
+  return listSvgCover('venue', item.title, item.sportCode, item.productTypeName)
+}
+
+function communitySvgCover(blog: BlogPost) {
+  const palettes: Array<[string, string, string, string]> = [
+    ['#fff4e4', '#ffd7a8', '#ef8a5a', '#6f3522'],
+    ['#eaf8f3', '#bde9dc', '#43aa8b', '#174c40'],
+    ['#edf3ff', '#c8d9f5', '#5680c0', '#203e6a'],
+    ['#fff0f4', '#f4c2d2', '#d56c91', '#682b43']
+  ]
+  const seed = Array.from(`${blog.title}:${blog.sportCode}`).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  const [background, wave, accent, ink] = palettes[seed % palettes.length]
+  const escapeSvg = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char] || char))
+  const cleanTitle = blog.title.replace(/\s+/g, '').slice(0, 22)
+  const titleLines = Array.from(cleanTitle).reduce<string[]>((lines, char) => {
+    const last = lines.length - 1
+    if (last < 0 || Array.from(lines[last]).length >= 11) lines.push(char)
+    else lines[last] += char
+    return lines
+  }, []).slice(0, 2).map(escapeSvg)
+  const sport = escapeSvg(sportNameByCode(blog.sportCode))
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="${escapeSvg(cleanTitle)}">
+    <rect width="400" height="300" rx="22" fill="${background}"/>
+    <circle cx="344" cy="52" r="38" fill="${accent}" opacity=".88"/>
+    <path d="M0 190c68-45 126-42 184-2 63 43 125 37 216-31v143H0Z" fill="${wave}"/>
+    <path d="M0 226c82-37 151-15 205 14 57 31 119 28 195-8v68H0Z" fill="${accent}" opacity=".18"/>
+    <path d="M34 66h150M34 76h94" stroke="${ink}" stroke-width="2" stroke-linecap="round" opacity=".13"/>
+    <rect x="28" y="28" width="${68 + Array.from(sport).length * 12}" height="34" rx="17" fill="#ffffff" opacity=".88"/>
+    <circle cx="47" cy="45" r="5" fill="${accent}"/>
+    <text x="60" y="51" fill="${ink}" font-size="15" font-family="Arial, sans-serif" font-weight="700">${sport}手记</text>
+    ${titleLines.map((line, index) => `<text x="30" y="${142 + index * 35}" fill="${ink}" font-size="27" font-family="Arial, sans-serif" font-weight="800">${line}</text>`).join('')}
+    <text x="30" y="271" fill="${ink}" font-size="12" font-family="Arial, sans-serif" font-weight="700" opacity=".58">YUEQIU · COMMUNITY</text>
+  </svg>`
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function communityListCover(blog: BlogPost) {
+  return communitySvgCover(blog)
+}
+
+function communityDetailCover(blog: BlogPost) {
+  return communitySvgCover(blog)
+}
+
 function resetListPaging() {
   placeQuery.radius = DEFAULT_PLACE_RADIUS
   placesPage.value = 1
@@ -1722,6 +1865,14 @@ async function switchTab(tab: Tab) {
     profileBlogsPage.value = 1
     profileBlogsTotal.value = 0
   }
+
+  // 所有底部主栏目共用浏览器的 window 滚动条。切换栏目后先等待新页面渲染，
+  // 再回到顶部，避免把首页的滚动位置错误带到社区、约球、装备或我的页面。
+  // AI 助手例外：它需要在 loadCurrentTab 后定位到最近一次用户问题。
+  if (tab !== 'assistant') {
+    await nextTick()
+    scrollToPageTop()
+  }
   await wrap(loadCurrentTab)
   if (tab === 'assistant') {
     await positionAgentOnEntry()
@@ -2554,11 +2705,14 @@ async function positionAgentOnEntry() {
 }
 
 function sportCodesFromAgentContext(reply = '') {
+  // 优先读取快捷文案中显式出现的球类。例如“查看羽毛球团购”不需要再弹选择器。
   const matched = sports.value
     .filter((sport) => reply.includes(sport.name))
     .map((sport) => sport.code)
   if (matched.length) return [...new Set(matched)]
 
+  // 快捷操作通常是对上一轮结果继续筛选，因此从新到旧查找最近的业务上下文：
+  // 先读卡片中后端返回的 sportCode；没有卡片时，再从历史消息文字中识别球类。
   for (let index = agentMessages.value.length - 1; index >= 0; index -= 1) {
     const item = agentMessages.value[index]
     const cardSports = (item.cards || [])
@@ -2575,16 +2729,20 @@ function sportCodesFromAgentContext(reply = '') {
 }
 
 function replyNeedsSportSelection(reply: string) {
+  // 已有明确球类时直接执行；只有首轮对话且没有任何球类线索时才让用户补充选择。
   if (sportCodesFromAgentContext(reply).length) return false
   return !hasAgentConversation.value
 }
 
 function handleAgentQuickReply(reply: string) {
+  // 首轮缺少球类属于必要信息不完整，先收集球类再发送请求。
   if (replyNeedsSportSelection(reply)) {
     openAgentSportPicker(reply)
     return
   }
 
+  // 后续的“按距离重筛”等命令自动继承上一轮球类，并把球类写进展示文案，
+  // 这样前后端、聊天记录和用户看到的内容保持一致。
   const sportCodes = sportCodesFromAgentContext(reply)
   const alreadyNamesSport = sports.value.some((sport) => reply.includes(sport.name))
   const sportNames = sportCodes.map((code) => sportNameByCode(code))
@@ -2596,6 +2754,7 @@ function handleAgentQuickReply(reply: string) {
 
 function openAgentSportPicker(reply: string) {
   agentPendingQuickReply.value = reply
+  // 打开选择器时优先回显会话中的球类；完全没有上下文时才使用首页当前球类。
   const contextualSports = sportCodesFromAgentContext(reply)
   agentSelectedSportCodes.value = contextualSports.length
     ? contextualSports
@@ -2645,11 +2804,17 @@ async function sendAgentMessage(
 ) {
   const content = text.trim()
   if (!content || loading.value) return
+
+  // 1. 明确本轮球类。选择“不限”时不能回退到首页当前球类；
+  //    普通输入没有单独传球类时，才使用首页当前选中的球类作为默认值。
   const effectiveSportCodes = allSportsRequested
     ? []
     : requestedSportCodes.length
     ? requestedSportCodes
     : selectedSport.value ? [selectedSport.value] : []
+
+  // 2. 先把用户问题放进页面，再发起网络请求。这样慢请求期间用户仍能确认
+  //    自己刚才问了什么，同时“正在理解需求”会占据助手回答的位置。
   agentInput.value = ''
   const userMessageId = `u-${Date.now()}`
   agentMessages.value = [
@@ -2660,11 +2825,14 @@ async function sendAgentMessage(
   agentThinking.value = true
   agentProgressText.value = '正在理解你的需求'
   await nextTick()
-  // Position the new turn once. Keeping the same anchor while the answer arrives avoids a second visual jump.
+  // 本轮只定位一次。答案回来时继续保持这个锚点，避免页面因新增卡片再次跳动。
   scrollAgentMessageIntoView(userMessageId, 'smooth', 'start')
   await wrap(async () => {
     let result: AgentChatResponse | undefined
     let streamError = ''
+
+    // 3. SSE 会逐步返回会话 ID、Graph 执行阶段和最终结果。
+    //    这里不拼接模型 token；stage 仅用于更新“正在查询场所”等进度提示。
     await streamApi('/agent/chat/stream', {
       method: 'POST',
       body: JSON.stringify({
@@ -2693,6 +2861,9 @@ async function sendAgentMessage(
     })
     if (streamError) throw new Error(streamError)
     if (!result) throw new Error('AI 助手响应未完成，请稍后重试')
+
+    // 4. done 事件是唯一可信的完整结果。后端已经验证模型选择的 cardId，
+    //    前端只负责保存会话状态并渲染答案、真实业务卡片和后续快捷操作。
     agentConversationId.value = result.conversationId
     agentQuickReplies.value = agentNextQuickReplies(result.quickReplies, result.cards || [], result.answer)
     agentAiEnabled.value = result.aiEnabled
@@ -2727,6 +2898,8 @@ function escapeHtml(value: string) {
 }
 
 function renderAgentContent(content: string) {
+  // 模型回答不直接作为 HTML 插入。先转义全部字符，再仅恢复项目需要的
+  // 粗体、列表和换行，避免回答中的脚本或任意标签进入页面。
   const inline = (value: string) => value.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   const lines = escapeHtml(stripInternalAgentFields(content)).split(/\r?\n/)
   const html: string[] = []
@@ -3699,10 +3872,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="blog-detail-images" v-if="selectedBlog.images.length">
-            <img v-for="image in selectedBlog.images" :key="image" :src="image" :alt="selectedBlog.title" @error="imageFallback" />
+          <div class="blog-detail-images">
+            <img :src="communityDetailCover(selectedBlog)" :alt="selectedBlog.title" />
           </div>
-          <h2>{{ selectedBlog.title }}</h2>
           <p>{{ selectedBlog.content }}</p>
           <button class="blog-related detail-related" type="button" @click="openBlogRelated(selectedBlog)">
             <ShoppingBag :size="15" />
@@ -3732,9 +3904,9 @@ onBeforeUnmount(() => {
               <ChevronLeft :size="20" />
             </button>
             <img
-              :src="selectedPlace.coverUrl || FALLBACK_IMAGE"
+              :src="placeListCover(selectedPlace, 'hero')"
               :alt="selectedPlace.name"
-              @error="imageFallback"
+              @error="placeImageFallback($event, selectedPlace, 'hero')"
             />
           </div>
 
@@ -3777,11 +3949,10 @@ onBeforeUnmount(() => {
             <div v-else-if="!selectedPlaceVenueItems.length" class="empty-box">该场馆暂未配置线上售卖项目</div>
             <article v-for="item in selectedPlaceVenueItems" :key="item.id" class="detail-deal-row">
               <img
-                :src="item.coverUrl || selectedPlace.coverUrl || FALLBACK_IMAGE"
+                :src="venueListCover(item)"
                 :alt="item.title"
                 loading="lazy"
                 decoding="async"
-                @error="imageFallback"
               />
               <div class="detail-deal-main">
                 <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
@@ -3847,7 +4018,7 @@ onBeforeUnmount(() => {
 
           <template v-for="place in places" :key="place.id">
           <article :id="placeDomId(place)" class="place-card" @click="selectPlace(place)">
-            <img :src="place.coverUrl || FALLBACK_IMAGE" :alt="place.name" loading="lazy" decoding="async" @error="imageFallback" />
+            <img :src="placeListCover(place)" :alt="place.name" loading="lazy" decoding="async" @error="placeImageFallback($event, place)" />
             <div class="place-info">
               <div class="place-title">
                 <h3>{{ place.name }}</h3>
@@ -3926,7 +4097,7 @@ onBeforeUnmount(() => {
                   'sale-spotlight': index === 0
                 }"
               >
-                <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.title" loading="lazy" decoding="async" @error="imageFallback" />
+                <img :src="venueListCover(item)" :alt="item.title" loading="lazy" decoding="async" />
                 <div class="venue-sale-content">
                   <div class="sale-row-head">
                     <span class="service-type" :class="typeClass(item.productType)">{{ item.productTypeName }}</span>
@@ -3979,11 +4150,10 @@ onBeforeUnmount(() => {
           <article v-for="blog in blogs" :key="blog.id" class="blog-card clickable-card" @click="openBlogDetail(blog)">
             <button class="blog-cover-button" type="button" @click.stop="openBlogDetail(blog)">
               <img
-                :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
+                :src="communityListCover(blog)"
                 :alt="blog.title"
                 loading="lazy"
                 decoding="async"
-                @error="imageFallback"
               />
             </button>
             <div class="blog-body">
@@ -4150,7 +4320,7 @@ onBeforeUnmount(() => {
             <button class="ghost" @click="() => loadSeckill()"><Zap :size="15" /> 刷新</button>
           </div>
           <article v-for="activity in filteredSeckillActivities" :key="activity.id" class="deal-row flash-row">
-            <img :src="activity.coverUrl || FALLBACK_IMAGE" :alt="activity.productName" loading="lazy" decoding="async" @error="imageFallback" />
+            <img :src="equipmentListCover(activity)" :alt="activity.productName" loading="lazy" decoding="async" />
             <div>
               <span>{{ activity.categoryName }}</span>
               <h3>{{ activity.productName }}</h3>
@@ -4168,7 +4338,7 @@ onBeforeUnmount(() => {
           class="product-row"
           :class="{ highlighted: isHighlighted('EQUIPMENT', product.id) }"
         >
-          <img :src="product.coverUrl || FALLBACK_IMAGE" :alt="product.name" loading="lazy" decoding="async" @error="imageFallback" />
+          <img :src="equipmentListCover(product)" :alt="product.name" loading="lazy" decoding="async" />
           <div>
             <span>{{ product.brand }} · {{ product.categoryName }}</span>
             <h3>{{ product.name }}</h3>
@@ -4634,11 +4804,10 @@ onBeforeUnmount(() => {
             <article v-for="blog in profileBlogs" :key="blog.id" class="blog-card clickable-card" @click="openBlogDetail(blog)">
               <button class="blog-cover-button" type="button" @click.stop="openBlogDetail(blog)">
                 <img
-                  :src="blog.images[0] || blog.relatedCoverUrl || FALLBACK_IMAGE"
+                  :src="communityListCover(blog)"
                   :alt="blog.title"
                   loading="lazy"
                   decoding="async"
-                  @error="imageFallback"
                 />
               </button>
               <div class="blog-body">
@@ -4779,6 +4948,18 @@ onBeforeUnmount(() => {
     >
       <Bot :size="18" />
       <span>AI 助手</span>
+    </button>
+
+    <!-- 从社区关联装备进入商城后，目标商品可能位于列表中部。
+         固定返回入口不会随着商品列表滚出视口。 -->
+    <button
+      v-if="activeTab === 'equipment' && relatedBlogReturn"
+      class="context-return-fab"
+      type="button"
+      @click="returnToBlogDetail"
+    >
+      <ChevronLeft :size="17" />
+      <span>返回社区</span>
     </button>
 
     <nav class="bottom-nav">

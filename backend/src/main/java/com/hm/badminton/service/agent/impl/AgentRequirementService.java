@@ -124,19 +124,35 @@ public class AgentRequirementService implements IAgentRequirementService {
         return requirement;
     }
 
+    /**
+     * 将本轮自然语言合并到上一轮结构化需求中。
+     *
+     * <p>这里不拼接整段聊天文本，而是维护城市、球类、日期、时段、预算、
+     * 距离、水平、偏好和业务意图等可直接查询的字段。用户只修改其中一个
+     * 条件时，其余条件会继续沿用。</p>
+     */
     @Override
     public AgentRequirement merge(AgentRequirement previous, AgentChatRequest request, LoginUser loginUser) {
+        // 1. 复制上一轮条件。本轮没有提到的字段默认继续沿用，避免追问后丢失上下文。
         AgentRequirement merged = copy(previous);
         String message = request.getMessage() == null ? "" : request.getMessage().trim();
+
+        // 2. 只根据本轮文本初步识别业务对象：场所、约球活动、装备；一个问题可以命中多个。
         Set<String> currentIntents = inferIntents(message);
         Set<String> previousIntents = new LinkedHashSet<>(safeList(merged.getIntents()));
+
+        // 3. “按距离重新筛”等话术只是在操作上一轮结果，不应重新猜测业务对象。
+        // 只有用户没有明确说场所/装备/活动时，才继承上一轮意图。
         if ((isRangeExpansionFollowUp(message) || isContextRefinementFollowUp(message))
                 && !mentionsExplicitBusinessDomain(message)
                 && !previousIntents.isEmpty()) {
             currentIntents = previousIntents;
         }
 
+        // 4. 用户明确从场所切到装备（或反向切换）时，旧预算通常不应跨业务复用。
         clearStaleCrossDomainBudget(merged, currentIntents, message);
+
+        // 5. 按字段逐项覆盖结构化需求。每个 mergeXxx 只处理自己负责的维度。
         mergeCity(merged, request, message, loginUser);
         mergeSports(merged, request, message);
         mergeEquipmentKeyword(merged, currentIntents, message);
@@ -147,6 +163,8 @@ public class AgentRequirementService implements IAgentRequirementService {
         mergePreferences(merged, message);
         mergeSortPreference(merged, message);
         mergeAvailabilityAndRefund(merged, message);
+
+        // 6. 本轮没有识别到新意图时保留旧值；识别到时才覆盖，供 Graph 决定查询哪些工具。
         mergeIntents(merged, currentIntents);
         return merged;
     }
@@ -193,6 +211,7 @@ public class AgentRequirementService implements IAgentRequirementService {
     }
 
     private void mergeSports(AgentRequirement target, AgentChatRequest request, String message) {
+        // 球类来源按可靠性排序：前端结构化多选 > 旧版单选字段 > “不限球类” > 文本规则识别。
         List<String> explicit = safeList(request.getSportCodes()).stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(String::trim)
@@ -434,18 +453,28 @@ public class AgentRequirementService implements IAgentRequirementService {
         }
     }
 
+    /**
+     * 识别需要查询的业务对象。
+     *
+     * <p>当前是确定性规则，不让模型直接控制数据库工具。优点是快、可测试；
+     * 局限是新说法需要补充规则，因此上下文筛选命令会在后面单独处理。</p>
+     */
     private Set<String> inferIntents(String message) {
         Set<String> intents = new LinkedHashSet<>();
+        // PLACE 同时覆盖真实场所及绑定到场所的团购/私教商品。
         if (containsAny(message, "场所", "场馆", "球馆", "附近", "场地", "哪里", "团购", "私教", "环境", "空场")) {
             intents.add("PLACE");
         }
+        // ACTIVITY 只查询可以加入的约球活动，不包含场馆团购。
         if (containsAny(message, "约球", "活动", "加入", "搭子", "组局", "球局", "哪些局", "的局")) {
             intents.add("ACTIVITY");
         }
+        // 装备先做类别归一化，例如“鞋子”会转为数据库可查询的“鞋”。
         String equipmentKeyword = EquipmentQueryNormalizer.normalize(message);
         if (equipmentKeyword != null || containsAny(message, "装备", "球拍", "球鞋", "护具", "球包", "购买", "买一个", "买一")) {
             intents.add("EQUIPMENT");
         }
+        // “今晚想打羽毛球”同时可能需要场所和可加入的局，因此并行查询两个分支。
         if (intents.isEmpty() && containsAny(message, "打球", "打羽毛球", "打乒乓球", "踢足球", "打篮球", "打网球", "打排球")) {
             intents.add("PLACE");
             intents.add("ACTIVITY");
@@ -599,6 +628,7 @@ public class AgentRequirementService implements IAgentRequirementService {
     }
 
     private boolean isContextRefinementFollowUp(String message) {
+        // 这些词表达的是“如何处理上一轮候选结果”，本身不代表场所、活动或装备。
         return containsAny(message,
                 "重新筛", "重新排序", "按距离", "按价格", "按评分", "按时间",
                 "离我更近", "更近的", "更便宜", "最划算", "预约规则",
@@ -606,6 +636,7 @@ public class AgentRequirementService implements IAgentRequirementService {
     }
 
     private boolean mentionsExplicitBusinessDomain(String message) {
+        // 用户显式说出新的业务对象时，以本轮为准，不再强制继承上一轮意图。
         return containsAny(message,
                 "场所", "场馆", "球馆", "场地", "团购", "私教",
                 "约球", "活动", "搭子", "组局", "球局",

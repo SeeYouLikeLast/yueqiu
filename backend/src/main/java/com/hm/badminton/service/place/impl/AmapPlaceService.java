@@ -147,9 +147,8 @@ public class AmapPlaceService implements IAmapPlaceService {
         List<AmapPlace> places = new ArrayList<>();
         JsonNode pois = root.path("pois");
         if (pois.isArray()) {
-            int rank = (page - 1) * size + 1;
             for (JsonNode poi : pois) {
-                places.add(toPlace(poi, sport, rank++));
+                places.add(toPlace(poi, sport));
             }
         }
         long total = parseLong(root.path("count").asText(), places.size());
@@ -333,7 +332,7 @@ public class AmapPlaceService implements IAmapPlaceService {
         }
     }
 
-    private AmapPlace toPlace(JsonNode poi, SportType sport, int rank) {
+    private AmapPlace toPlace(JsonNode poi, SportType sport) {
         SportType actualSport = detectSport(poi, sport);
         String location = text(poi, "location");
         Double[] coordinates = parseLocation(location);
@@ -341,7 +340,8 @@ public class AmapPlaceService implements IAmapPlaceService {
         String type = text(poi, "type");
         String businessArea = firstNonBlank(text(business, "business_area"), text(poi, "business_area"));
         String openHours = firstNonBlank(text(business, "opentime_week"), text(business, "opentime_today"));
-        String coverUrl = firstNonBlank(amapPhotoUrl(poi), localPlaceCoverUrl(rank));
+        // 场所列表只使用高德提供的真实照片；没有照片则让前端生成本地 SVG，不再回退 MinIO 演示图。
+        String coverUrl = amapPhotoUrl(poi);
         String id = firstNonBlank(text(poi, "id"), text(poi, "name") + ":" + location);
 
         return new AmapPlace(
@@ -416,11 +416,6 @@ public class AmapPlaceService implements IAmapPlaceService {
             steps.add(radius);
         }
         return steps.stream().distinct().toList();
-    }
-
-    private String localPlaceCoverUrl(int rank) {
-        int fileId = 31 + Math.floorMod(rank - 1, 25);
-        return "/objects/hm-badminton/demo/places/cover/place-%03d.png".formatted(fileId);
     }
 
     private String amapPhotoUrl(JsonNode poi) {

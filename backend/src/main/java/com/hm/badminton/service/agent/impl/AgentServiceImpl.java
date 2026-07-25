@@ -175,8 +175,13 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
 
     @Override
     public SseEmitter chatStream(AgentChatRequest request, String clientIp, String anonymousId) {
+        // UserContext 基于当前 HTTP 线程保存登录信息，必须在切换到虚拟线程之前取出。
+        // 后续 Graph 使用这个不可变 LoginUser，避免新线程拿不到 ThreadLocal。
         LoginUser loginUser = userContext.current().orElse(null);
         SseEmitter emitter = new SseEmitter(120_000L);
+
+        // 模型和高德调用可能持续数秒。使用虚拟线程可以立即释放 Tomcat 请求线程，
+        // 并通过 SseEmitter 持续向浏览器发送执行阶段，而不是让连接静默等待。
         Thread.startVirtualThread(() -> {
             try {
                 AgentChatResponse response = executeChat(request, clientIp, anonymousId, loginUser,
@@ -200,6 +205,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                                           String anonymousId,
                                           LoginUser loginUser,
                                           Consumer<AgentGraphProgress> progress) {
+        // 同步接口和 SSE 接口共用同一条 Graph，避免两套业务流程产生不同结果。
         return agentGraphWorkflow.execute(this,
                 new AgentGraphRunContext(request, clientIp, anonymousId, loginUser, progress));
     }
@@ -220,7 +226,12 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         run.emit(new AgentGraphProgress("conversation", Map.of("conversationId", turn.conversationId())));
     }
 
-    /** Second graph node: merge the current question into structured cross-turn memory. */
+    /**
+     * Graph 的需求理解节点。
+     *
+     * <p>先从 Redis/MySQL 加载上一轮结构化需求，再把本轮问题合并进去。
+     * 如果装备筛选缺少预算，则生成澄清问题并暂停后续业务查询。</p>
+     */
     @Override
     public void understandRequirement(AgentGraphRunContext run) {
         AgentTurnContext turn = run.require(RUN_TURN, AgentTurnContext.class);
@@ -237,7 +248,12 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         }
     }
 
-    /** Emits the stages for the branches that the graph is about to run. */
+    /**
+     * 工具分发提示节点。
+     *
+     * <p>这里不执行查询，只根据意图向 SSE 推送“正在查询场所/约球/装备”，
+     * 让前端可以及时展示进度。</p>
+     */
     @Override
     public void dispatchTools(AgentGraphRunContext run) {
         if (clarification(run) != null) {
@@ -256,7 +272,11 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         }
     }
 
-    /** Place branch: real AMap places must be known before products can be bound by place rank. */
+    /**
+     * 场所分支：先从高德获得真实场所，再按场所顺序绑定本平台可售团购。
+     *
+     * <p>场所商品依赖真实场所的 placeRank，因此这两个查询必须在同一分支内按顺序执行。</p>
+     */
     @Override
     public AgentPlaceBranchResult queryPlacesAndProducts(AgentGraphRunContext run) {
         if (clarification(run) != null) {
@@ -269,16 +289,21 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         List<AgentCard> places = new ArrayList<>();
         List<AgentCard> products = new ArrayList<>();
         for (String sportCode : querySports(context)) {
+            // 1. 先查询真实高德场所；结果太少时由 searchPlacesWithExpansion 自动扩大半径。
             List<AgentCard> found = searchPlacesWithExpansion(run, context, sportCode);
+
+            // 2. 控制传给模型和手机端的候选数量，避免一次回答产生过多卡片。
             List<AgentCard> visiblePlaces = found.stream().limit(2).toList();
             places.addAll(visiblePlaces);
+
+            // 3. 本平台场馆商品按 placeRank 绑定真实场所，必须等场所确定后才能查询。
             products.addAll(safeTool(run.getRequestId(), "venue-products:" + sportCode,
                     () -> venueProducts(visiblePlaces, sportCode, context.requirement())));
         }
         return new AgentPlaceBranchResult(places, products);
     }
 
-    /** Activity branch, executed in parallel with place and equipment branches by StateGraph. */
+    /** 约球分支：按照球类、城市、水平和时段查询可加入活动，并排除当前用户自己的活动。 */
     @Override
     public List<AgentCard> queryActivities(AgentGraphRunContext run) {
         if (clarification(run) != null) {
@@ -302,7 +327,10 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         return result;
     }
 
-    /** Equipment branch, including seckill rows only when the user explicitly asks for discounts. */
+    /**
+     * 装备分支：按球类、归一化类别和预算查询普通装备。
+     * 只有用户明确提到“秒杀/特价/抢购”时，才额外查询秒杀装备。
+     */
     @Override
     public List<AgentCard> queryEquipment(AgentGraphRunContext run) {
         if (clarification(run) != null) {
@@ -313,14 +341,21 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             return List.of();
         }
         String message = run.getRequest().getMessage();
+
+        // 本轮明确提到“鞋子/球拍”时使用新关键词；“500 元以内”等追问没有品类，
+        // 则继续使用结构化记忆里的上一轮装备类别。
         String keyword = firstNotBlank(
                 EquipmentQueryNormalizer.normalize(message),
                 context.requirement().getEquipmentKeyword());
         List<AgentCard> result = new ArrayList<>();
         for (String sportCode : querySports(context)) {
+            // 普通装备始终查真实商品表，并在工具层应用球类、品类和预算条件。
             result.addAll(safeTool(run.getRequestId(), "equipment:" + sportCode,
                     () -> equipmentTool.searchEquipment(sportCode, keyword, context.budget())
                             .stream().limit(2).toList()));
+
+            // 秒杀是独立库存链路，只有用户明确表达优惠诉求时才查询，避免普通推荐
+            // 被秒杀商品占满，也避免无意义的额外数据库/Redis 请求。
             if (containsAny(message, "秒杀", "特价", "抢购", "便宜")) {
                 result.addAll(safeTool(run.getRequestId(), "seckill-equipment:" + sportCode,
                         () -> equipmentTool.searchSeckillEquipment(sportCode).stream().limit(2).toList()));
@@ -373,6 +408,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     @Override
     public void scoreCandidates(AgentGraphRunContext run) {
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
+
+        // 先由后端按距离、预算、时段、评分等硬指标排序。模型只能在这批真实、
+        // 已排序候选中选择和解释，不能凭空创建商品或篡改价格库存。
         List<AgentCard> scored = recommendationScorer
                 .scoreAndSort(context.cards(), context.requirement())
                 .stream().limit(18).toList();
@@ -396,6 +434,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         }
         ChatClient.Builder chatClientBuilder = safeChatClientBuilder();
         run.emit(AgentGraphProgress.stage("生成建议", "正在核对候选并整理推荐依据"));
+
+        // 模型应返回 selectedCardIds + explanation；callModelOrFallback 会校验 ID，
+        // 无效 ID 被丢弃，模型不可用时则使用本地可解释摘要降级。
         AgentDecisionResult decision = timed(run.getRequestId(), "model",
                 () -> callModelOrFallback(run.getRequest(), context, chatClientBuilder, run.getLoginUser()));
         AgentRequirement requirement = run.require(RUN_REQUIREMENT, AgentRequirement.class);
@@ -412,10 +453,16 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         AgentRequirement requirement = run.require(RUN_REQUIREMENT, AgentRequirement.class);
         AgentContext context = run.require(RUN_CONTEXT, AgentContext.class);
         AgentDecisionResult decision = run.require(RUN_DECISION, AgentDecisionResult.class);
+
+        // 外部模型和业务工具已经全部执行完毕，这里只开启一个短事务保存最终回答。
+        // 避免在等待高德/大模型期间长期占用数据库连接和事务锁。
         timed(run.getRequestId(), "persist-answer", () -> {
             persistenceService.completeTurn(turn, decision.answer(), decision.cards(), requirement);
             return null;
         });
+
+        // Redis 保存结构化短期记忆，用于下一轮“换成更近的”等追问快速继承条件；
+        // MySQL 中的会话消息则负责历史记录和 Redis 失效后的恢复。
         requirementService.cache(turn, requirement);
         AgentContext selectedContext = context.withCards(decision.cards());
         AgentClarificationResolver.Clarification clarification = clarification(run);
