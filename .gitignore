@@ -9,6 +9,12 @@ logs/
 *.tsbuildinfo
 .DS_Store
 
+# Local Markdown editor state and personal scratch notes are not project documentation.
+.obsidian/
+docs/1问题.md
+docs/2原理.md
+docs/初期环境配置--ai操作/羽动羽毛球点评项目规划.md
+
 # Local environment files may contain passwords, API keys and mail authorization codes.
 .env
 .env.*
