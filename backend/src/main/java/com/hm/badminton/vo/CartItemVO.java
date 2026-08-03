@@ -16,6 +16,8 @@ public class CartItemVO {
     private Integer type;
     private Long productId;
     private Long inventoryId;
+    private String sportCode;
+    private String categoryName;
     private String productName;
     private String brand;
     private String coverUrl;
@@ -33,6 +35,8 @@ public class CartItemVO {
                 2,
                 item.getProductId(),
                 null,
+                item.getSportCode(),
+                item.getCategoryName(),
                 item.getProductName(),
                 item.getBrand(),
                 item.getCoverUrl(),
@@ -52,6 +56,8 @@ public class CartItemVO {
                 1,
                 item.getProductId(),
                 item.getInventoryId(),
+                item.getSportCode(),
+                item.getProductTypeName(),
                 item.getProductName(),
                 item.getVenueName(),
                 item.getCoverUrl(),

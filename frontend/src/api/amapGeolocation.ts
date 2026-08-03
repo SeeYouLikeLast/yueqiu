@@ -1,5 +1,4 @@
-const DEFAULT_AMAP_JS_KEY = '0b3dedfd34e183c63be3e7206dc5560c'
-const AMAP_JS_KEY = import.meta.env.VITE_AMAP_JS_KEY || DEFAULT_AMAP_JS_KEY
+const AMAP_JS_KEY = import.meta.env.VITE_AMAP_JS_KEY || ''
 const AMAP_SCRIPT_ID = 'amap-js-api'
 
 export type PreciseLocation = {
@@ -95,6 +94,10 @@ function locateByAmap(): Promise<PreciseLocation> {
 }
 
 function loadAmap(): Promise<AMapNamespace> {
+  // JS Key 会暴露在浏览器网络请求中，但仍不能硬编码进仓库；生产构建时通过 Vite 环境变量注入。
+  // 未配置时快速失败，由 locateWithAmapFirst() 立即回退到浏览器原生定位。
+  if (!AMAP_JS_KEY) return Promise.reject(new Error('未配置高德 JS API Key'))
+
   const current = (window as AMapWindow).AMap
   if (current?.Geolocation) return Promise.resolve(current)
   if (amapLoadPromise) return amapLoadPromise

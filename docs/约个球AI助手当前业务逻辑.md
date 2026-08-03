@@ -1,6 +1,6 @@
 # 约个球 AI 助手当前业务逻辑
 
-> 最后更新：2026-07-19
+> 最后更新：2026-07-25
 > 本文只描述当前代码已经实现的行为。后续演进方案见《约个球AI助手Agent实施规划.md》。
 
 ## 1. 先理解当前实现是什么
@@ -9,6 +9,8 @@
 
 ```text
 Spring AI Alibaba StateGraph 多节点编排
+  + 快捷按钮结构化 Command 直通
+  + 自由文本“规则优先、模型按需补全”
   + 后端结构化会话记忆
   + 实体约束的博客/评价/装备心得混合 RAG
   + 后端统一、可解释推荐评分
@@ -30,10 +32,18 @@ Spring AI Alibaba StateGraph 多节点编排
 
 ```mermaid
 flowchart TD
-    U["用户输入问题"] --> V["Vue 助手页面"]
+    U1["快捷按钮"] --> V["Vue 助手页面"]
+    U2["自由文本"] --> V
     V --> S["POST /api/agent/chat/stream"]
     S --> C["AgentController"]
-    C --> O["AgentGraphWorkflow / StateGraph"]
+    C --> I{"输入类型"}
+    I -->|"AgentCommand"| IC["白名单校验并直接合并"]
+    I -->|"自由文本"| IR["基础规则快速识别"]
+    IR -->|"复杂或低置信度"| IM["DashScope 提取 JSON patch"]
+    IR --> IV["后端字段校验"]
+    IM --> IV
+    IC --> O["AgentGraphWorkflow / StateGraph"]
+    IV --> O
 
     O --> P1["beginTurn：短事务 A 保存问题"]
     P1 --> M["understandRequirement：合并 AgentRequirement"]
@@ -64,6 +74,8 @@ flowchart TD
 | Graph 运行上下文/状态 | `backend/src/main/java/com/hm/badminton/service/agent/graph/AgentGraphRunContext.java`、`AgentGraphState.java` |
 | 各节点业务实现 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentServiceImpl.java` |
 | 结构化需求 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRequirementService.java` |
+| 快捷命令 DTO | `backend/src/main/java/com/hm/badminton/dto/agent/AgentCommand.java`、`AgentCommandType.java` |
+| 模型需求提取 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRequirementModelExtractor.java` |
 | 短事务持久化 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentPersistenceService.java` |
 | 游客匿名身份 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentAnonymousSessionResolver.java` |
 | 统一评分 | `backend/src/main/java/com/hm/badminton/service/agent/impl/AgentRecommendationScorer.java` |
@@ -93,7 +105,7 @@ flowchart TD
 5. 登录用户和游客均可打开历史面板、切换会话、确认后删除会话。
 6. 聚焦底部输入框。
 
-快捷问题会先打开运动选择器。用户可以选择一个、多个运动或“不限球类”。前端发送：
+快捷问题会先打开运动选择器。用户可以选择一个、多个运动或“不限球类”。快捷按钮的显示文字仍会进入聊天记录，但执行依据是结构化 `command`：
 
 ```json
 {
@@ -104,12 +116,23 @@ flowchart TD
   "allSportsRequested": false,
   "city": "西安市",
   "lng": 108.9747,
-  "lat": 34.15568
+  "lat": 34.15568,
+  "command": {
+    "type": "FIND_NEARBY_PLACES",
+    "sportCodes": ["badminton"],
+    "allSportsRequested": false,
+    "timePreset": "TONIGHT",
+    "sortPreference": "TIME",
+    "availabilityRequired": true
+  }
 }
 ```
 
 其中：
 
+- `command` 只由快捷按钮发送；输入框自由文本不发送该字段。
+- `type` 只能取后端 `AgentCommandType` 白名单，不能携带 SQL、Mapper 名或任意工具名。
+- `TONIGHT` 由后端按北京时间解析；19:00 已过时自动使用下一天 19:00，避免推荐过期场次。
 - `sportCode` 用于兼容单运动请求。
 - `sportCodes` 是当前正式使用的多运动字段。
 - `allSportsRequested=true` 只表示用户明确选择“不限”。
@@ -182,6 +205,24 @@ Redis: agent:conversation:requirement:{conversationId}
 ```
 
 本轮明确条件覆盖旧条件，本轮未提及的条件继续沿用。过期日期会在读取时清理。
+
+需求入口分两条：
+
+```text
+快捷按钮
+  -> AgentCommand
+  -> 校验命令类型、球类、预算、距离、时间、水平和排序
+  -> 直接合并 AgentRequirement，不解析按钮文案
+
+自由文本
+  -> 基础规则快速识别
+  -> 规则缺少意图、长复合条件或模糊指代时调用模型
+  -> 模型只返回 AgentRequirementExtraction JSON patch
+  -> 后端白名单、范围和日期校验
+  -> 模型字段先合并，明确 request/rule 字段随后覆盖
+```
+
+因此快捷按钮不会因改了展示文案而切错业务；自由文本也不是每次都多调用一次模型。模型提取失败、JSON 非法或置信度低于 `0.55` 时，系统直接保留规则结果继续执行。
 
 ### 5.4 StateGraph 并行查询业务工具
 
@@ -283,7 +324,7 @@ recommendReasons 确定性兜底理由
 | `sortPreference` | 排序目标 | `DISTANCE`、`PRICE`、`VALUE` |
 | `availabilityRequired` | 是否要求当前可用 | `true` |
 | `refundableRequired` | 是否要求支持退款 | `true` |
-| `fieldSources` | 字段来源 | `request/rule/profile/follow-up` |
+| `fieldSources` | 字段来源 | `command/request/rule/model/profile/follow-up` |
 | `intents` | 当前业务意图 | `PLACE`、`ACTIVITY`、`EQUIPMENT` |
 | `lastSelectedCardIds` | 上轮最终卡片 | 用于记录上一轮选择 |
 
@@ -299,7 +340,17 @@ recommendReasons 确定性兜底理由
 - 水平：不限、新手、初级、中级、高级、进阶。
 - 装备类别：把“鞋子/球鞋/训练鞋”归一为“鞋”，并识别球拍、手胶、护具、球包、球袜等类别。
 - 意图：根据场所、团购、活动、搭子、装备等关键词判断。
-- 追问：用户要求“按预算筛装备”但没有给金额时，先询问预算；装备无结果时只建议调整预算或品类，不会错误切换到场馆团购。
+- 追问：用户要求“按预算筛装备”但没有给金额时，先询问预算。
+- 自动预算回退：用户已给出上限但无严格匹配时，保持运动和装备类别不变，从真实库存中选择价格最接近的一件，并直接告知需要增加的金额；无需用户再点一次更高预算。
+- 自动回退后仍无同类商品时才建议更换品类，装备请求不会错误切换到场馆团购。
+
+模型提取不是业务工具调用。它只能补充 `AgentRequirementExtraction` 中定义的字段，且必须通过以下校验：
+
+- 意图仅允许 `PLACE/ACTIVITY/EQUIPMENT`。
+- 球类、水平和排序值必须属于后端白名单。
+- 预算限制在 `0-100000`，距离限制在 `100-50000` 米。
+- 过去日期、非法时间、过长标签和未知枚举会被丢弃。
+- 同一个字段同时被模型和明确规则识别时，`request/rule` 优先。
 
 位置优先级：
 
@@ -418,6 +469,10 @@ recommendReasons 确定性兜底理由
 - 按运动、关键词和预算筛选。
 - 每个运动最多加入 2 个候选。
 - 推荐依据包括预算、评分、销量、库存、品牌和分类。
+- 若严格预算没有结果，`searchClosestEquipmentAboveBudget` 会查询最多 50 条同类真实商品，过滤无库存商品，按价格升序选择最接近预算的候选。
+- 多球类同时查询时，编排层再比较 `budgetIncrease`，最终只保留全局需要加价最少的一件。
+- 回退卡片携带 `budgetExpanded/originalBudget/budgetIncrease`。本地回答和模型提示都必须明确说明预算变化，禁止描述为“符合原预算”。
+- 若更高价格也没有同类可购买商品，才返回更换品类提示，不再生成另一轮 500/1000 元预算按钮。
 
 只有问题包含“秒杀、特价、抢购、便宜”等词时，才额外查询装备秒杀，每个运动最多加入 2 个。
 
@@ -650,9 +705,9 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 
 当前执行过程：
 
-1. 识别 `sportCodes=[badminton]`。
-2. 识别意图 `PLACE`。
-3. 识别日期为今天，时段为 `19:00-20:00`。
+1. 快捷按钮发送 `FIND_NEARBY_PLACES` Command，不重新猜测显示文案。
+2. 后端校验并写入 `sportCodes=[badminton]`、意图 `PLACE`。
+3. `TONIGHT` 转成下一个可用的 `19:00-20:00`。
 4. 按用户经纬度查询附近高德羽毛球场所。
 5. 对前两处场所查询 `venue_inventory`。
 6. 只接受今天 `19:00-20:00` 的真实可售库存；不存在时查同日真实单场一小时。
@@ -663,9 +718,9 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 
 ## 17. 当前仍存在的不足
 
-### 17.1 需求识别仍以规则为主
+### 17.1 模型需求提取仍是补全器
 
-当前结构化需求稳定、便宜，但对“预算别太高”“离公司近点”“周六晚饭后”这类模糊表达能力有限。后续可以增加一个受 JSON Schema 约束的模型需求提取节点，再由 Java 校验。
+当前已完成“快捷 Command + 规则优先 + 复杂文本模型 JSON 补全”。它能改善长复合条件和模糊指代，但农历、周期性计划、“离公司近”等缺少坐标的表达仍可能需要澄清。模型提取还会增加一次远程调用，因此只在规则低置信度时启用，不能替代确定性规则。
 
 ### 17.2 场所候选目前只取前两处
 
@@ -673,7 +728,7 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 
 ### 17.3 Graph 仍是确定性工作流
 
-当前已经完成 StateGraph 多节点编排和并行分支，但需求意图仍由规则解析，节点路由也由后端业务规则控制。它还没有使用模型动态规划工具，也没有启用 Graph Checkpointer；跨轮业务记忆继续由现有 MySQL + Redis 管理。这是当前安全边界，不应描述成完全自治 Agent。
+当前已经完成 StateGraph 多节点编排和并行分支，需求入口采用 Command/规则/模型混合解析，但节点路由仍由后端业务规则控制。它没有让模型动态规划写操作，也没有启用 Graph Checkpointer；跨轮业务记忆继续由现有 MySQL + Redis 管理。这是当前安全边界，不应描述成完全自治 Agent。
 
 ### 17.4 RAG 仍是轻量实现
 
@@ -704,12 +759,25 @@ API Key 只放在服务器 `/etc/hm-badminton/app.env`，不能写入 Git。
 3. `AgentController.chatStream()`，找到后端入口。
 4. `AgentGraphWorkflow`，先看节点、并行边和汇合点。
 5. `AgentServiceImpl.beginTurn()` 到 `persistAnswer()`，理解每个节点的业务实现。
-6. `AgentRequirementService.merge()`，理解多轮上下文。
-7. 四个 `service/agent/tools` 工具类，理解候选从哪里来。
-8. `AgentRagService`，理解评价、博客、装备心得如何按实体绑定。
-9. `AgentRecommendationScorer`，理解统一评分与分项得分。
-10. `VenueItemService.agentCandidates()`，理解真实时段匹配。
-11. `AgentServiceImpl.callModelOrFallback()`，理解模型选卡和逐卡理由。
-12. `AgentServiceImpl.finalizeSelection()`，理解后端怎样补齐两处场所和团购。
-13. `AgentPersistenceService` 与 `AgentAnonymousSessionResolver`，理解登录/游客两种存储。
-14. 回到 `App.vue` 的 `agentPlaceBundles()` 和卡片模板，理解最终页面。
+6. `AgentCommand`、`AgentCommandType`，理解快捷操作的白名单协议。
+7. `AgentRequirementService.merge()`，对比 Command 直通和自由文本混合解析。
+8. `AgentRequirementModelExtractor`，理解低置信度 JSON 补全及失败降级。
+9. 四个 `service/agent/tools` 工具类，理解候选从哪里来。
+10. `AgentRagService`，理解评价、博客、装备心得如何按实体绑定。
+11. `AgentRecommendationScorer`，理解统一评分与分项得分。
+12. `VenueItemService.agentCandidates()`，理解真实时段匹配。
+13. `AgentServiceImpl.callModelOrFallback()`，理解模型选卡和逐卡理由。
+14. `AgentServiceImpl.finalizeSelection()`，理解后端怎样补齐两处场所和团购。
+15. `AgentPersistenceService` 与 `AgentAnonymousSessionResolver`，理解登录/游客两种存储。
+16. 回到 `App.vue` 的 `agentPlaceBundles()` 和卡片模板，理解最终页面。
+
+## 19. 最终版维护约定
+
+1. 价格、库存、时段、活动人数和订单状态只能来自实时业务工具，不能写入 Prompt 作为固定事实。
+2. 模型只能返回候选 `cardId` 与解释，后端必须验证 ID 并重新用真实卡片渲染。
+3. 新增快捷按钮时同时新增结构化 `AgentCommand`，不要只添加一句自然语言让系统重新猜意图。
+4. 新增记忆字段时要同步修改解析、合并、持久化、清空条件和测试。
+5. 新增 Graph 节点时要声明输入、输出、超时、降级和可观测字段，禁止在数据库事务中调用模型或高德。
+6. 发布前执行后端测试、前端构建和至少一轮真实 DashScope 对话回归。
+
+当前 AI 已适合演示真实业务推荐闭环，但仍不具备完全自治、商业 SLA 或无限知识准确性。统一验收口径见 [最终版评审与验收清单](最终版评审与验收清单.md)。

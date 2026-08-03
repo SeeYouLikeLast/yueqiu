@@ -18,7 +18,7 @@ import java.util.List;
 public interface VenueOrderMapper extends BaseMapper<VenueOrder> {
 
     String ORDER_COLUMNS = """
-            id, user_id, product_id, inventory_id, venue_id, amap_place_id, venue_name,
+            id, order_no, user_id, product_id, inventory_id, venue_id, amap_place_id, venue_name,
             product_title, product_type, service_date, start_time, end_time, amount,
             status, verify_code, paid_at, used_at, created_at
             """;
@@ -30,6 +30,7 @@ public interface VenueOrderMapper extends BaseMapper<VenueOrder> {
             """)
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
+            @Arg(column = "order_no", javaType = String.class),
             @Arg(column = "user_id", javaType = Long.class),
             @Arg(column = "product_id", javaType = Long.class),
             @Arg(column = "inventory_id", javaType = Long.class),
@@ -60,6 +61,7 @@ public interface VenueOrderMapper extends BaseMapper<VenueOrder> {
             """)
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
+            @Arg(column = "order_no", javaType = String.class),
             @Arg(column = "user_id", javaType = Long.class),
             @Arg(column = "product_id", javaType = Long.class),
             @Arg(column = "inventory_id", javaType = Long.class),

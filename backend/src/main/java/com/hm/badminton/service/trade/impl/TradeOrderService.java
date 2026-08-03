@@ -5,6 +5,8 @@ import com.hm.badminton.constants.TradeType;
 import com.hm.badminton.dto.trade.EquipmentOrderCreateRequest;
 import com.hm.badminton.dto.trade.EquipmentOrderItemRequest;
 import com.hm.badminton.dto.trade.PaymentRequest;
+import com.hm.badminton.dto.trade.PaymentResult;
+import com.hm.badminton.dto.trade.OrderReference;
 import com.hm.badminton.dto.trade.VenueOrderCreateRequest;
 import com.hm.badminton.entity.VenueCartItem;
 import com.hm.badminton.entity.VenueOrder;
@@ -16,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 普通交易的统一编排服务。
@@ -40,7 +41,7 @@ public class TradeOrderService implements ITradeOrderService {
     // 创建订单和支付必须处于同一事务，避免出现已扣库存但未支付的半完成状态。
     @Override
     @Transactional
-    public Map<String, Object> payDirect(Long userId, PaymentRequest request) {
+    public PaymentResult payDirect(Long userId, PaymentRequest request) {
         // 1. 统一入口根据 type 分流，1=场所商品，2=装备商品。
         int tradeType = TradeType.require(request.getType());
         if (tradeType == TradeType.VENUE) {
@@ -48,53 +49,50 @@ public class TradeOrderService implements ITradeOrderService {
             VenueOrder created = venueItemService.createOrder(userId,
                     new VenueOrderCreateRequest(request.getProductId(), request.getInventoryId()));
             VenueOrder paid = venueItemService.pay(userId, created.getId());
-            return Map.of(
-                    "orderId", paid.getId(),
-                    "verifyCode", paid.getVerifyCode(),
-                    "order", paid);
+            return PaymentResult.direct(paid.getOrderNo(), paid.getVerifyCode());
         }
         List<EquipmentOrderItemRequest> items = request.getProductId() == null
                 ? null
                 : List.of(new EquipmentOrderItemRequest(request.getProductId(), quantity(request.getQuantity())));
         // 3. 装备购买可直接买单品，也可在 productId 为空时从购物车结算。
-        Long orderId = equipmentService.createOrder(userId,
+        OrderReference order = equipmentService.createOrder(userId,
                 new EquipmentOrderCreateRequest(items, request.getAddress()));
-        equipmentService.pay(userId, orderId);
-        return Map.of("orderId", orderId);
+        equipmentService.pay(userId, order.getId());
+        return PaymentResult.direct(order.getOrderNo(), null);
     }
 
     // 购物车结算会同时处理场所和装备，统一入口能减少前端重复请求。
     @Override
     @Transactional
-    public Map<String, Object> payCart(Long userId, PaymentRequest request) {
+    public PaymentResult payCart(Long userId, PaymentRequest request) {
         // 1. 先处理场所购物车：每个场所商品都对应一个明确库存时段，因此逐个创建订单。
         List<VenueCartItem> venueItems = venueItemService.cart(userId);
-        List<Long> venueOrderIds = new ArrayList<>();
+        List<String> venueOrderNos = new ArrayList<>();
         for (VenueCartItem item : venueItems) {
             VenueOrder created = venueItemService.createOrder(userId,
                     new VenueOrderCreateRequest(item.getProductId(), item.getInventoryId()));
             VenueOrder paid = venueItemService.pay(userId, created.getId());
-            venueOrderIds.add(paid.getId());
+            venueOrderNos.add(paid.getOrderNo());
         }
         if (!venueItems.isEmpty()) {
             venueItemService.clearCart(userId);
         }
 
         // 2. 装备购物车合并成一个装备订单，便于地址、总价和物流统一处理。
-        Long equipmentOrderId = null;
+        OrderReference equipmentOrder = null;
         if (!equipmentService.cart(userId).isEmpty()) {
-            equipmentOrderId = equipmentService.createOrder(userId,
+            equipmentOrder = equipmentService.createOrder(userId,
                     new EquipmentOrderCreateRequest(null, request.getAddress()));
-            equipmentService.pay(userId, equipmentOrderId);
+            equipmentService.pay(userId, equipmentOrder.getId());
         }
 
-        if (venueOrderIds.isEmpty() && equipmentOrderId == null) {
+        if (venueOrderNos.isEmpty() && equipmentOrder == null) {
             throw new BusinessException("购物车为空");
         }
         // 3. 方法整体事务提交后，场所订单、装备订单、库存扣减和购物车清理同时生效。
-        return Map.of(
-                "venueOrderIds", venueOrderIds,
-                "equipmentOrderId", equipmentOrderId == null ? "" : equipmentOrderId);
+        return PaymentResult.cart(
+                venueOrderNos,
+                equipmentOrder == null ? null : equipmentOrder.getOrderNo());
     }
 
     private int quantity(Integer value) {

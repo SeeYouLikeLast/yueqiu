@@ -13,6 +13,7 @@ import com.hm.badminton.mapper.trade.VenueOrderMapper;
 import com.hm.badminton.service.catalog.ISportCatalogService;
 import com.hm.badminton.service.trade.IVenueItemService;
 import com.hm.badminton.utils.CacheClient;
+import com.hm.badminton.utils.OrderNoGenerator;
 import com.hm.badminton.vo.AgentVenueProductVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -195,6 +196,7 @@ public class VenueItemService implements IVenueItemService {
 
         // 4. 保存订单快照，避免高德场所顺序或商品信息变化影响历史订单展示。
         VenueItemMapper.InsertVenueOrderRow row = new VenueItemMapper.InsertVenueOrderRow();
+        row.setOrderNo(OrderNoGenerator.next());
         row.setUserId(userId);
         row.setProductId(sale.getProductId());
         row.setInventoryId(sale.getInventoryId());

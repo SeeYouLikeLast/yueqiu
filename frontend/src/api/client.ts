@@ -47,8 +47,9 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
   try {
     body = JSON.parse(raw) as ApiResponse<T>
   } catch {
-    // 反向代理、网关或 CORS 拒绝有时返回纯文本，避免把底层错误伪装成 JSON 解析异常。
-    throw new Error(raw || `请求失败（HTTP ${response.status}）`)
+    // Nginx 上游不可用时可能返回 HTML。页面只展示可操作的中文提示，
+    // 不能把完整网关错误页和服务器版本暴露给用户。
+    throw new Error(formatResponseError(response, raw))
   }
   // 4. 后端统一返回 ApiResponse；业务 code 非 0 时转成异常，交给页面提示层处理。
   if (body.code !== 0) {
@@ -125,8 +126,30 @@ async function responseError(response: Response) {
   const raw = await response.text()
   try {
     const body = JSON.parse(raw) as Partial<ApiResponse<unknown>>
-    return body.message || `请求失败（HTTP ${response.status}）`
+    return body.message || statusMessage(response.status)
   } catch {
-    return raw || `请求失败（HTTP ${response.status}）`
+    return formatResponseError(response, raw)
   }
+}
+
+function formatResponseError(response: Response, raw: string) {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || ''
+  const looksLikeHtml = contentType.includes('text/html') || /^\s*<!doctype html/i.test(raw) || /^\s*<html/i.test(raw)
+  if (looksLikeHtml || !raw.trim()) {
+    return statusMessage(response.status)
+  }
+  return raw.trim()
+}
+
+function statusMessage(status: number) {
+  if (status === 502 || status === 503) {
+    return '服务正在启动或暂时不可用，请稍后重试'
+  }
+  if (status === 504) {
+    return 'AI 助手响应超时，请稍后重试'
+  }
+  if (status === 429) {
+    return '请求过于频繁，请稍后再试'
+  }
+  return `请求失败（HTTP ${status}）`
 }

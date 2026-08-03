@@ -42,7 +42,7 @@ class AgentClarificationResolverTest {
     }
 
     @Test
-    void emptyEquipmentResultShouldSuggestBudgetInsteadOfNearbyRange() {
+    void emptyEquipmentResultShouldNotAskForAnotherBudgetAfterAutomaticExpansion() {
         AgentRequirement requirement = new AgentRequirement();
         requirement.setSportCodes(List.of("badminton"));
         requirement.setIntents(List.of("EQUIPMENT"));
@@ -53,8 +53,9 @@ class AgentClarificationResolverTest {
                 AgentClarificationResolver.equipmentNoResult(requirement);
 
         assertThat(result).isNotNull();
-        assertThat(result.answer()).contains("200元以内的羽毛球鞋", "不受附近距离影响");
+        assertThat(result.answer()).contains("200元以内的羽毛球鞋", "自动检查价格更高的同类商品");
         assertThat(result.answer()).doesNotContain("扩大附近范围");
-        assertThat(result.quickReplies()).contains("500元以内的羽毛球鞋", "不限预算的羽毛球鞋");
+        assertThat(result.quickReplies()).containsExactly("查看不限品类装备", "推荐新手装备");
+        assertThat(result.quickReplies()).noneMatch(text -> text.contains("500元"));
     }
 }

@@ -179,3 +179,31 @@ sudo systemctl restart hm-badminton
 cd /opt/hm-badminton/deploy/production && docker compose logs -f minio
 ssh -L 9001:127.0.0.1:9001 root@你的ECS公网IP
 ```
+
+## 更新发布
+
+日常发布只更新代码、JAR、前端静态文件和必要的增量 SQL，不重新初始化演示数据：
+
+1. 本地执行后端 `mvn test` 和前端 `npm run build`。
+2. 备份 ECS 的数据库、当前 `app.jar`、`/var/www/hm-badminton` 和 Nginx 配置。
+3. 上传新 JAR，执行 `systemctl restart hm-badminton` 并检查日志。
+4. 将新 `dist/` 同步到 `/var/www/hm-badminton/`。Vite 资源带哈希，`index.html` 已配置为不缓存。
+5. 修改 Nginx 时先执行 `nginx -t`，通过后再 reload。
+6. 验证首页、`/api/sports`、登录、社区、购物车、约球和 AI。
+
+更新发布时禁止执行：
+
+```text
+initialize-demo-data.sh
+docker compose down -v
+```
+
+## 回滚
+
+每次发布前给 JAR、前端目录和 Nginx 配置创建带时间戳的备份。应用异常时先恢复上一版文件，再重启后端或 reload Nginx。涉及数据库结构时必须使用可逆的增量迁移，并在发布前验证备份可以恢复。
+
+详细检查、密钥和灾备说明：
+
+- [最终版评审与验收清单](../../docs/最终版评审与验收清单.md)
+- [生产安全与密钥管理](../../docs/生产安全与密钥管理.md)
+- [备份、恢复与监控](../../docs/备份恢复与监控.md)

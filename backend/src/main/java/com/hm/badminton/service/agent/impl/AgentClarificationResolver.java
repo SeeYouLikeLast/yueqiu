@@ -43,11 +43,7 @@ public final class AgentClarificationResolver {
                         "不限预算的" + target));
     }
 
-    /**
-     * Equipment is sold platform-wide and is not constrained by the user's nearby radius.
-     * When a price ceiling removes every candidate, ask to relax price instead of suggesting
-     * a place-oriented operation such as "扩大附近范围".
-     */
+    /** Equipment is platform-wide. This fallback runs only after higher-priced peers were also checked. */
     public static Clarification equipmentNoResult(AgentRequirement requirement) {
         if (requirement == null || requirement.getIntents() == null
                 || !requirement.getIntents().contains("EQUIPMENT")) {
@@ -66,18 +62,10 @@ public final class AgentClarificationResolver {
         }
 
         int budget = requirement.getMaxBudget().intValue();
-        List<String> replies = new java.util.ArrayList<>();
-        for (int option : List.of(200, 500, 1000, 1500)) {
-            if (option > budget) {
-                replies.add(option + "元以内的" + target);
-            }
-        }
-        replies.add("不限预算的" + target);
-        replies.add("查看不限品类装备");
         return new Clarification(
                 "当前平台没有找到" + budget + "元以内的" + target
-                        + "。装备商品不受附近距离影响，我不会把它切换成场馆团购；请提高预算或更换装备类别。",
-                replies.stream().distinct().limit(4).toList());
+                        + "，自动检查价格更高的同类商品后也没有可购买结果。你可以更换装备类别，我不会把装备请求切换成场馆团购。",
+                List.of("查看不限品类装备", "推荐新手装备"));
     }
 
     private static boolean hasEquipmentContext(String message, AgentRequirement requirement) {

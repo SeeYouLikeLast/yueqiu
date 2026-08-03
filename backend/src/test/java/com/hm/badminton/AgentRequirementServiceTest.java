@@ -2,8 +2,12 @@ package com.hm.badminton;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.config.AgentProperties;
+import com.hm.badminton.dto.agent.AgentCommand;
+import com.hm.badminton.dto.agent.AgentCommandType;
 import com.hm.badminton.dto.agent.AgentChatRequest;
 import com.hm.badminton.dto.agent.AgentRequirement;
+import com.hm.badminton.dto.agent.AgentRequirementExtraction;
+import com.hm.badminton.dto.agent.AgentTimePreset;
 import com.hm.badminton.service.agent.impl.AgentRequirementService;
 import org.junit.jupiter.api.Test;
 
@@ -11,13 +15,131 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 class AgentRequirementServiceTest {
 
     private final AgentRequirementService service = new AgentRequirementService(
-            null, null, new ObjectMapper(), new AgentProperties());
+            null, null, new ObjectMapper(), new AgentProperties(), null);
+
+    @Test
+    void structuredCommandMustBypassDisplayTextIntentGuessing() {
+        AgentRequirement previous = service.merge(
+                new AgentRequirement(), request("我要买一个羽毛球鞋子"), null);
+        AgentChatRequest request = request("推荐新手装备");
+        AgentCommand command = new AgentCommand();
+        command.setType(AgentCommandType.FIND_JOINABLE_ACTIVITIES);
+        command.setSportCodes(List.of("tennis"));
+        command.setTimePreset(AgentTimePreset.TOMORROW);
+        command.setLevel("不限");
+        request.setCommand(command);
+
+        AgentRequirement result = service.merge(previous, request, null);
+
+        assertThat(result.getIntents()).containsExactly("ACTIVITY");
+        assertThat(result.getSportCodes()).containsExactly("tennis");
+        assertThat(result.getTargetDate()).isEqualTo(LocalDate.now().plusDays(1));
+        assertThat(result.getEquipmentKeyword()).isNull();
+        assertThat(result.getFieldSources()).containsEntry("intents", "command");
+    }
+
+    @Test
+    void bookingRulesCommandMustClearPreviousRecommendationConstraints() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setIntents(List.of("PLACE"));
+        previous.setSportCodes(List.of("badminton"));
+        previous.setTargetDate(LocalDate.now());
+        previous.setStartTime(LocalTime.of(19, 0));
+        previous.setEndTime(LocalTime.of(20, 0));
+        previous.setDurationMinutes(60);
+        previous.setMaxBudget(BigDecimal.valueOf(80));
+        previous.setMaxDistanceMeters(5000);
+        previous.setPreferenceTags(List.of("停车"));
+        previous.setLastSelectedCardIds(List.of("venue:1:1"));
+
+        AgentChatRequest request = request("帮我看预约规则");
+        AgentCommand command = new AgentCommand();
+        command.setType(AgentCommandType.VIEW_BOOKING_RULES);
+        request.setCommand(command);
+
+        AgentRequirement result = service.merge(previous, request, null);
+
+        assertThat(result.getIntents()).containsExactly("BOOKING_RULES");
+        assertThat(result.getSportCodes()).isEmpty();
+        assertThat(result.getTargetDate()).isNull();
+        assertThat(result.getStartTime()).isNull();
+        assertThat(result.getEndTime()).isNull();
+        assertThat(result.getDurationMinutes()).isNull();
+        assertThat(result.getMaxBudget()).isNull();
+        assertThat(result.getMaxDistanceMeters()).isNull();
+        assertThat(result.getPreferenceTags()).isEmpty();
+        assertThat(result.getLastSelectedCardIds()).isEmpty();
+        assertThat(result.isAvailabilityRequired()).isFalse();
+        assertThat(result.getFieldSources()).containsOnly(entry("intents", "command"));
+    }
+
+    @Test
+    void freeTextBookingRulesMustNotReusePreviousPlaceIntent() {
+        AgentRequirement previous = new AgentRequirement();
+        previous.setIntents(List.of("PLACE"));
+        previous.setSportCodes(List.of("badminton"));
+        previous.setTargetDate(LocalDate.now());
+        previous.setStartTime(LocalTime.of(19, 0));
+        previous.setMaxDistanceMeters(3000);
+
+        AgentRequirement result = service.merge(previous, request("场馆预约规则是什么"), null);
+
+        assertThat(result.getIntents()).containsExactly("BOOKING_RULES");
+        assertThat(result.getSportCodes()).isEmpty();
+        assertThat(result.getTargetDate()).isNull();
+        assertThat(result.getStartTime()).isNull();
+        assertThat(result.getMaxDistanceMeters()).isNull();
+    }
+
+    @Test
+    void lowConfidenceRulesShouldUseValidatedModelPatch() {
+        AgentRequirementExtraction extraction = new AgentRequirementExtraction();
+        extraction.setConfidence(0.88d);
+        extraction.setIntents(List.of("equipment", "DROP_TABLE"));
+        extraction.setSportCodes(List.of("tennis", "unknown"));
+        extraction.setMaxBudget(BigDecimal.valueOf(300));
+        extraction.setEquipmentKeyword("网球鞋");
+        AgentRequirementService modelBackedService = new AgentRequirementService(
+                null, null, new ObjectMapper(), new AgentProperties(),
+                (message, previous) -> Optional.of(extraction));
+
+        AgentRequirement result = modelBackedService.merge(
+                new AgentRequirement(), request("帮我挑一个更适合我的，预算不要太高"), null);
+
+        assertThat(result.getIntents()).containsExactly("EQUIPMENT");
+        assertThat(result.getSportCodes()).containsExactly("tennis");
+        assertThat(result.getMaxBudget()).isEqualByComparingTo(BigDecimal.valueOf(300));
+        assertThat(result.getEquipmentKeyword()).isEqualTo("鞋");
+        assertThat(result.getFieldSources()).containsEntry("intents", "model");
+    }
+
+    @Test
+    void explicitRulesMustOverrideModelExtraction() {
+        AgentRequirementExtraction extraction = new AgentRequirementExtraction();
+        extraction.setConfidence(0.95d);
+        extraction.setIntents(List.of("PLACE"));
+        extraction.setSportCodes(List.of("football"));
+        extraction.setMaxDistanceMeters(15000);
+        AgentRequirementService modelBackedService = new AgentRequirementService(
+                null, null, new ObjectMapper(), new AgentProperties(),
+                (message, previous) -> Optional.of(extraction));
+
+        AgentRequirement result = modelBackedService.merge(new AgentRequirement(),
+                request("帮我找适合新手、环境比较好而且离我近一些的羽毛球馆"), null);
+
+        assertThat(result.getIntents()).containsExactly("PLACE");
+        assertThat(result.getSportCodes()).containsExactly("badminton");
+        assertThat(result.getLevel()).isEqualTo("初级");
+        assertThat(result.getFieldSources()).containsEntry("sportCodes", "rule");
+    }
 
     @Test
     void dateMustNotBeParsedAsTimeRange() {

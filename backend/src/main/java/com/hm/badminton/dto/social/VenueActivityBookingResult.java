@@ -7,7 +7,7 @@ import lombok.Data;
 @Data
 @AllArgsConstructor
 public class VenueActivityBookingResult {
-    private Long venueOrderId;
+    private String venueOrderNo;
     private String verifyCode;
     private Long activityId;
 }

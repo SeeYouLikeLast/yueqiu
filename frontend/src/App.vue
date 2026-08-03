@@ -102,6 +102,7 @@ type VenueInventory = {
 
 type VenueOrder = {
   id: number
+  orderNo: string
   venueName: string
   productTitle: string
   productType: string
@@ -113,11 +114,20 @@ type VenueOrder = {
   verifyCode: string
 }
 
+type PaymentResult = {
+  orderNo?: string
+  verifyCode?: string
+  venueOrderNos: string[]
+  equipmentOrderNo?: string
+}
+
 type CartItem = {
   id: number
   type: number
   productId: number
   inventoryId?: number
+  sportCode?: string
+  categoryName?: string
   productName: string
   brand: string
   coverUrl: string
@@ -310,6 +320,36 @@ type AgentAction = {
   payload?: Record<string, unknown>
 }
 
+type AgentCommandType =
+  | 'FIND_NEARBY_PLACES'
+  | 'FIND_JOINABLE_ACTIVITIES'
+  | 'RECOMMEND_EQUIPMENT'
+  | 'VIEW_VENUE_PRODUCTS'
+  | 'FILTER_DISTANCE'
+  | 'FILTER_BUDGET'
+  | 'FILTER_PRICE'
+  | 'FILTER_LEVEL'
+  | 'VIEW_BOOKING_RULES'
+  | 'REFINE_RESULTS'
+
+type AgentCommand = {
+  type: AgentCommandType
+  sportCodes?: string[]
+  allSportsRequested?: boolean
+  timePreset?: 'TONIGHT' | 'TODAY' | 'TOMORROW'
+  startTime?: string
+  durationMinutes?: number
+  maxBudget?: number
+  clearBudget?: boolean
+  maxDistanceMeters?: number
+  level?: string
+  equipmentKeyword?: string
+  clearEquipmentKeyword?: boolean
+  sortPreference?: 'BALANCED' | 'PRICE' | 'DISTANCE' | 'RATING' | 'TIME' | 'VALUE'
+  availabilityRequired?: boolean
+  refundableRequired?: boolean
+}
+
 type AgentCard = {
   cardId?: string
   type: 'place' | 'venue_product' | 'activity' | 'equipment' | 'seckill'
@@ -471,6 +511,7 @@ const cartCount = ref(0)
 const cartLoaded = ref(false)
 const ordersLoaded = ref(false)
 const codeCountdown = ref(0)
+const codeSending = ref(false)
 const buyingVenueItemId = ref<number | null>(null)
 const purchaseNotice = ref('')
 const profileView = ref<ProfileView>('orders')
@@ -896,6 +937,27 @@ function equipmentListCover(item: Pick<EquipmentItem, 'name' | 'sportCode' | 'ca
   return listSvgCover('equipment', title, item.sportCode, item.categoryName)
 }
 
+function inferSportCode(...values: Array<string | undefined>) {
+  const text = values.filter(Boolean).join(' ')
+  const exactSport = sports.value.find((sport) => text.includes(sport.name))
+  if (exactSport) return exactSport.code
+
+  return sports.value.find((sport) =>
+    [...sport.keywords]
+      .filter((keyword) => keyword.length > 1)
+      .sort((left, right) => right.length - left.length)
+      .some((keyword) => text.includes(keyword))
+  )?.code
+}
+
+function cartItemCover(item: CartItem) {
+  const kind: ListCoverKind = item.type === 2 ? 'equipment' : 'venue'
+  // 兼容尚未升级的旧版 /cart 响应：缺少 sportCode 时从商品名和分类推断，
+  // 保证购物车与装备商城始终使用同一球类插画，而不是退回通用占位图。
+  const sportCode = item.sportCode || inferSportCode(item.productName, item.categoryName, item.brand)
+  return listSvgCover(kind, item.productName, sportCode, item.categoryName || item.brand)
+}
+
 function venueListCover(item: VenueItem) {
   return listSvgCover('venue', item.title, item.sportCode, item.productTypeName)
 }
@@ -1014,6 +1076,14 @@ function startCodeCountdown(seconds: number) {
       codeTimer = undefined
     }
   }, 1000)
+}
+
+function resetCodeCountdown() {
+  if (codeTimer) {
+    window.clearInterval(codeTimer)
+    codeTimer = undefined
+  }
+  codeCountdown.value = 0
 }
 
 function errorMessage(error: unknown) {
@@ -1293,14 +1363,23 @@ async function wrap(action: () => Promise<void>, okMessage?: string) {
 }
 
 async function sendLoginCode() {
-  await wrap(async () => {
+  if (codeSending.value || codeCountdown.value > 0) return
+
+  codeSending.value = true
+  startCodeCountdown(60)
+  try {
     const result = await api<LoginCodeResponse>('/auth/code', {
       method: 'POST',
       body: JSON.stringify({ email: loginForm.email.trim() })
     })
-    startCodeCountdown(result.cooldownSeconds || 60)
     message.value = `验证码已发送至 ${result.email}，5 分钟内有效`
-  })
+  } catch (error) {
+    // 邮件未被 SMTP 接受时，本次冷却在后端也会撤销，前端同步恢复发送按钮。
+    resetCodeCountdown()
+    message.value = handleRequestError(error)
+  } finally {
+    codeSending.value = false
+  }
 }
 
 async function login() {
@@ -2775,9 +2854,92 @@ function sportCodesFromAgentContext(reply = '') {
 }
 
 function replyNeedsSportSelection(reply: string) {
+  // 预约规则是平台级只读查询，不依赖球类，也不应弹出运动选择器。
+  if (/(预约规则|预订规则|核销规则|退款规则|使用规则)/.test(reply)) return false
   // 已有明确球类时直接执行；只有首轮对话且没有任何球类线索时才让用户补充选择。
   if (sportCodesFromAgentContext(reply).length) return false
   return !hasAgentConversation.value
+}
+
+/**
+ * 快捷按钮不再把显示文案交给后端重新猜意图，而是转换为受控 Command。
+ * 文案仍作为聊天消息展示；真正决定 Graph 分支的是 type 和经过后端校验的筛选字段。
+ */
+function agentCommandForQuickReply(
+  reply: string,
+  sportCodes: string[] = [],
+  allSportsRequested = false
+): AgentCommand {
+  const text = reply.replace(/\s+/g, '')
+  let type: AgentCommandType = 'REFINE_RESULTS'
+
+  if (/(约球|活动|加入|哪些局|的局)/.test(text)) {
+    type = 'FIND_JOINABLE_ACTIVITIES'
+  } else if (/(装备|球拍|拍子|球鞋|鞋子|手胶|护具|球包|球袜)/.test(text)) {
+    type = 'RECOMMEND_EQUIPMENT'
+  } else if (/(预约规则|预订规则|核销规则)/.test(text)) {
+    type = 'VIEW_BOOKING_RULES'
+  } else if (/(团购|私教|可买项目)/.test(text)) {
+    type = 'VIEW_VENUE_PRODUCTS'
+  } else if (/(按距离|离我更近|更近的|最近)/.test(text)) {
+    type = 'FILTER_DISTANCE'
+  } else if (/(按预算|预算筛选)/.test(text)) {
+    type = 'FILTER_BUDGET'
+  } else if (/(最划算|更便宜|最便宜|价格最低)/.test(text)) {
+    type = 'FILTER_PRICE'
+  } else if (/(适合新手|不限水平|初级|中级|高级)/.test(text)) {
+    type = 'FILTER_LEVEL'
+  } else if (/(附近|场地|场所|场馆|打球)/.test(text)) {
+    type = 'FIND_NEARBY_PLACES'
+  }
+
+  const command: AgentCommand = {
+    type,
+    sportCodes,
+    allSportsRequested
+  }
+  if (type !== 'VIEW_BOOKING_RULES') command.availabilityRequired = true
+  if (text.includes('今晚') || text.includes('晚间')) {
+    command.timePreset = 'TONIGHT'
+    command.sortPreference = 'TIME'
+  } else if (text.includes('明天')) {
+    command.timePreset = 'TOMORROW'
+  } else if (text.includes('今天')) {
+    command.timePreset = 'TODAY'
+  }
+
+  const exactTime = text.match(/(2[0-3]|[01]?\d):([0-5]\d)/)
+  if (exactTime) {
+    command.startTime = `${exactTime[1].padStart(2, '0')}:${exactTime[2]}`
+    command.durationMinutes = 60
+  }
+  const budget = text.match(/(\d{1,5})元(?:以内|以下|之内)?/)
+  if (budget) {
+    command.maxBudget = Number(budget[1])
+  }
+  if (/(不限预算|预算不限)/.test(text)) {
+    command.clearBudget = true
+  }
+  const distance = text.match(/(\d+(?:\.\d+)?)(公里|千米|km|米|m)/i)
+  if (distance) {
+    const value = Number(distance[1])
+    command.maxDistanceMeters = /^(米|m)$/i.test(distance[2]) ? Math.round(value) : Math.round(value * 1000)
+  }
+  if (type === 'FILTER_DISTANCE') command.sortPreference = 'DISTANCE'
+  if (type === 'FILTER_PRICE') command.sortPreference = text.includes('划算') ? 'VALUE' : 'PRICE'
+  if (/(不限水平|水平不限)/.test(text)) command.level = '不限'
+  else if (/(新手|初学|入门)/.test(text)) command.level = '初级'
+  else if (text.includes('中级')) command.level = '中级'
+  else if (/(高级|高手|进阶)/.test(text)) command.level = '高级'
+
+  if (/(球鞋|鞋子|运动鞋)/.test(text)) command.equipmentKeyword = '鞋'
+  else if (/(球拍|拍子)/.test(text)) command.equipmentKeyword = '球拍'
+  else if (text.includes('手胶')) command.equipmentKeyword = '手胶'
+  else if (text.includes('护具')) command.equipmentKeyword = '护'
+  else if (text.includes('球包')) command.equipmentKeyword = '包'
+  else if (text.includes('球袜')) command.equipmentKeyword = '袜'
+  if (/(不限品类|全部装备)/.test(text)) command.clearEquipmentKeyword = true
+  return command
 }
 
 function handleAgentQuickReply(reply: string) {
@@ -2789,13 +2951,14 @@ function handleAgentQuickReply(reply: string) {
 
   // 后续的“按距离重筛”等命令自动继承上一轮球类，并把球类写进展示文案，
   // 这样前后端、聊天记录和用户看到的内容保持一致。
-  const sportCodes = sportCodesFromAgentContext(reply)
+  const isBookingRules = /(预约规则|预订规则|核销规则|退款规则|使用规则)/.test(reply)
+  const sportCodes = isBookingRules ? [] : sportCodesFromAgentContext(reply)
   const alreadyNamesSport = sports.value.some((sport) => reply.includes(sport.name))
   const sportNames = sportCodes.map((code) => sportNameByCode(code))
-  const content = !alreadyNamesSport && sportNames.length
+  const content = !isBookingRules && !alreadyNamesSport && sportNames.length
     ? `${reply}（${sportNames.join('、')}）`
     : reply
-  void sendAgentMessage(content, sportCodes)
+  void sendAgentMessage(content, sportCodes, false, agentCommandForQuickReply(reply, sportCodes))
 }
 
 function openAgentSportPicker(reply: string) {
@@ -2840,13 +3003,20 @@ function confirmAgentQuickReply() {
   closeAgentSportPicker()
   // 用户在选择器中点了“不限”时，必须保留“全运动”的语义，
   // 不能再回退为首页当前选中的单一运动。
-  void sendAgentMessage(content, sportCodes, sportCodes.length === 0)
+  const allSportsRequested = sportCodes.length === 0
+  void sendAgentMessage(
+    content,
+    sportCodes,
+    allSportsRequested,
+    agentCommandForQuickReply(prompt, sportCodes, allSportsRequested)
+  )
 }
 
 async function sendAgentMessage(
   text = agentInput.value,
   requestedSportCodes: string[] = [],
-  allSportsRequested = false
+  allSportsRequested = false,
+  command?: AgentCommand
 ) {
   const content = text.trim()
   if (!content || loading.value) return
@@ -2889,7 +3059,8 @@ async function sendAgentMessage(
         city: placeQuery.city,
         lng: placeQuery.lng,
         lat: placeQuery.lat,
-        allSportsRequested
+        allSportsRequested,
+        command
       })
     }, (event, data) => {
       if (event === 'conversation') {
@@ -3133,7 +3304,7 @@ async function confirmAgentVenueBooking() {
   }
   await wrap(async () => {
     agentVenueBookingSubmitting.value = true
-    const result = await api<{ venueOrderId: number; verifyCode: string; activityId: number }>('/social/activities/book-and-create', {
+    const result = await api<{ venueOrderNo: string; verifyCode: string; activityId: number }>('/social/activities/book-and-create', {
       method: 'POST',
       body: JSON.stringify({
         productId,
@@ -3321,7 +3492,7 @@ async function buyVenueItem(product: VenueItem) {
       message.value = '该项目暂无可购买时段'
       return
     }
-    const created = await api<{ orderId: number; verifyCode: string; order: VenueOrder }>('/payments', {
+    const created = await api<PaymentResult>('/payments', {
       method: 'POST',
       body: JSON.stringify({
         type: 1,
@@ -3330,7 +3501,7 @@ async function buyVenueItem(product: VenueItem) {
       })
     })
     ordersLoaded.value = false
-    purchaseNotice.value = `购买成功，核销码 ${created.verifyCode}`
+    purchaseNotice.value = `购买成功，订单号 ${created.orderNo}，核销码 ${created.verifyCode}`
     message.value = '购买成功，可在“我的”查看订单'
   }).finally(() => {
     buyingVenueItemId.value = null
@@ -3369,11 +3540,12 @@ async function addVenueCart(product: VenueItem) {
 async function buyEquipmentNow(product: EquipmentItem) {
   if (!requireLogin('请先登录后购买装备')) return
   await wrap(async () => {
-    await api('/payments', {
+    const created = await api<PaymentResult>('/payments', {
       method: 'POST',
       body: JSON.stringify({ type: 2, productId: product.id, quantity: 1, address: profileAddress() })
     })
     ordersLoaded.value = false
+    message.value = `装备订单已支付，订单号 ${created.orderNo}`
   }, '装备订单已支付')
 }
 
@@ -3388,7 +3560,7 @@ async function checkoutCart() {
     return
   }
   await wrap(async () => {
-    await api<{ orderId: number }>('/payments/cart', {
+    const result = await api<PaymentResult>('/payments/cart', {
       method: 'POST',
       body: JSON.stringify({ address: profileAddress() })
     })
@@ -3396,6 +3568,8 @@ async function checkoutCart() {
     cartCount.value = 0
     cartLoaded.value = true
     ordersLoaded.value = false
+    const orderCount = result.venueOrderNos.length + (result.equipmentOrderNo ? 1 : 0)
+    message.value = `购物车结算成功，共生成 ${orderCount} 个订单`
   }, '装备订单已支付')
 }
 
@@ -3528,6 +3702,19 @@ function formatDateTime(value?: string) {
   return value.replace('T', ' ').slice(0, 16)
 }
 
+function displayOrderCode(value?: string) {
+  const code = value?.trim()
+  if (!code) return ''
+  // 后端会给部分普通订单号加 # 前缀，先去掉前缀再识别 UUID，避免误判成秒杀订单号。
+  const rawCode = code.startsWith('#') ? code.slice(1) : code
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(rawCode)
+  if (isUuid || rawCode.length > 18) {
+    return `订单号 ${rawCode.slice(0, 8)}...${rawCode.slice(-5)}`
+  }
+  // 秒杀订单号较短且需要保留 #，方便和普通订单快速区分。
+  return code.startsWith('#') ? code : `订单号 ${code}`
+}
+
 function reviewImages(review: VenueReview) {
   const images = (review.imageUrls || '')
     .split(',')
@@ -3655,8 +3842,8 @@ onBeforeUnmount(() => {
                 <MessageCircle :size="18" />
                 <input v-model="loginForm.code" inputmode="numeric" maxlength="6" placeholder="请输入验证码" />
               </div>
-              <button class="code-button" @click="sendLoginCode" :disabled="loading || codeCountdown > 0 || !loginForm.email.trim()">
-                {{ codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}
+              <button type="button" class="code-button" @click="sendLoginCode" :disabled="loading || codeSending || codeCountdown > 0 || !loginForm.email.trim()">
+                {{ codeSending ? `发送中 ${codeCountdown}s` : codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}
               </button>
             </div>
           </label>
@@ -4928,7 +5115,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!cartItems.length" class="empty-box">购物车暂无商品</div>
           <article v-for="item in cartItems" :key="item.id" class="cart-item-row">
-            <img :src="item.coverUrl || FALLBACK_IMAGE" :alt="item.productName" loading="lazy" decoding="async" @error="imageFallback" />
+            <img :src="cartItemCover(item)" :alt="item.productName" loading="lazy" decoding="async" />
             <div>
               <h3>{{ item.productName }}</h3>
               <p>{{ item.brand }}</p>
@@ -4969,7 +5156,7 @@ onBeforeUnmount(() => {
             <div class="order-side">
               <strong>{{ yuan(order.amount) }}</strong>
               <span>{{ order.status }}</span>
-              <em>{{ order.code }}</em>
+              <em v-if="order.code" :title="order.code">{{ displayOrderCode(order.code) }}</em>
             </div>
           </article>
         </section>
@@ -4991,7 +5178,7 @@ onBeforeUnmount(() => {
             <div class="order-side">
               <strong>{{ yuan(order.amount) }}</strong>
               <span>{{ order.status }}</span>
-              <em>{{ order.code }}</em>
+              <em v-if="order.code" :title="order.code">{{ displayOrderCode(order.code) }}</em>
             </div>
           </article>
         </section>

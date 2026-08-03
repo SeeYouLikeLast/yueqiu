@@ -4,6 +4,8 @@
 
 > 当前为学习与演示项目：支付为模拟支付；高德场所为真实 POI 搜索，团购、库存、订单、评价和社区内容由平台本地数据维护。
 
+**当前状态（2026-08-03）**：最终演示版已部署到 ECS。后端 50 个自动化测试通过，前端类型检查和生产构建通过，核心公开接口线上可访问。该结论表示“功能演示可交付”，不等同于具备商业生产系统的支付合规、高可用、灾备和容量承诺。上线边界与验收证据见 [最终版评审与验收清单](docs/最终版评审与验收清单.md)。
+
 ## 功能概览
 
 ### 移动端业务
@@ -140,6 +142,7 @@ docker compose down
 | 环境变量 | 用途 |
 | --- | --- |
 | `AMAP_KEY` | 高德 Web 服务 API Key |
+| `VITE_AMAP_JS_KEY` | 前端构建使用的高德 JS Key；配置域名白名单，不与 Web 服务 Key 共用 |
 | `AI_DASHSCOPE_ENABLED` | 是否启用 DashScope，例如 `true` |
 | `AI_DASHSCOPE_API_KEY` | DashScope API Key |
 | `AI_MODEL` | 模型名，例如 `qwen-plus` |
@@ -154,6 +157,7 @@ PowerShell 示例：
 
 ```powershell
 $env:AMAP_KEY="你的高德Key"
+$env:VITE_AMAP_JS_KEY="你的高德JSKey"
 $env:AI_DASHSCOPE_ENABLED="true"
 $env:AI_DASHSCOPE_API_KEY="你的DashScopeKey"
 $env:AI_MODEL="qwen-plus"
@@ -167,7 +171,7 @@ $env:MAIL_PASSWORD="你的QQ邮箱SMTP授权码"
 - 开发环境的 `schema.sql`、`data.sql` 会在启动时重建轻量演示数据，适合调试，不应保存真实业务数据。
 - 生产环境使用 [application-prod.yml](backend/src/main/resources/application-prod.yml)，已关闭自动 SQL 初始化，服务重启不会清表。
 - 演示图片位于 `seed-assets/generated`，由脚本上传到 MinIO；MySQL 只保存对象元数据和访问地址。
-- 本地数据量、字段差异和绑定规则见 [轻量演示数据方案](docs/轻量演示数据方案.md)。
+- 本地数据量、字段差异和绑定规则见 [轻量演示数据方案](docs/低优先级/轻量演示数据方案.md)。
 
 ## API 概览
 
@@ -206,17 +210,23 @@ $env:MAIL_PASSWORD="你的QQ邮箱SMTP授权码"
 
 ## 相关文档
 
+- [文档索引](docs/文档索引.md)
+- [最终版评审与验收清单](docs/最终版评审与验收清单.md)
+- [生产安全与密钥管理](docs/生产安全与密钥管理.md)
+- [备份、恢复与监控](docs/备份恢复与监控.md)
 - [新手代码阅读指南：从页面到数据库完整追踪](docs/新手代码阅读指南.md)
-- [项目启动与关闭](docs/项目启动与关闭.md)
+- [项目启动与关闭](docs/初期环境配置--ai操作/项目启动与关闭.md)
 - [后端 HMDP 分层结构与 API 转发](docs/后端HMDP分层结构与API转发.md)
 - [数据存储分工：MySQL、Redis、MinIO](docs/数据存储分工-MySQL-Redis-MinIO.md)
 - [Redis 防穿透、雪崩、击穿](docs/关键业务/redis防穿透、雪崩、击穿（Get）.md)
-- [秒杀业务逻辑与并发控制](docs/关键业务/秒杀业务逻辑与并发控制(Post).md)
-- [AI 助手逻辑与改进方案](docs/toAI助手逻辑与改进方案.md)
-- [接口性能测试与优化建议](docs/接口性能测试与优化建议.md)
+- [秒杀业务逻辑与并发控制](<docs/关键业务/秒杀业务逻辑与并发控制(Post).md>)
+- [AI 助手当前业务逻辑](docs/约个球AI助手当前业务逻辑.md)
+- [AI 助手 Agent 实施规划](docs/约个球AI助手Agent实施规划.md)
+- [接口性能测试与优化建议](docs/低优先级/接口性能测试与优化建议.md)
 
 ## 安全提醒
 
 - `.env`、`app.env`、邮箱 SMTP 授权码、DashScope Key、JWT 密钥、生产数据库密码不得提交 Git。
 - 高德 JS Key 应在高德控制台限制允许的 Web 域名；Web 服务 Key 不应暴露在前端代码中。
 - 首次上传前优先使用 GitHub 私有仓库；若密钥曾进入提交历史，应立即轮换，而不是只依赖 `.gitignore`。
+- 当前 MinIO Bucket 为公开读，适合头像和博客图片，不适合任何私密附件；商业化前应拆分公开与私有 Bucket。

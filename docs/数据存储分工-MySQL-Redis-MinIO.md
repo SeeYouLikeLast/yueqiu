@@ -234,3 +234,7 @@ SELECT id, user_id, title, updated_at FROM agent_conversation ORDER BY updated_a
 3. 修改 MinIO Bucket、对象路径、公开访问策略、上传限制或清理任务。
 4. 新增 RocketMQ Topic、Consumer Group、消息幂等规则或降级策略。
 5. 修改本地/生产端口、容器内存限制、初始化方式或备份恢复流程。
+- 生产环境的数据备份、恢复顺序和监控项见 [备份、恢复与监控](备份恢复与监控.md)。
+- MinIO 当前 Bucket 为匿名下载，公开图片可以直连；私密文件必须改用独立私有 Bucket 和鉴权下载。
+- Redis 丢失后不应丢订单事实，但会使登录态、缓存、Feed 和游客 AI 历史失效；恢复时先保证 MySQL 和 MinIO 正确。
+- `schema.sql`、`data.sql` 只用于开发或首次演示初始化，生产更新必须使用增量迁移。

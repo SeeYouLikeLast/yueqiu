@@ -20,6 +20,8 @@ public class CartItem implements Serializable {
 
     private Long id;
     private Long productId;
+    private String sportCode;
+    private String categoryName;
     private String productName;
     private String brand;
     private String coverUrl;

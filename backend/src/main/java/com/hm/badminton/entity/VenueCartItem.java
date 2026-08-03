@@ -23,6 +23,8 @@ public class VenueCartItem implements Serializable {
     private Long id;
     private Long productId;
     private Long inventoryId;
+    private String sportCode;
+    private String productTypeName;
     private String productName;
     private String venueName;
     private String coverUrl;

@@ -1,6 +1,7 @@
 package com.hm.badminton.dto.agent;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
 import lombok.Data;
 
 import java.util.List;
@@ -17,4 +18,7 @@ public class AgentChatRequest {
     private String city;
     private Double lng;
     private Double lat;
+    /** Present only for quick actions; free-text messages leave this field null. */
+    @Valid
+    private AgentCommand command;
 }

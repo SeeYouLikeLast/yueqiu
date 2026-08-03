@@ -25,6 +25,25 @@ public final class EquipmentQueryNormalizer {
     private EquipmentQueryNormalizer() {
     }
 
+    /**
+     * Resolves the database keyword without letting a structured command's display text
+     * override its validated fields.
+     *
+     * <p>Quick replies send both a machine-readable command and a user-facing message.
+     * For those requests, the command has already updated {@code rememberedKeyword};
+     * parsing text such as "不限预算的羽毛球装备" again would incorrectly turn
+     * "预算的" into a SQL {@code LIKE} keyword.</p>
+     */
+    public static String resolveQueryKeyword(String message,
+                                             String rememberedKeyword,
+                                             boolean structuredCommand) {
+        if (structuredCommand) {
+            return blankToNull(rememberedKeyword);
+        }
+        String currentKeyword = normalize(message);
+        return currentKeyword == null ? blankToNull(rememberedKeyword) : currentKeyword;
+    }
+
     public static String normalize(String message) {
         if (message == null || message.isBlank()) {
             return null;
@@ -39,7 +58,7 @@ public final class EquipmentQueryNormalizer {
 
         // Filtering instructions describe how to query; they are not product keywords.
         // Passing "按预算筛" into SQL LIKE would incorrectly produce an empty result set.
-        if (compact.matches(".*(按预算|预算筛选?|按价格|价格筛选?).*")) {
+        if (compact.matches(".*(按预算|预算筛选?|按价格|价格筛选?|不限预算|预算不限|不考虑价格).*")) {
             return null;
         }
         if (compact.matches(".*(按距离|距离筛选?|重新筛|重新排序|离我更近|更近的|最划算|预约规则|这些场所|这些团购).*")) {
@@ -64,5 +83,9 @@ public final class EquipmentQueryNormalizer {
 
     private static Map.Entry<Pattern, String> alias(String regex, String keyword) {
         return Map.entry(Pattern.compile(regex), keyword);
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

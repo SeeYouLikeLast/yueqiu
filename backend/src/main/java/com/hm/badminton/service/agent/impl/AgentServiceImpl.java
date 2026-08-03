@@ -26,6 +26,7 @@ import com.hm.badminton.service.agent.graph.AgentGraphState;
 import com.hm.badminton.service.agent.graph.AgentGraphWorkflow;
 import com.hm.badminton.service.agent.graph.AgentPlaceBranchResult;
 import com.hm.badminton.service.agent.tools.ActivityAgentTool;
+import com.hm.badminton.service.agent.tools.BookingRuleAgentTool;
 import com.hm.badminton.service.agent.tools.EquipmentAgentTool;
 import com.hm.badminton.service.agent.tools.EquipmentQueryNormalizer;
 import com.hm.badminton.service.agent.tools.PlaceAgentTool;
@@ -41,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -98,6 +100,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             "recommendScore",
             "scoreBreakdown",
             "recommendReasons",
+            "budgetExpanded",
+            "originalBudget",
+            "budgetIncrease",
             "ragEvidence",
             "knowledgeHighlights",
             "knowledgeSources",
@@ -111,6 +116,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             recommendationReasons 必须为每个 selectedCardId 分别生成一句有差异的推荐理由。
             每条理由至少引用一个该卡片独有的信息，例如场馆名、价格、距离或项目特点；禁止只复述所有卡片共有的规则。
             理由只能使用该卡片中已有的时间、价格、距离、水平、场景、优缺点等事实，不能补充未提供的信息。
+            如果卡片 budgetExpanded=true，必须明确说明原预算、需要增加的金额和商品现价，不能声称商品符合原预算。
             ragEvidence 是博客、场馆评价或装备心得的可追溯软知识；可以引用其标题和摘录，但不能把主观体验写成库存、价格或可售时段事实。
             只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 以外的内容：
             {"selectedCardIds":["cardId"],"recommendationReasons":{"cardId":"该卡片的具体推荐理由"},"explanation":"本次选择的总体依据"}
@@ -123,6 +129,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     private final VenueProductAgentTool venueProductTool;
     private final ActivityAgentTool activityTool;
     private final EquipmentAgentTool equipmentTool;
+    private final BookingRuleAgentTool bookingRuleTool;
     private final UserContext userContext;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
@@ -138,6 +145,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                             VenueProductAgentTool venueProductTool,
                             ActivityAgentTool activityTool,
                             EquipmentAgentTool equipmentTool,
+                            BookingRuleAgentTool bookingRuleTool,
                             UserContext userContext,
                             ObjectMapper objectMapper,
                             StringRedisTemplate redisTemplate,
@@ -152,6 +160,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         this.venueProductTool = venueProductTool;
         this.activityTool = activityTool;
         this.equipmentTool = equipmentTool;
+        this.bookingRuleTool = bookingRuleTool;
         this.userContext = userContext;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
@@ -270,6 +279,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         if (shouldQuery(context, "EQUIPMENT")) {
             run.emit(AgentGraphProgress.stage("查询装备", "正在按运动、预算和水平筛选装备"));
         }
+        if (hasIntent(context, "BOOKING_RULES")) {
+            run.emit(AgentGraphProgress.stage("读取规则", "正在读取平台预约、核销和退款规则"));
+        }
     }
 
     /**
@@ -342,17 +354,30 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
         }
         String message = run.getRequest().getMessage();
 
-        // 本轮明确提到“鞋子/球拍”时使用新关键词；“500 元以内”等追问没有品类，
-        // 则继续使用结构化记忆里的上一轮装备类别。
-        String keyword = firstNotBlank(
-                EquipmentQueryNormalizer.normalize(message),
-                context.requirement().getEquipmentKeyword());
+        // 快捷按钮的结构化 Command 已经完成品类、预算的校验与记忆合并，
+        // 此处不能再解析展示文案，否则“不限预算”会被误当成商品搜索词。
+        // 自由文本仍允许识别“鞋子/球拍”等新关键词；仅有预算的追问则复用上一轮品类。
+        String keyword = EquipmentQueryNormalizer.resolveQueryKeyword(
+                message,
+                context.requirement().getEquipmentKeyword(),
+                run.getRequest().getCommand() != null);
         List<AgentCard> result = new ArrayList<>();
+        List<AgentCard> budgetFallbacks = new ArrayList<>();
         for (String sportCode : querySports(context)) {
             // 普通装备始终查真实商品表，并在工具层应用球类、品类和预算条件。
-            result.addAll(safeTool(run.getRequestId(), "equipment:" + sportCode,
+            List<AgentCard> exactMatches = safeTool(run.getRequestId(), "equipment:" + sportCode,
                     () -> equipmentTool.searchEquipment(sportCode, keyword, context.budget())
-                            .stream().limit(2).toList()));
+                            .stream().limit(2).toList());
+            result.addAll(exactMatches);
+
+            // 严格预算无结果时保持球类和品类不变，自动查找价格最接近的真实可购买商品。
+            // 回答层会直接说明需要增加多少预算，避免用户再点一次更高预算。
+            if (exactMatches.isEmpty() && context.budget() != null) {
+                run.emit(AgentGraphProgress.stage("调整预算",
+                        context.budget() + "元内暂无匹配，正在查找最接近预算的可买装备"));
+                budgetFallbacks.addAll(safeTool(run.getRequestId(), "equipment-budget-fallback:" + sportCode,
+                        () -> equipmentTool.searchClosestAboveBudget(sportCode, keyword, context.budget())));
+            }
 
             // 秒杀是独立库存链路，只有用户明确表达优惠诉求时才查询，避免普通推荐
             // 被秒杀商品占满，也避免无意义的额外数据库/Redis 请求。
@@ -360,6 +385,13 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 result.addAll(safeTool(run.getRequestId(), "seckill-equipment:" + sportCode,
                         () -> equipmentTool.searchSeckillEquipment(sportCode).stream().limit(2).toList()));
             }
+        }
+        if (result.isEmpty() && !budgetFallbacks.isEmpty()) {
+            budgetFallbacks.stream()
+                    .min(Comparator.comparing(
+                            card -> decimalMeta(card, "budgetIncrease"),
+                            Comparator.nullsLast(BigDecimal::compareTo)))
+                    .ifPresent(result::add);
         }
         return result;
     }
@@ -514,9 +546,7 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     private boolean shouldQuery(AgentContext context, String intent) {
         AgentRequirement requirement = context.requirement();
         Set<String> intents = new HashSet<>(requirement.getIntents() == null ? List.of() : requirement.getIntents());
-        boolean broad = !intents.contains("PLACE")
-                && !intents.contains("ACTIVITY")
-                && !intents.contains("EQUIPMENT");
+        boolean broad = intents.isEmpty();
         return broad || intents.contains(intent);
     }
 
@@ -768,6 +798,9 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     private String groundedAnswerBody(AgentContext context) {
+        if (hasIntent(context, "BOOKING_RULES")) {
+            return bookingRuleTool.queryPlatformBookingRules();
+        }
         if (context.cards().isEmpty()) {
             AgentClarificationResolver.Clarification equipmentNoResult =
                     AgentClarificationResolver.equipmentNoResult(context.requirement());
@@ -796,6 +829,13 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 .toList();
         if (!equipmentCards.isEmpty()) {
             return groundedEquipmentAnswer(equipmentCards);
+        }
+        List<AgentCard> activityCards = context.cards().stream()
+                .filter(card -> AgentConstants.CARD_ACTIVITY.equals(card.getType()))
+                .limit(4)
+                .toList();
+        if (!activityCards.isEmpty()) {
+            return groundedActivityAnswer(activityCards);
         }
         if (!venueProducts.isEmpty()) {
             return groundedVenueProductAnswer(venueProducts, context.timePreference());
@@ -832,7 +872,24 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
     }
 
     private String groundedEquipmentAnswer(List<AgentCard> cards) {
-        StringBuilder answer = new StringBuilder("我只根据当前平台真实可购买装备为你筛选：\n\n");
+        AgentCard expandedCard = cards.stream()
+                .filter(card -> Boolean.TRUE.equals(card.getMeta().get("budgetExpanded")))
+                .findFirst()
+                .orElse(null);
+        StringBuilder answer = new StringBuilder();
+        if (expandedCard != null) {
+            BigDecimal originalBudget = decimalMeta(expandedCard, "originalBudget");
+            BigDecimal increase = decimalMeta(expandedCard, "budgetIncrease");
+            answer.append("你设置的预算是 ¥")
+                    .append(money(originalBudget))
+                    .append("，当前没有符合条件的真实商品。你可以加一点预算，增加 ¥")
+                    .append(money(increase))
+                    .append(" 后选择下面这件 ")
+                    .append(expandedCard.getPrice())
+                    .append(" 的装备：\n\n");
+        } else {
+            answer.append("我只根据当前平台真实可购买装备为你筛选：\n\n");
+        }
         for (int i = 0; i < cards.size(); i++) {
             AgentCard card = cards.get(i);
             answer.append(i + 1)
@@ -884,6 +941,29 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             answer.append("\n");
         }
         return answer.append("\n如果要下单，请点击对应团购卡片，前端会再让你确认。").toString();
+    }
+
+    /** Builds an activity-specific answer from validated card facts instead of a generic count. */
+    private String groundedActivityAnswer(List<AgentCard> cards) {
+        StringBuilder answer = new StringBuilder("为你找到以下仍可加入的约球活动：\n\n");
+        for (int i = 0; i < cards.size(); i++) {
+            AgentCard card = cards.get(i);
+            answer.append(i + 1)
+                    .append(". **").append(card.getTitle()).append("**：")
+                    .append(firstNotBlank(card.getSubtitle(), "时间和场所以活动详情为准"));
+            if (card.getTags() != null && !card.getTags().isEmpty()) {
+                appendSentenceSeparator(answer);
+                answer.append(String.join("、", card.getTags()));
+            }
+            List<String> reasons = reasonTexts(card);
+            if (!reasons.isEmpty()) {
+                appendSentenceSeparator(answer);
+                answer.append("**可加入依据：**").append(String.join("、", reasons));
+            }
+            appendSentenceSeparator(answer);
+            answer.append("\n");
+        }
+        return answer.append("\n点击活动卡片中的“加入”，确认后才会提交加入请求。").toString();
     }
 
     private String groundedPlaceAnswer(List<AgentCard> cards) {
@@ -960,8 +1040,14 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             addQuickReply(replies, "帮我选适合新手的局");
         }
         if (hasCardType(context, AgentConstants.CARD_EQUIPMENT) || hasCardType(context, AgentConstants.CARD_SECKILL)) {
-            addQuickReply(replies, "帮我按预算筛装备");
-            addQuickReply(replies, "这几件适合新手吗");
+            if (context.cards().stream()
+                    .anyMatch(card -> Boolean.TRUE.equals(card.getMeta().get("budgetExpanded")))) {
+                addQuickReply(replies, "这件适合新手吗");
+                addQuickReply(replies, "看看这件的优缺点");
+            } else {
+                addQuickReply(replies, "帮我按预算筛装备");
+                addQuickReply(replies, "这几件适合新手吗");
+            }
         }
         if (replies.isEmpty()) {
             AgentClarificationResolver.Clarification equipmentNoResult =
@@ -976,11 +1062,16 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
                 String dayText = LocalTime.now(BUSINESS_ZONE).isBefore(DEMO_ACTIVITY_START_TIME) ? "今天" : "明天";
                 addQuickReply(replies, "查看" + dayText + "19:00可加入的局");
                 addQuickReply(replies, "不限水平查看" + dayText + "可加入的局");
+            } else if (hasIntent(context, "BOOKING_RULES")) {
+                addQuickReply(replies, "看看附近可订场所");
+                addQuickReply(replies, "今晚附近能打球吗");
             } else {
                 addQuickReply(replies, "补充运动类型");
                 addQuickReply(replies, "补充预算范围");
             }
-        } else if (!context.sportCodes().isEmpty()) {
+        } else if (!context.sportCodes().isEmpty()
+                && (hasCardType(context, AgentConstants.CARD_PLACE)
+                || hasCardType(context, AgentConstants.CARD_VENUE_PRODUCT))) {
             addQuickReply(replies, "换成离我更近的");
         }
         return replies.stream().limit(4).toList();
@@ -1225,6 +1316,28 @@ public class AgentServiceImpl implements IAgentService, AgentGraphNodeHandler {
             return "";
         }
         return text;
+    }
+
+    private BigDecimal decimalMeta(AgentCard card, String key) {
+        if (card == null || card.getMeta() == null) {
+            return null;
+        }
+        Object value = card.getMeta().get(key);
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return BigDecimal.valueOf(number.doubleValue());
+        }
+        try {
+            return value == null ? null : new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private String money(BigDecimal value) {
+        return value == null ? "0" : value.stripTrailingZeros().toPlainString();
     }
 
     private AgentClarificationResolver.Clarification clarification(AgentGraphRunContext run) {

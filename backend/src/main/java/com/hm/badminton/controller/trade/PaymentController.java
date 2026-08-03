@@ -2,6 +2,7 @@ package com.hm.badminton.controller.trade;
 
 import com.hm.badminton.common.ApiResponse;
 import com.hm.badminton.dto.trade.PaymentRequest;
+import com.hm.badminton.dto.trade.PaymentResult;
 import com.hm.badminton.service.trade.ITradeOrderService;
 import com.hm.badminton.utils.UserContext;
 import jakarta.validation.Valid;
@@ -26,13 +27,13 @@ public class PaymentController {
 
     // Controller 只负责参数入口，交易事务统一下沉到 Service 层。
     @PostMapping
-    public ApiResponse<?> pay(@Valid @RequestBody PaymentRequest request) {
+    public ApiResponse<PaymentResult> pay(@Valid @RequestBody PaymentRequest request) {
         Long userId = userContext.requireUserId();
         return ApiResponse.ok(tradeOrderService.payDirect(userId, request));
     }
 
     @PostMapping("/cart")
-    public ApiResponse<?> payCart(@Valid @RequestBody PaymentRequest request) {
+    public ApiResponse<PaymentResult> payCart(@Valid @RequestBody PaymentRequest request) {
         Long userId = userContext.requireUserId();
         return ApiResponse.ok(tradeOrderService.payCart(userId, request));
     }

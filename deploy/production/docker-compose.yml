@@ -56,7 +56,9 @@ services:
         -XX:MaxDirectMemorySize=16m -XX:MaxMetaspaceSize=48m
         -XX:ReservedCodeCacheSize=24m
     command: sh mqnamesrv
-    mem_limit: 128m
+    # Heap, metaspace, code cache and native threads together exceed 128 MiB
+    # during JVM warm-up; 192 MiB prevents the NameServer restart loop.
+    mem_limit: 192m
     volumes:
       - rocketmq-namesrv-logs:/home/rocketmq/logs
 

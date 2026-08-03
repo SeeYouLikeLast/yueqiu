@@ -20,3 +20,11 @@ deploy/production/.env
 # Local runtime data and uploaded files must stay on the deployment server.
 data/
 uploads/
+
+# JMeter raw results and generated dashboards are local performance artifacts.
+reports/jmeter/*.jtl
+reports/jmeter/*-html/
+
+# Release archives and generated performance dashboards are reproducible artifacts.
+*.tgz
+reports/

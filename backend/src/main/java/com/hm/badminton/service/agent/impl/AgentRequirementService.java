@@ -5,10 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hm.badminton.config.AgentProperties;
 import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.dto.LoginUser;
+import com.hm.badminton.dto.agent.AgentCommand;
+import com.hm.badminton.dto.agent.AgentCommandType;
 import com.hm.badminton.dto.agent.AgentChatRequest;
 import com.hm.badminton.dto.agent.AgentRequirement;
+import com.hm.badminton.dto.agent.AgentRequirementExtraction;
+import com.hm.badminton.dto.agent.AgentTimePreset;
 import com.hm.badminton.dto.agent.AgentTurnContext;
 import com.hm.badminton.service.agent.IAgentPersistenceService;
+import com.hm.badminton.service.agent.IAgentRequirementExtractor;
 import com.hm.badminton.service.agent.IAgentRequirementService;
 import com.hm.badminton.service.agent.tools.EquipmentQueryNormalizer;
 import com.hm.badminton.utils.RedisTtl;
@@ -20,6 +25,8 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -74,6 +82,14 @@ public class AgentRequirementService implements IAgentRequirementService {
             "网球", "tennis",
             "排球", "volleyball");
     private static final List<String> KNOWN_CITIES = List.of("西安", "上海", "北京", "成都");
+    private static final Set<String> ALLOWED_SPORTS = Set.of(
+            "badminton", "table_tennis", "football", "basketball", "tennis", "volleyball");
+    private static final Set<String> ALLOWED_INTENTS = Set.of(
+            "PLACE", "ACTIVITY", "EQUIPMENT", "BOOKING_RULES");
+    private static final Set<String> ALLOWED_LEVELS = Set.of("不限", "初级", "中级", "高级");
+    private static final Set<String> ALLOWED_SORTS = Set.of(
+            "BALANCED", "PRICE", "DISTANCE", "RATING", "TIME", "VALUE");
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Map<String, String> PREFERENCE_ALIASES = Map.ofEntries(
             Map.entry("停车", "停车"),
             Map.entry("淋浴", "淋浴"),
@@ -96,15 +112,18 @@ public class AgentRequirementService implements IAgentRequirementService {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final AgentProperties properties;
+    private final IAgentRequirementExtractor requirementExtractor;
 
     public AgentRequirementService(IAgentPersistenceService persistenceService,
                                    StringRedisTemplate redisTemplate,
                                    ObjectMapper objectMapper,
-                                   AgentProperties properties) {
+                                   AgentProperties properties,
+                                   IAgentRequirementExtractor requirementExtractor) {
         this.persistenceService = persistenceService;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.requirementExtractor = requirementExtractor;
     }
 
     @Override
@@ -133,29 +152,53 @@ public class AgentRequirementService implements IAgentRequirementService {
      */
     @Override
     public AgentRequirement merge(AgentRequirement previous, AgentChatRequest request, LoginUser loginUser) {
+        // 快捷按钮携带受控 Command。该分支完全不猜测按钮文案，校验结构化字段后直接进入 Graph。
+        if (request.getCommand() != null && request.getCommand().getType() != null) {
+            return mergeCommand(previous, request, loginUser);
+        }
+
         // 1. 复制上一轮条件。本轮没有提到的字段默认继续沿用，避免追问后丢失上下文。
         AgentRequirement merged = copy(previous);
         String message = request.getMessage() == null ? "" : request.getMessage().trim();
 
         // 2. 只根据本轮文本初步识别业务对象：场所、约球活动、装备；一个问题可以命中多个。
-        Set<String> currentIntents = inferIntents(message);
+        Set<String> ruleIntents = inferIntents(message);
         Set<String> previousIntents = new LinkedHashSet<>(safeList(merged.getIntents()));
+
+        // 预约规则是独立的只读知识意图，不继承上一轮推荐条件，也不需要模型补全。
+        if (ruleIntents.contains("BOOKING_RULES")) {
+            return bookingRulesRequirement(merged, "rule");
+        }
 
         // 3. “按距离重新筛”等话术只是在操作上一轮结果，不应重新猜测业务对象。
         // 只有用户没有明确说场所/装备/活动时，才继承上一轮意图。
         if ((isRangeExpansionFollowUp(message) || isContextRefinementFollowUp(message))
                 && !mentionsExplicitBusinessDomain(message)
                 && !previousIntents.isEmpty()) {
-            currentIntents = previousIntents;
+            ruleIntents = previousIntents;
         }
 
-        // 4. 用户明确从场所切到装备（或反向切换）时，旧预算通常不应跨业务复用。
-        clearStaleCrossDomainBudget(merged, currentIntents, message);
+        // 4. 规则无法稳定识别、或一句话包含多个条件时，才让模型补充一个 JSON patch。
+        // 模型字段先写入，后面的 request/rule 字段会覆盖它，因此明确规则始终优先。
+        Optional<AgentRequirementExtraction> modelExtraction = shouldUseModelExtraction(message, ruleIntents)
+                ? requirementExtractor.extract(message, previous)
+                : Optional.empty();
+        Set<String> modelIntents = modelExtraction
+                .map(AgentRequirementExtraction::getIntents)
+                .map(this::validIntents)
+                .orElseGet(LinkedHashSet::new);
+        Set<String> currentIntents = ruleIntents.isEmpty() ? modelIntents : ruleIntents;
 
-        // 5. 按字段逐项覆盖结构化需求。每个 mergeXxx 只处理自己负责的维度。
+        // 5. 用户明确从场所切到装备（或反向切换）时，旧预算通常不应跨业务复用。
+        clearStaleCrossDomainBudget(merged, currentIntents, message);
+        modelExtraction.ifPresent(extraction -> applyModelExtraction(merged, extraction));
+
+        // 6. 按字段逐项覆盖结构化需求。每个 mergeXxx 只处理自己负责的维度。
         mergeCity(merged, request, message, loginUser);
         mergeSports(merged, request, message);
-        mergeEquipmentKeyword(merged, currentIntents, message);
+        // 只有规则本身明确命中装备域时才从原句提取类别；否则保留模型已校验的类别，
+        // 避免把“帮我挑一个更适合我的”整句误归一化成商品关键词。
+        mergeEquipmentKeyword(merged, ruleIntents, message);
         mergeDateAndTime(merged, message);
         mergeBudget(merged, message);
         mergeDistance(merged, message);
@@ -164,9 +207,345 @@ public class AgentRequirementService implements IAgentRequirementService {
         mergeSortPreference(merged, message);
         mergeAvailabilityAndRefund(merged, message);
 
-        // 6. 本轮没有识别到新意图时保留旧值；识别到时才覆盖，供 Graph 决定查询哪些工具。
-        mergeIntents(merged, currentIntents);
+        // 7. 规则识别到的意图覆盖模型；只有规则为空时才保留已校验的模型意图。
+        if (!ruleIntents.isEmpty()) {
+            mergeIntents(merged, ruleIntents);
+        }
         return merged;
+    }
+
+    /**
+     * Merges a quick action without parsing its display label.
+     *
+     * <p>The command controls only whitelisted recommendation dimensions. Database IDs,
+     * mapper methods and write operations are intentionally absent from the DTO.</p>
+     */
+    private AgentRequirement mergeCommand(AgentRequirement previous,
+                                          AgentChatRequest request,
+                                          LoginUser loginUser) {
+        AgentRequirement target = copy(previous);
+        AgentCommand command = request.getCommand();
+
+        // 1. Resolve the workflow from a backend enum. Refinement commands inherit the
+        // previous domain; first-turn refinements use a conservative domain default.
+        Set<String> intents = commandIntents(command.getType(), target.getIntents());
+        clearStaleCrossDomainBudget(target, intents, "");
+        target.setIntents(new ArrayList<>(intents));
+        source(target, "intents", "command");
+        if (!intents.contains("EQUIPMENT")) {
+            target.setEquipmentKeyword(null);
+            target.getFieldSources().remove("equipmentKeyword");
+        }
+        if (command.getType() == AgentCommandType.VIEW_BOOKING_RULES) {
+            return bookingRulesRequirement(target, "command");
+        }
+
+        // 2. Location comes from the normal trusted request/profile path. Sport values from
+        // the command are whitelisted and override the page's legacy sport fields.
+        mergeCity(target, request, "", loginUser);
+        List<String> commandSports = validSports(command.getSportCodes());
+        if (!commandSports.isEmpty()) {
+            target.setSportCodes(commandSports);
+            source(target, "sportCodes", "command");
+        } else if (command.isAllSportsRequested()) {
+            target.setSportCodes(new ArrayList<>());
+            source(target, "sportCodes", "command");
+        } else {
+            mergeSports(target, request, "");
+        }
+
+        // 3. Apply only validated filters. A null field keeps conversation memory while an
+        // explicit clear flag removes a previous budget/category.
+        applyCommandTime(target, command);
+        if (command.isClearBudget()) {
+            target.setMinBudget(null);
+            target.setMaxBudget(null);
+            source(target, "budget", "command");
+        } else if (command.getMinBudget() != null || command.getMaxBudget() != null) {
+            target.setMinBudget(validMoney(command.getMinBudget()));
+            target.setMaxBudget(validMoney(command.getMaxBudget()));
+            normalizeBudgetOrder(target);
+            source(target, "budget", "command");
+        }
+        if (command.getMaxDistanceMeters() != null) {
+            target.setMaxDistanceMeters(Math.max(100, Math.min(50000, command.getMaxDistanceMeters())));
+            source(target, "maxDistanceMeters", "command");
+        } else if (command.getType() == AgentCommandType.FILTER_DISTANCE) {
+            target.setMaxDistanceMeters(target.getMaxDistanceMeters() == null
+                    ? 5000 : Math.max(500, target.getMaxDistanceMeters()));
+            target.setSortPreference("DISTANCE");
+            source(target, "maxDistanceMeters", "command");
+            source(target, "sortPreference", "command");
+        }
+        if (command.getLevel() != null && ALLOWED_LEVELS.contains(command.getLevel().trim())) {
+            target.setLevel(command.getLevel().trim());
+            source(target, "level", "command");
+        } else if (target.getLevel() == null || target.getLevel().isBlank()) {
+            target.setLevel(loginUser == null || loginUser.getLevel() == null
+                    ? "不限" : loginUser.getLevel());
+            source(target, "level", loginUser == null ? "default" : "profile");
+        }
+        if (command.isClearEquipmentKeyword()) {
+            target.setEquipmentKeyword(null);
+            source(target, "equipmentKeyword", "command");
+        } else if (command.getEquipmentKeyword() != null && intents.contains("EQUIPMENT")) {
+            String keyword = EquipmentQueryNormalizer.normalize(command.getEquipmentKeyword());
+            if (keyword != null && !keyword.isBlank()) {
+                target.setEquipmentKeyword(keyword);
+                source(target, "equipmentKeyword", "command");
+            }
+        }
+        String sort = normalizeSort(command.getSortPreference());
+        if (sort != null) {
+            target.setSortPreference(sort);
+            source(target, "sortPreference", "command");
+        } else if (command.getType() == AgentCommandType.FILTER_PRICE) {
+            target.setSortPreference("VALUE");
+            source(target, "sortPreference", "command");
+        }
+        mergeValidatedTags(target, command.getPreferenceTags(), command.getAvoidTags(), "command");
+        if (command.getAvailabilityRequired() != null) {
+            target.setAvailabilityRequired(command.getAvailabilityRequired());
+            source(target, "availabilityRequired", "command");
+        }
+        if (command.getRefundableRequired() != null) {
+            target.setRefundableRequired(command.getRefundableRequired());
+            source(target, "refundableRequired", "command");
+        }
+        return target;
+    }
+
+    private void applyCommandTime(AgentRequirement target, AgentCommand command) {
+        LocalDate date = command.getTargetDate();
+        LocalTime start = command.getStartTime();
+        LocalTime end = command.getEndTime();
+        if (command.getTimePreset() != null) {
+            LocalDate today = LocalDate.now(BUSINESS_ZONE);
+            LocalTime now = LocalTime.now(BUSINESS_ZONE);
+            if (command.getTimePreset() == AgentTimePreset.TONIGHT) {
+                date = now.isBefore(LocalTime.of(19, 0)) ? today : today.plusDays(1);
+                start = LocalTime.of(19, 0);
+                end = LocalTime.of(20, 0);
+            } else if (command.getTimePreset() == AgentTimePreset.TODAY) {
+                date = today;
+            } else if (command.getTimePreset() == AgentTimePreset.TOMORROW) {
+                date = today.plusDays(1);
+            }
+        }
+        if (date != null && !date.isBefore(LocalDate.now(BUSINESS_ZONE))) {
+            target.setTargetDate(date);
+            source(target, "targetDate", "command");
+        }
+        if (start != null) {
+            target.setStartTime(start);
+            target.setEndTime(end != null && end.isAfter(start) ? end : start.plusHours(1));
+            target.setDurationMinutes((int) Duration.between(
+                    target.getStartTime(), target.getEndTime()).toMinutes());
+            source(target, "time", "command");
+        } else if (command.getDurationMinutes() != null) {
+            target.setDurationMinutes(Math.max(30, Math.min(720, command.getDurationMinutes())));
+            source(target, "durationMinutes", "command");
+        }
+    }
+
+    private Set<String> commandIntents(AgentCommandType type, List<String> previousIntents) {
+        return switch (type) {
+            case FIND_NEARBY_PLACES, VIEW_VENUE_PRODUCTS ->
+                    new LinkedHashSet<>(List.of("PLACE"));
+            case VIEW_BOOKING_RULES -> new LinkedHashSet<>(List.of("BOOKING_RULES"));
+            case FIND_JOINABLE_ACTIVITIES -> new LinkedHashSet<>(List.of("ACTIVITY"));
+            case RECOMMEND_EQUIPMENT -> new LinkedHashSet<>(List.of("EQUIPMENT"));
+            case FILTER_DISTANCE -> inheritedOrDefault(previousIntents, "PLACE");
+            case FILTER_BUDGET -> inheritedOrDefault(previousIntents, "EQUIPMENT");
+            case FILTER_LEVEL -> inheritedOrDefault(previousIntents, "ACTIVITY");
+            case FILTER_PRICE, REFINE_RESULTS -> inheritedOrDefault(previousIntents, "PLACE");
+        };
+    }
+
+    private Set<String> inheritedOrDefault(List<String> previousIntents, String fallback) {
+        Set<String> validated = validIntents(previousIntents);
+        return validated.isEmpty() ? new LinkedHashSet<>(List.of(fallback)) : validated;
+    }
+
+    private boolean shouldUseModelExtraction(String message, Set<String> ruleIntents) {
+        if (requirementExtractor == null || message == null || message.isBlank()) {
+            return false;
+        }
+        if (ruleIntents.isEmpty()) {
+            return true;
+        }
+        boolean complexSentence = message.length() >= Math.max(8, properties.getRequirementModelMinLength())
+                && containsAny(message, "并且", "而且", "同时", "最好", "比较", "适合", "但是", "不要太", "帮我安排");
+        boolean ambiguousReference = containsAny(message, "那个", "这种", "上一个", "刚才那个", "差不多的", "你看着选");
+        boolean missingSport = inferSports(message).isEmpty()
+                && (ruleIntents.contains("PLACE") || ruleIntents.contains("ACTIVITY") || ruleIntents.contains("EQUIPMENT"));
+        return complexSentence || ambiguousReference || (message.length() >= 12 && missingSport);
+    }
+
+    /**
+     * Applies model output as a lower-priority patch.
+     *
+     * <p>Every enum-like value is whitelisted, numeric values are clamped, invalid dates
+     * are ignored, and deterministic rule parsing runs afterwards to overwrite this patch.</p>
+     */
+    private void applyModelExtraction(AgentRequirement target, AgentRequirementExtraction extraction) {
+        Set<String> intents = validIntents(extraction.getIntents());
+        if (!intents.isEmpty()) {
+            target.setIntents(new ArrayList<>(intents));
+            source(target, "intents", "model");
+        }
+        List<String> sports = validSports(extraction.getSportCodes());
+        if (!sports.isEmpty()) {
+            target.setSportCodes(sports);
+            source(target, "sportCodes", "model");
+        }
+        String city = normalizeCity(extraction.getCity());
+        if (city != null && city.length() <= 20) {
+            target.setCity(city);
+            source(target, "city", "model");
+        }
+        LocalDate date = parseIsoDate(extraction.getTargetDate());
+        if (date != null && !date.isBefore(LocalDate.now(BUSINESS_ZONE))) {
+            target.setTargetDate(date);
+            source(target, "targetDate", "model");
+        }
+        LocalTime start = parseIsoTime(extraction.getStartTime());
+        LocalTime end = parseIsoTime(extraction.getEndTime());
+        if (start != null) {
+            target.setStartTime(start);
+            target.setEndTime(end != null && end.isAfter(start) ? end : start.plusHours(1));
+            target.setDurationMinutes((int) Duration.between(
+                    target.getStartTime(), target.getEndTime()).toMinutes());
+            source(target, "time", "model");
+        } else if (extraction.getDurationMinutes() != null) {
+            target.setDurationMinutes(Math.max(30, Math.min(720, extraction.getDurationMinutes())));
+            source(target, "durationMinutes", "model");
+        }
+        if (extraction.getMinBudget() != null || extraction.getMaxBudget() != null) {
+            target.setMinBudget(validMoney(extraction.getMinBudget()));
+            target.setMaxBudget(validMoney(extraction.getMaxBudget()));
+            normalizeBudgetOrder(target);
+            source(target, "budget", "model");
+        }
+        if (extraction.getMaxDistanceMeters() != null) {
+            target.setMaxDistanceMeters(Math.max(100, Math.min(50000, extraction.getMaxDistanceMeters())));
+            source(target, "maxDistanceMeters", "model");
+        }
+        if (extraction.getLevel() != null && ALLOWED_LEVELS.contains(extraction.getLevel().trim())) {
+            target.setLevel(extraction.getLevel().trim());
+            source(target, "level", "model");
+        }
+        if (extraction.getEquipmentKeyword() != null && intents.contains("EQUIPMENT")) {
+            String keyword = EquipmentQueryNormalizer.normalize(extraction.getEquipmentKeyword());
+            if (keyword != null && !keyword.isBlank()) {
+                target.setEquipmentKeyword(keyword);
+                source(target, "equipmentKeyword", "model");
+            }
+        }
+        String sort = normalizeSort(extraction.getSortPreference());
+        if (sort != null) {
+            target.setSortPreference(sort);
+            source(target, "sortPreference", "model");
+        }
+        mergeValidatedTags(target, extraction.getPreferenceTags(), extraction.getAvoidTags(), "model");
+        if (extraction.getAvailabilityRequired() != null) {
+            target.setAvailabilityRequired(extraction.getAvailabilityRequired());
+            source(target, "availabilityRequired", "model");
+        }
+        if (extraction.getRefundableRequired() != null) {
+            target.setRefundableRequired(extraction.getRefundableRequired());
+            source(target, "refundableRequired", "model");
+        }
+    }
+
+    private Set<String> validIntents(List<String> values) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (String value : safeList(values)) {
+            if (value != null && ALLOWED_INTENTS.contains(value.trim().toUpperCase(Locale.ROOT))) {
+                result.add(value.trim().toUpperCase(Locale.ROOT));
+            }
+        }
+        return result;
+    }
+
+    private List<String> validSports(List<String> values) {
+        return safeList(values).stream()
+                .filter(value -> value != null && ALLOWED_SPORTS.contains(value.trim()))
+                .map(String::trim)
+                .distinct()
+                .limit(6)
+                .toList();
+    }
+
+    private void mergeValidatedTags(AgentRequirement target,
+                                    List<String> preferences,
+                                    List<String> avoids,
+                                    String valueSource) {
+        List<String> preferred = validTags(preferences);
+        List<String> avoided = validTags(avoids);
+        if (!preferred.isEmpty()) {
+            target.setPreferenceTags(mergeTags(target.getPreferenceTags(), preferred));
+            source(target, "preferences", valueSource);
+        }
+        if (!avoided.isEmpty()) {
+            target.setAvoidTags(mergeTags(target.getAvoidTags(), avoided));
+            source(target, "preferences", valueSource);
+        }
+    }
+
+    private List<String> validTags(List<String> values) {
+        return safeList(values).stream()
+                .filter(value -> value != null && !value.isBlank() && value.trim().length() <= 20)
+                .map(String::trim)
+                .distinct()
+                .limit(10)
+                .toList();
+    }
+
+    private List<String> mergeTags(List<String> current, List<String> additions) {
+        LinkedHashSet<String> values = new LinkedHashSet<>(safeList(current));
+        values.addAll(additions);
+        return values.stream().limit(10).toList();
+    }
+
+    private String normalizeSort(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return ALLOWED_SORTS.contains(normalized) ? normalized : null;
+    }
+
+    private BigDecimal validMoney(BigDecimal value) {
+        if (value == null) {
+            return null;
+        }
+        return value.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100000));
+    }
+
+    private void normalizeBudgetOrder(AgentRequirement target) {
+        if (target.getMinBudget() != null && target.getMaxBudget() != null
+                && target.getMinBudget().compareTo(target.getMaxBudget()) > 0) {
+            BigDecimal minimum = target.getMaxBudget();
+            target.setMaxBudget(target.getMinBudget());
+            target.setMinBudget(minimum);
+        }
+    }
+
+    private LocalDate parseIsoDate(String value) {
+        try {
+            return value == null || value.isBlank() ? null : LocalDate.parse(value.trim());
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    private LocalTime parseIsoTime(String value) {
+        try {
+            return value == null || value.isBlank() ? null : LocalTime.parse(value.trim());
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 
     @Override
@@ -461,6 +840,12 @@ public class AgentRequirementService implements IAgentRequirementService {
      */
     private Set<String> inferIntents(String message) {
         Set<String> intents = new LinkedHashSet<>();
+        // 规则查询必须先于“场馆/团购”等业务词判断，避免“场馆预约规则”
+        // 同时落入 PLACE 分支并继续查询上一轮场所和商品。
+        if (containsAny(message, "预约规则", "预订规则", "核销规则", "退款规则", "使用规则")) {
+            intents.add("BOOKING_RULES");
+            return intents;
+        }
         // PLACE 同时覆盖真实场所及绑定到场所的团购/私教商品。
         if (containsAny(message, "场所", "场馆", "球馆", "附近", "场地", "哪里", "团购", "私教", "环境", "空场")) {
             intents.add("PLACE");
@@ -469,9 +854,11 @@ public class AgentRequirementService implements IAgentRequirementService {
         if (containsAny(message, "约球", "活动", "加入", "搭子", "组局", "球局", "哪些局", "的局")) {
             intents.add("ACTIVITY");
         }
-        // 装备先做类别归一化，例如“鞋子”会转为数据库可查询的“鞋”。
-        String equipmentKeyword = EquipmentQueryNormalizer.normalize(message);
-        if (equipmentKeyword != null || containsAny(message, "装备", "球拍", "球鞋", "护具", "球包", "购买", "买一个", "买一")) {
+        // 只有显式装备词或购买动作才进入装备域。归一化器不能单独决定意图，
+        // 否则“帮我挑一个更适合我的”这类模糊句会被整句误判为商品类别。
+        if (containsAny(message,
+                "装备", "球拍", "拍子", "球鞋", "运动鞋", "鞋子", "手胶",
+                "护具", "球包", "球袜", "购买", "买一个", "买一")) {
             intents.add("EQUIPMENT");
         }
         // “今晚想打羽毛球”同时可能需要场所和可加入的局，因此并行查询两个分支。
@@ -480,6 +867,33 @@ public class AgentRequirementService implements IAgentRequirementService {
             intents.add("ACTIVITY");
         }
         return intents;
+    }
+
+    /**
+     * Creates an isolated rules requirement and removes every recommendation constraint
+     * inherited from the previous conversation turn.
+     */
+    private AgentRequirement bookingRulesRequirement(AgentRequirement target, String sourceName) {
+        target.setSportCodes(new ArrayList<>());
+        target.setTargetDate(null);
+        target.setStartTime(null);
+        target.setEndTime(null);
+        target.setDurationMinutes(null);
+        target.setMinBudget(null);
+        target.setMaxBudget(null);
+        target.setMaxDistanceMeters(null);
+        target.setLevel("不限");
+        target.setEquipmentKeyword(null);
+        target.setPreferenceTags(new ArrayList<>());
+        target.setAvoidTags(new ArrayList<>());
+        target.setSortPreference("BALANCED");
+        target.setAvailabilityRequired(false);
+        target.setRefundableRequired(false);
+        target.setLastSelectedCardIds(new ArrayList<>());
+        target.setIntents(new ArrayList<>(List.of("BOOKING_RULES")));
+        target.setFieldSources(new LinkedHashMap<>());
+        source(target, "intents", sourceName);
+        return target;
     }
 
     private void mergeIntents(AgentRequirement target, Set<String> intents) {

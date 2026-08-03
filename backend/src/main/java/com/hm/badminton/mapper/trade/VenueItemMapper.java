@@ -371,10 +371,10 @@ public interface VenueItemMapper {
     int deductInventory(@Param("productId") Long productId, @Param("inventoryId") Long inventoryId);
 
     @Insert("""
-            insert into order_venue(user_id, product_id, inventory_id, venue_id, amap_place_id,
+            insert into order_venue(order_no, user_id, product_id, inventory_id, venue_id, amap_place_id,
                                      venue_name, product_title, product_type, service_date,
                                      start_time, end_time, amount, status, verify_code)
-            values (#{row.userId}, #{row.productId}, #{row.inventoryId}, #{row.venueId}, #{row.amapPlaceId},
+            values (#{row.orderNo}, #{row.userId}, #{row.productId}, #{row.inventoryId}, #{row.venueId}, #{row.amapPlaceId},
                     #{row.venueName}, #{row.productTitle}, #{row.productType}, #{row.serviceDate},
                     #{row.startTime}, #{row.endTime}, #{row.amount}, '待支付', #{row.verifyCode})
             """)
@@ -424,7 +424,14 @@ public interface VenueItemMapper {
                         @Param("inventoryId") Long inventoryId);
 
     @Select("""
-            select c.id, p.id as product_id, i.id as inventory_id, p.title as product_name,
+            select c.id, p.id as product_id, i.id as inventory_id, p.sport_code,
+                   case p.product_type
+                     when 'TIME_PACKAGE' then '畅打套餐'
+                     when 'COURT_SLOT' then '单场时段'
+                     when 'COACH_LESSON' then '私教课'
+                     else p.product_type
+                   end as product_type_name,
+                   p.title as product_name,
                    p.venue_name, p.cover_url, i.price, c.quantity, i.price * c.quantity as amount,
                    i.service_date, i.start_time, i.end_time
             from cart_venue c
@@ -437,6 +444,8 @@ public interface VenueItemMapper {
             @Arg(column = "id", javaType = Long.class),
             @Arg(column = "product_id", javaType = Long.class),
             @Arg(column = "inventory_id", javaType = Long.class),
+            @Arg(column = "sport_code", javaType = String.class),
+            @Arg(column = "product_type_name", javaType = String.class),
             @Arg(column = "product_name", javaType = String.class),
             @Arg(column = "venue_name", javaType = String.class),
             @Arg(column = "cover_url", javaType = String.class),
@@ -517,6 +526,7 @@ public interface VenueItemMapper {
 
     class InsertVenueOrderRow {
         private Long id;
+        private String orderNo;
         private Long userId;
         private Long productId;
         private Long inventoryId;

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,40 +30,93 @@ public class EquipmentAgentTool {
 
     @Tool(name = "searchEquipment", description = "Search equipment products by sport, keyword and max price.")
     public List<AgentCard> searchEquipment(String sportCode, String keyword, Integer maxPrice) {
-        List<Equipment> items = equipmentService.items(blankToNull(sportCode), null, blankToNull(keyword), 1, 8).getRecords();
+        String requestedSport = blankToNull(sportCode);
+        // 先取完整的小型商品候选集再按预算过滤，避免前 8 条都超预算时误判为“没有商品”。
+        List<Equipment> items = equipmentService.items(
+                requestedSport, null, blankToNull(keyword), 1, 50).getRecords();
         List<AgentCard> cards = new ArrayList<>();
         for (Equipment item : items) {
+            // 商城列表可能用其他球类补足一页；Agent 必须重新校验球类，不能把补位商品当成候选。
+            if (requestedSport != null && !requestedSport.equals(item.getSportCode())) {
+                continue;
+            }
+            // 推荐卡片必须可以立即购买，零库存商品不参与严格匹配或后续预算判断。
+            if (item.getStock() == null || item.getStock() <= 0) {
+                continue;
+            }
             if (maxPrice != null && item.getPrice() != null
                     && item.getPrice().compareTo(BigDecimal.valueOf(maxPrice)) > 0) {
                 continue;
             }
-            AgentCard card = new AgentCard();
-            card.setType(AgentConstants.CARD_EQUIPMENT);
-            card.setTitle(item.getName());
-            card.setSubtitle(item.getDescription());
-            card.setCoverUrl(item.getCoverUrl());
-            card.setPrice(yuan(item.getPrice()));
-            card.setTags(List.of(item.getBrand(), item.getCategoryName()));
-            AgentAction action = AgentAction.of(AgentConstants.ACTION_OPEN_EQUIPMENT, item.getId());
-            action.getPayload().put("sportCode", item.getSportCode());
-            card.setAction(action);
-            Map<String, Object> meta = new LinkedHashMap<>();
-            meta.put("id", item.getId());
-            meta.put("sportCode", item.getSportCode());
-            meta.put("categoryId", item.getCategoryId());
-            meta.put("available", item.getStock() != null && item.getStock() > 0);
-            meta.put("stock", item.getStock());
-            meta.put("rating", item.getScore());
-            meta.put("sold", item.getSold());
-            meta.put("suitableLevel", suitableLevel(item));
-            meta.put("sceneTags", sceneTags(item));
-            meta.put("pros", pros(item, maxPrice));
-            meta.put("cons", cons(item));
-            meta.put("recommendReasons", pros(item, maxPrice).stream().limit(3).toList());
-            card.setMeta(meta);
-            cards.add(card);
+            cards.add(toCard(item, maxPrice));
         }
         return cards;
+    }
+
+    /**
+     * 严格预算没有结果时，只在同一球类和同一装备类别中查找价格最接近的真实商品。
+     * 原预算和需要增加的金额随卡片返回，回答层据此一次性说明预算放宽结果。
+     */
+    @Tool(name = "searchClosestEquipmentAboveBudget",
+            description = "Search the closest purchasable equipment above the user's budget.")
+    public List<AgentCard> searchClosestAboveBudget(String sportCode, String keyword, Integer maxPrice) {
+        if (maxPrice == null || maxPrice < 0) {
+            return List.of();
+        }
+        String requestedSport = blankToNull(sportCode);
+        BigDecimal budget = BigDecimal.valueOf(maxPrice);
+        return equipmentService.items(requestedSport, null, blankToNull(keyword), 1, 50)
+                .getRecords()
+                .stream()
+                .filter(item -> requestedSport == null || requestedSport.equals(item.getSportCode()))
+                .filter(item -> item.getPrice() != null && item.getPrice().compareTo(budget) > 0)
+                .filter(item -> item.getStock() != null && item.getStock() > 0)
+                .sorted(Comparator.comparing(Equipment::getPrice)
+                        .thenComparing(Equipment::getScore, Comparator.nullsLast(Comparator.reverseOrder())))
+                .limit(2)
+                .map(item -> {
+                    AgentCard card = toCard(item, maxPrice);
+                    BigDecimal increase = item.getPrice().subtract(budget);
+                    card.getMeta().put("budgetExpanded", true);
+                    card.getMeta().put("originalBudget", budget);
+                    card.getMeta().put("budgetIncrease", increase);
+
+                    List<String> reasons = new ArrayList<>();
+                    reasons.add("只需增加¥" + increase.stripTrailingZeros().toPlainString()
+                            + "，是当前最接近原预算的同类商品");
+                    reasons.addAll(pros(item, maxPrice));
+                    card.getMeta().put("recommendReasons", reasons.stream().distinct().limit(3).toList());
+                    return card;
+                })
+                .toList();
+    }
+
+    private AgentCard toCard(Equipment item, Integer maxPrice) {
+        AgentCard card = new AgentCard();
+        card.setType(AgentConstants.CARD_EQUIPMENT);
+        card.setTitle(item.getName());
+        card.setSubtitle(item.getDescription());
+        card.setCoverUrl(item.getCoverUrl());
+        card.setPrice(yuan(item.getPrice()));
+        card.setTags(List.of(item.getBrand(), item.getCategoryName()));
+        AgentAction action = AgentAction.of(AgentConstants.ACTION_OPEN_EQUIPMENT, item.getId());
+        action.getPayload().put("sportCode", item.getSportCode());
+        card.setAction(action);
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("id", item.getId());
+        meta.put("sportCode", item.getSportCode());
+        meta.put("categoryId", item.getCategoryId());
+        meta.put("available", item.getStock() != null && item.getStock() > 0);
+        meta.put("stock", item.getStock());
+        meta.put("rating", item.getScore());
+        meta.put("sold", item.getSold());
+        meta.put("suitableLevel", suitableLevel(item));
+        meta.put("sceneTags", sceneTags(item));
+        meta.put("pros", pros(item, maxPrice));
+        meta.put("cons", cons(item));
+        meta.put("recommendReasons", pros(item, maxPrice).stream().limit(3).toList());
+        card.setMeta(meta);
+        return card;
     }
 
     private String suitableLevel(Equipment item) {

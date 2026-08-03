@@ -18,13 +18,14 @@ import java.util.List;
 public interface EquipmentOrderMapper {
 
     @Select("""
-            select id, user_id, total_amount, status, address, created_at
+            select id, order_no, user_id, total_amount, status, address, created_at
             from order_equipment
             where user_id = #{userId}
             order by created_at desc
             """)
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
+            @Arg(column = "order_no", javaType = String.class),
             @Arg(column = "user_id", javaType = Long.class),
             @Arg(column = "total_amount", javaType = BigDecimal.class),
             @Arg(column = "status", javaType = String.class),
@@ -53,6 +54,7 @@ public interface EquipmentOrderMapper {
     @AllArgsConstructor
     class OrderRow {
         private Long id;
+        private String orderNo;
         private Long userId;
         private BigDecimal totalAmount;
         private String status;

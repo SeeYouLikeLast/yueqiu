@@ -150,16 +150,20 @@ public interface EquipmentMapper {
     int insertCart(@Param("userId") Long userId, @Param("productId") Long productId, @Param("quantity") Integer quantity);
 
     @Select("""
-            select ci.id, p.id as product_id, p.name, p.brand, p.cover_url, p.price, ci.quantity, p.stock,
+            select ci.id, p.id as product_id, p.sport_code, c.name as category_name,
+                   p.name, p.brand, p.cover_url, p.price, ci.quantity, p.stock,
                    p.price * ci.quantity as amount
             from cart_equipment ci
             join equipment p on p.id = ci.product_id
+            left join equipment_categories c on c.id = p.category_id
             where ci.user_id = #{userId}
             order by ci.updated_at desc
             """)
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
             @Arg(column = "product_id", javaType = Long.class),
+            @Arg(column = "sport_code", javaType = String.class),
+            @Arg(column = "category_name", javaType = String.class),
             @Arg(column = "name", javaType = String.class),
             @Arg(column = "brand", javaType = String.class),
             @Arg(column = "cover_url", javaType = String.class),
@@ -183,8 +187,8 @@ public interface EquipmentMapper {
                            @Param("quantity") Integer quantity);
 
     @Insert("""
-            insert into order_equipment(user_id, total_amount, status, address)
-            values (#{row.userId}, #{row.totalAmount}, '待支付', #{row.address})
+            insert into order_equipment(order_no, user_id, total_amount, status, address)
+            values (#{row.orderNo}, #{row.userId}, #{row.totalAmount}, '待支付', #{row.address})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "row.id")
     int insertOrder(@Param("row") InsertOrderRow row);
@@ -255,6 +259,7 @@ public interface EquipmentMapper {
 
     class InsertOrderRow {
         private Long id;
+        private String orderNo;
         private Long userId;
         private BigDecimal totalAmount;
         private String address;

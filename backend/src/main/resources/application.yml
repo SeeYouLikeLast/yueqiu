@@ -86,7 +86,8 @@ hm:
     secret-key: ${MINIO_SECRET_KEY:minioadmin123}
     bucket: ${MINIO_BUCKET:hm-badminton}
   amap:
-    key: ${AMAP_KEY:0b3dedfd34e183c63be3e7206dc5560c}
+    # 本地通过 AMAP_KEY 注入；真实 Key 不进入源码和 Git 历史。
+    key: ${AMAP_KEY:}
     endpoint: https://restapi.amap.com/v5/place/around
     default-city: 西安
     radius: 5000
@@ -110,6 +111,10 @@ hm:
     rag-embedding-enabled: ${AI_RAG_EMBEDDING_ENABLED:true}
     rag-candidate-limit: 48
     rag-top-k: 3
+    # 快捷按钮直接发送结构化 Command；只有复杂或低置信度自由文本才调用模型补全需求。
+    requirement-model-extraction-enabled: ${AI_REQUIREMENT_EXTRACTION_ENABLED:true}
+    requirement-model-min-length: 24
+    requirement-model-min-confidence: 0.55
     rag-embedding-cache-days: 7
   seckill:
     # 默认优先 RocketMQ 异步落库；MQ 未部署或投递失败时可降级为同步事务落库。

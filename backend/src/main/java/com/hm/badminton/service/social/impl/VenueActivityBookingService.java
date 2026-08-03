@@ -79,7 +79,7 @@ public class VenueActivityBookingService implements IVenueActivityBookingService
         activityRequest.setFeeType("场地已购");
         Long activityId = socialService.createActivity(userId, activityRequest);
 
-        return new VenueActivityBookingResult(paid.getId(), paid.getVerifyCode(), activityId);
+        return new VenueActivityBookingResult(paid.getOrderNo(), paid.getVerifyCode(), activityId);
     }
 
     private String blankToDefault(String value, String fallback) {

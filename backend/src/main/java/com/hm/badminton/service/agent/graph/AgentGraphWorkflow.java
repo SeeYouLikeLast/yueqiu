@@ -88,7 +88,8 @@ public class AgentGraphWorkflow {
                         return Map.of(AgentGraphState.CONVERSATION_ID,
                                 run(config).getAttributes().get(AgentGraphState.CONVERSATION_ID));
                     }))
-                    // 2. 把自然语言转换为可查询的结构化需求。
+                    // 2. 快捷 Command 直接校验合并；自由文本走规则优先、模型按需补全，
+                    // 两条入口最终都产出同一种可查询 AgentRequirement。
                     .addNode(UNDERSTAND, node_async((state, config) -> {
                         handler(config).understandRequirement(run(config));
                         return Map.of(AgentGraphState.REQUIREMENT_READY, true);

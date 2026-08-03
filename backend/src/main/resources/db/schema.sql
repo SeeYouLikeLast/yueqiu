@@ -260,6 +260,7 @@ create table venue_inventory (
 
 create table order_venue (
   id bigint primary key auto_increment,
+  order_no varchar(36) not null,
   user_id bigint not null,
   product_id bigint not null,
   inventory_id bigint not null,
@@ -279,6 +280,7 @@ create table order_venue (
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,
   key idx_order_venue_user (user_id, created_at),
+  unique key uk_order_venue_no (order_no),
   key idx_order_venue_product (product_id, inventory_id),
   key idx_order_venue_verify (verify_code)
 ) engine=InnoDB default charset=utf8mb4;
@@ -384,6 +386,7 @@ create table cart_equipment (
 
 create table order_equipment (
   id bigint primary key auto_increment,
+  order_no varchar(36) not null,
   user_id bigint not null,
   total_amount decimal(10, 2) not null,
   status varchar(16) not null default '待支付',
@@ -391,6 +394,7 @@ create table order_equipment (
   paid_at datetime null,
   created_at datetime not null default current_timestamp,
   updated_at datetime not null default current_timestamp on update current_timestamp,
+  unique key uk_order_equipment_no (order_no),
   key idx_orders_user (user_id, created_at)
 ) engine=InnoDB default charset=utf8mb4;
 

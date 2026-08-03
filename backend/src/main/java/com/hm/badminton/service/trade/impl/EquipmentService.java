@@ -6,6 +6,7 @@ import com.hm.badminton.constants.RedisConstants;
 import com.hm.badminton.dto.trade.EquipmentCartRequest;
 import com.hm.badminton.dto.trade.EquipmentCreateRequest;
 import com.hm.badminton.dto.trade.EquipmentOrderCreateRequest;
+import com.hm.badminton.dto.trade.OrderReference;
 import com.hm.badminton.dto.trade.EquipmentOrderItemRequest;
 import com.hm.badminton.entity.CartItem;
 import com.hm.badminton.entity.OrderSummary;
@@ -16,6 +17,7 @@ import com.hm.badminton.mapper.trade.EquipmentOrderMapper;
 import com.hm.badminton.service.trade.IEquipmentService;
 import com.hm.badminton.service.catalog.ISportCatalogService;
 import com.hm.badminton.utils.CacheClient;
+import com.hm.badminton.utils.OrderNoGenerator;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -149,7 +151,7 @@ public class EquipmentService implements IEquipmentService {
     // 从 payDirect() 进来：共用外层事务
     // 从其他地方单独调用 createOrder()：自己有事务保护。
     @Transactional
-    public Long createOrder(Long userId, EquipmentOrderCreateRequest request) {
+    public OrderReference createOrder(Long userId, EquipmentOrderCreateRequest request) {
         // 1. request.items 有值表示立即购买；为空表示从当前用户购物车结算。
         boolean fromCart = request.getItems() == null || request.getItems().isEmpty();
         List<OrderEquipment> equipment = loadOrderEquipments(userId, request.getItems());
@@ -161,6 +163,7 @@ public class EquipmentService implements IEquipmentService {
                 .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         EquipmentMapper.InsertOrderRow row = new EquipmentMapper.InsertOrderRow();
+        row.setOrderNo(OrderNoGenerator.next());
         row.setUserId(userId);
         row.setTotalAmount(total);
         row.setAddress(request.getAddress());
@@ -181,7 +184,7 @@ public class EquipmentService implements IEquipmentService {
         if (fromCart) {
             equipmentMapper.deleteCartByUser(userId);
         }
-        return orderId;
+        return new OrderReference(orderId, row.getOrderNo());
     }
 
     @Transactional
@@ -194,7 +197,7 @@ public class EquipmentService implements IEquipmentService {
 
     public List<OrderSummary> orders(Long userId) {
         return equipmentOrderMapper.selectByUserId(userId).stream()
-                .map(order -> new OrderSummary(order.getId(), order.getUserId(), order.getTotalAmount(),
+                .map(order -> new OrderSummary(order.getId(), order.getOrderNo(), order.getUserId(), order.getTotalAmount(),
                         order.getStatus(),
                         order.getAddress(), order.getCreatedAt(), equipmentOrderMapper.selectItems(order.getId())))
                 .toList();

@@ -4,6 +4,7 @@ import com.hm.badminton.common.PageResult;
 import com.hm.badminton.dto.trade.EquipmentCartRequest;
 import com.hm.badminton.dto.trade.EquipmentCreateRequest;
 import com.hm.badminton.dto.trade.EquipmentOrderCreateRequest;
+import com.hm.badminton.dto.trade.OrderReference;
 import com.hm.badminton.entity.CartItem;
 import com.hm.badminton.entity.OrderSummary;
 import com.hm.badminton.entity.Equipment;
@@ -28,7 +29,7 @@ public interface IEquipmentService {
 
     void clearCart(Long userId);
 
-    Long createOrder(Long userId, EquipmentOrderCreateRequest request);
+    OrderReference createOrder(Long userId, EquipmentOrderCreateRequest request);
 
     void pay(Long userId, Long orderId);
 

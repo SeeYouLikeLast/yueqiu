@@ -2575,10 +2575,16 @@ p {
 }
 
 .order-side em {
-  color: #17211b;
+  max-width: 150px;
+  overflow: hidden;
+  color: #68756b;
   font-style: normal;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-box {

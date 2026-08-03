@@ -98,7 +98,7 @@ public class OrderController {
                 "%s · 共 %d 件".formatted(DATE_TIME.format(order.getCreatedAt()), equipmentQuantity(order)),
                 order.getTotalAmount(),
                 order.getStatus(),
-                "#" + order.getId());
+                order.getOrderNo());
     }
 
     private OrderCardVO fromSeckillOrder(SeckillOrder order, String subtitle) {
