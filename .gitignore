@@ -13,7 +13,13 @@ logs/
 .obsidian/
 docs/1问题.md
 docs/2原理.md
-docs/初期环境配置--ai操作/羽动羽毛球点评项目规划.md
+docs/初期环境配置--ai操作/
+
+# Publish only the curated, code-aligned technical documentation.
+docs/*
+!docs/README.md
+!docs/技术文档/
+!docs/技术文档/**
 
 # Local environment files may contain passwords, API keys and mail authorization codes.
 .env
