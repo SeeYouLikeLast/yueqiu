@@ -6,6 +6,27 @@
 
 **当前状态（2026-08-03）**：最终演示版已部署到 ECS。后端 50 个自动化测试通过，前端类型检查和生产构建通过，核心公开接口线上可访问。该结论表示“功能演示可交付”，不等同于具备商业生产系统的支付合规、高可用、灾备和容量承诺。技术边界见 [生产部署、安全、运维与测试](docs/技术文档/12-生产部署安全运维与测试.md)。
 
+## 在线体验
+
+**项目地址：[https://121.40.140.135/](https://121.40.140.135/)**
+
+建议使用手机浏览器访问；桌面浏览器可以打开开发者工具并切换到移动设备模式体验。
+
+## 项目预览
+
+<table>
+  <tr>
+    <td align="center"><strong>附近场所</strong><br><img src="assets/readme/home.png" alt="附近运动场所首页" width="240"></td>
+    <td align="center"><strong>球友社区</strong><br><img src="assets/readme/community.png" alt="球友社区" width="240"></td>
+    <td align="center"><strong>同城约球</strong><br><img src="assets/readme/social.png" alt="同城约球" width="240"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>装备商城</strong><br><img src="assets/readme/equipment.png" alt="装备商城与秒杀" width="240"></td>
+    <td align="center"><strong>AI 助手</strong><br><img src="assets/readme/agent.png" alt="约个球 AI 助手" width="240"></td>
+    <td align="center"><strong>核心体验</strong><br>真实场所 · 场馆团购<br>同城约球 · 装备商城<br>社区 Feed · AI 推荐</td>
+  </tr>
+</table>
+
 ## 功能概览
 
 ### 移动端业务
