@@ -2988,6 +2988,7 @@ p {
 
 .agent-card-carousel {
   display: flex;
+  align-items: flex-start;
   gap: 10px;
   overflow-x: auto;
   padding: 1px 2px 8px;
@@ -3008,6 +3009,7 @@ p {
   flex: 0 0 82%;
   max-width: 340px;
   display: grid;
+  align-content: start;
   gap: 8px;
   padding: 10px;
   border: 1px solid #dfe8dc;
@@ -3041,6 +3043,13 @@ p {
   margin: 2px 0 3px;
   font-size: 15px;
   line-height: 1.28;
+}
+
+.agent-place-main h3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .agent-place-main p,

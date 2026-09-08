@@ -3388,6 +3388,14 @@ function placeFromAgentCard(card: AgentCard): Place {
   }
 }
 
+function agentPlaceCover(card: AgentCard) {
+  return placeListCover(placeFromAgentCard(card))
+}
+
+function agentPlaceImageFallback(event: Event, card: AgentCard) {
+  placeImageFallback(event, placeFromAgentCard(card))
+}
+
 async function openAgentVenueProduct(card: AgentCard) {
   const id = Number(card.action?.id)
   if (!Number.isFinite(id)) return
@@ -4645,7 +4653,7 @@ onBeforeUnmount(() => {
                     class="agent-place-card"
                   >
                     <button class="agent-place-main" type="button" @click="handleAgentCardAction(bundle.place)">
-                      <img v-if="bundle.place.coverUrl" :src="bundle.place.coverUrl" :alt="bundle.place.title" loading="lazy" decoding="async" @error="imageFallback" />
+                      <img :src="agentPlaceCover(bundle.place)" :alt="bundle.place.title" loading="lazy" decoding="async" @error="agentPlaceImageFallback($event, bundle.place)" />
                       <div>
                         <span>场所</span>
                         <h3>{{ bundle.place.title }}</h3>
